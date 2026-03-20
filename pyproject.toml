@@ -1,0 +1,128 @@
+[project]
+name = "ops-agent-langgraph"
+version = "2.0.0"
+description = "Intelligent ops automation platform with LangGraph workflow orchestration"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+    { name = "Ops Team", email = "ops@example.com" }
+]
+
+dependencies = [
+    # Core framework
+    "fastapi>=0.109.0",
+    "uvicorn>=0.27.0",
+    "pydantic>=2.6.0",
+    "pydantic-settings>=2.1.0",
+    "python-dotenv>=1.0.0",
+    # LangGraph & LangChain (NEW)
+    "langgraph>=0.0.50",
+    "langchain>=0.1.0",
+    "langchain-core>=0.1.0",
+    "langchain-openai>=0.0.5",
+    "langchain-anthropic>=0.0.1",
+    "deepagents>=0.4.0",  # DeepAgents framework
+    "aiosqlite>=0.20.0",
+    # Database
+    "sqlalchemy>=2.0.0",
+    "alembic>=1.13.0",
+    # HTTP client
+    "httpx>=0.26.0",
+    # Feishu Official SDK (for long connection)
+    "lark-oapi>=1.4.0",
+    # WebSocket (backup, may not need if using lark-oapi)
+    "websockets>=13.1",
+    # Encryption
+    "pycryptodome>=3.21.0",
+    # JWT for ZhipuAI
+    "pyjwt>=2.12.1",
+    # Authentication
+    "python-jose[cryptography]>=3.3.0",
+    "passlib[bcrypt]>=1.7.4",
+    # Testing
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0",
+    # Logging
+    "python-json-logger>=2.0.0",
+    "langchain-community>=0.4.1",
+    "apscheduler>=3.11.2",
+    "langgraph-checkpoint-sqlite>=3.0.3",
+    "email-validator>=2.3.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "black>=24.0.0",
+    "ruff>=0.2.0",
+    "mypy>=1.8.0",
+]
+
+kubernetes = [
+    "kubernetes>=29.0.0",
+]
+
+prometheus = [
+    "prometheus-client>=0.19.0",
+    "prometheus-api-client>=0.5.3",
+]
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = [
+    "app",
+    "app.deepagents",
+    "app.deepagents.subagents",
+    "app.middleware",
+    "app.models",
+    "app.tools",
+    "app.api",
+    "app.integrations",
+    "app.core",
+    "app.utils",
+    "app.prompts",
+    "app.prompts.subagents",
+    "app.services",
+    "app.schemas",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+asyncio_mode = "auto"
+markers = [
+    "unit: Unit tests",
+    "integration: Integration tests",
+    "e2e: End-to-end tests",
+    "performance: Performance tests",
+]
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.git
+  | \.venv
+  | build
+  | dist
+)/
+'''
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+select = ["E", "F", "W", "I", "N", "UP", "ANN", "B", "A", "C4", "DTZ", "T10", "DJ", "EM", "EXE", "ISC", "ICN", "G", "INP", "PIE", "T20", "PYI", "PT", "Q", "RSE", "RET", "SLF", "SIM", "TID", "TCH", "INT", "ARG", "PTH", "ERA", "PD", "PGH", "PL", "TRY", "NPY", "RUF"]
+ignore = ["ANN101", "ANN102"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
