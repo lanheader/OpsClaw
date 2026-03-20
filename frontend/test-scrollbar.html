@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>滚动条测试</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+        }
+
+        .container {
+            display: flex;
+            height: 600px;
+            border: 2px solid #ccc;
+        }
+
+        .sidebar {
+            width: 280px;
+            border-right: 1px solid #f0f0f0;
+            display: flex;
+            flex-direction: column;
+            background: white;
+        }
+
+        .header {
+            padding: 16px;
+            flex-shrink: 0;
+            border-bottom: 1px solid #f0f0f0;
+        }
+
+        .session-list-container {
+            flex: 1;
+            overflow-y: scroll !important;
+            overflow-x: hidden;
+            min-height: 0;
+            max-height: 100%;
+        }
+
+        /* WebKit 浏览器（Chrome, Safari, Edge）滚动条样式 */
+        .session-list-container::-webkit-scrollbar {
+            width: 12px !important;
+            display: block !important;
+        }
+
+        .session-list-container::-webkit-scrollbar-track {
+            background: #e8e8e8 !important;
+            border-radius: 0;
+            border-left: 1px solid #d9d9d9;
+        }
+
+        .session-list-container::-webkit-scrollbar-thumb {
+            background: #999 !important;
+            border-radius: 6px;
+            border: 3px solid #e8e8e8;
+            min-height: 40px;
+        }
+
+        .session-list-container::-webkit-scrollbar-thumb:hover {
+            background: #666 !important;
+        }
+
+        /* Firefox 滚动条样式 */
+        .session-list-container {
+            scrollbar-width: auto !important;
+            scrollbar-color: #999 #e8e8e8 !important;
+        }
+
+        .session-item {
+            padding: 12px 16px;
+            border-bottom: 1px solid #f0f0f0;
+            cursor: pointer;
+        }
+
+        .session-item:hover {
+            background: #f5f5f5;
+        }
+
+        .session-title {
+            font-weight: 500;
+            margin-bottom: 4px;
+        }
+
+        .session-preview {
+            font-size: 12px;
+            color: #999;
+        }
+
+        .info {
+            padding: 20px;
+            background: #f0f0f0;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="info">
+        <h2>滚动条测试页面</h2>
+        <p>这个页面用于测试会话列表的滚动条是否正常显示。</p>
+        <p><strong>预期效果：</strong>右侧应该能看到一个灰色的滚动条（宽度 10px）</p>
+    </div>
+
+    <div class="container">
+        <div class="sidebar">
+            <div class="header">
+                <button style="width: 100%; padding: 8px; background: #1890ff; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                    新建对话
+                </button>
+            </div>
+            <div class="session-list-container">
+                <!-- 生成 10 个会话项，模拟实际情况 -->
+                <script>
+                    for (let i = 1; i <= 10; i++) {
+                        document.write(`
+                            <div class="session-item">
+                                <div class="session-title">会话 ${i}</div>
+                                <div class="session-preview">这是会话 ${i} 的预览内容...</div>
+                            </div>
+                        `);
+                    }
+                </script>
+            </div>
+        </div>
+        <div style="flex: 1; padding: 20px; background: #fafafa;">
+            <h3>主内容区域</h3>
+            <p>左侧是会话列表，应该能看到滚动条。</p>
+        </div>
+    </div>
+
+    <div class="info" style="margin-top: 20px;">
+        <h3>调试信息</h3>
+        <p>浏览器：<span id="browser"></span></p>
+        <p>滚动条宽度：<span id="scrollbar-width"></span></p>
+        <script>
+            // 检测浏览器
+            const ua = navigator.userAgent;
+            let browser = 'Unknown';
+            if (ua.indexOf('Chrome') > -1) browser = 'Chrome';
+            else if (ua.indexOf('Safari') > -1) browser = 'Safari';
+            else if (ua.indexOf('Firefox') > -1) browser = 'Firefox';
+            else if (ua.indexOf('Edge') > -1) browser = 'Edge';
+            document.getElementById('browser').textContent = browser;
+
+            // 检测滚动条宽度
+            const container = document.querySelector('.session-list-container');
+            const scrollbarWidth = container.offsetWidth - container.clientWidth;
+            document.getElementById('scrollbar-width').textContent = scrollbarWidth + 'px';
+        </script>
+    </div>
+</body>
+</html>

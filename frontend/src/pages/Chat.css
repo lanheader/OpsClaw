@@ -1,0 +1,82 @@
+/* src/pages/Chat.css */
+
+/* 会话列表滚动条样式 - 始终显示滚动条 */
+.session-list-container {
+  flex: 1;
+  overflow-y: scroll !important;  /* 强制显示滚动条 */
+  overflow-x: hidden;
+  min-height: 0;  /* 确保 flex 子元素可以正确收缩 */
+  max-height: 100%;  /* 限制最大高度 */
+}
+
+/* 强制显示滚动条轨道 - 即使内容不够多 */
+.session-list-container::-webkit-scrollbar {
+  width: 12px !important;  /* 增加到 12px，更明显 */
+  display: block !important;  /* 强制显示 */
+}
+
+.session-list-container::-webkit-scrollbar-track {
+  background: #e8e8e8 !important;  /* 更深的背景色，更容易看到 */
+  border-radius: 0;  /* 移除圆角，占满整个宽度 */
+  border-left: 1px solid #d9d9d9;  /* 添加左边框，更明显 */
+}
+
+.session-list-container::-webkit-scrollbar-thumb {
+  background: #999 !important;  /* 更深的颜色 */
+  border-radius: 6px;
+  border: 3px solid #e8e8e8;  /* 添加边框，让滑块更明显 */
+  min-height: 40px;  /* 设置最小高度 */
+}
+
+.session-list-container::-webkit-scrollbar-thumb:hover {
+  background: #666 !important;  /* 悬停时更深 */
+}
+
+/* Firefox 滚动条样式 */
+.session-list-container {
+  scrollbar-width: auto !important;  /* 使用标准宽度 */
+  scrollbar-color: #999 #e8e8e8 !important;  /* 滑块颜色 轨道颜色 */
+}
+
+/* Ant Design List 组件样式覆盖 */
+.session-list-container .ant-list {
+  min-height: 100%;  /* 确保列表至少占满容器 */
+}
+
+/* Markdown 样式 */
+.ant-card-body p {
+  margin-bottom: 8px;
+}
+
+.ant-card-body pre {
+  background-color: #282c34;
+  color: #abb2bf;
+  padding: 12px;
+  border-radius: 4px;
+  overflow-x: auto;
+}
+
+.ant-card-body code {
+  background-color: #f0f0f0;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: 'Courier New', monospace;
+}
+
+.ant-card-body pre code {
+  background-color: transparent;
+  padding: 0;
+}
+
+.ant-card-body ul,
+.ant-card-body ol {
+  margin-left: 20px;
+  margin-bottom: 8px;
+}
+
+.ant-card-body blockquote {
+  border-left: 4px solid #d9d9d9;
+  padding-left: 12px;
+  margin: 8px 0;
+  color: #666;
+}
