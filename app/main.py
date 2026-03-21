@@ -16,6 +16,7 @@ from app.api.v1 import permissions
 from app.api.v1 import roles
 from app.api.v1 import settings as settings_api
 from app.api.v1 import users
+from app.api.v1 import approval_config
 from app.api.v2 import alert
 from app.api.v2 import chat
 from app.api.v2 import inspection
@@ -66,7 +67,7 @@ async def initialize_deepagents():
         logger.info(
             "  - 子智能体: intent-agent, data-agent, analyze-agent, execute-agent, report-agent, format-agent"
         )
-        logger.info("  - 中间件: RoutingMiddleware, SecurityMiddleware")
+        logger.info("  - 中间件: MessageTrimmingMiddleware, LoggingMiddleware")
         logger.info("  - 会话管理: LangGraph SQLite checkpointer (持久化)")
 
     except Exception as e:
@@ -80,6 +81,38 @@ def get_ops_agent():
     if _ops_agent is None:
         raise RuntimeError("DeepAgents not initialized. Call initialize_deepagents() first.")
     return _ops_agent
+
+
+async def cleanup_deepagents():
+    """清理 DeepAgents 资源（异步）"""
+    global _ops_agent
+
+    if _ops_agent is not None:
+        logger.info("🧹 清理 DeepAgents 资源...")
+
+        try:
+            # 清理检查点器（如果存在）
+            if hasattr(_ops_agent, 'checkpointer'):
+                checkpointer = _ops_agent.checkpointer
+                if hasattr(checkpointer, 'close'):
+                    await checkpointer.close()
+                    logger.info("✅ 检查点器已关闭")
+
+            # 清理 agent 本身（如果支持）
+            if hasattr(_ops_agent, 'aclose'):
+                await _ops_agent.aclose()
+                logger.info("✅ Agent 已关闭")
+
+            # 重置全局变量
+            _ops_agent = None
+            logger.info("✅ DeepAgents 资源清理完成")
+
+        except Exception as e:
+            logger.error(f"❌ 清理 DeepAgents 时出错: {e}")
+            # 即使出错也要重置，避免保留可能损坏的引用
+            _ops_agent = None
+    else:
+        logger.info("ℹ️  DeepAgents 未初始化，无需清理")
 
 
 @asynccontextmanager
@@ -130,6 +163,12 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     logger.info("👋 Shutting down Ops Agent")
+
+    # Cleanup DeepAgents resources
+    try:
+        await cleanup_deepagents()
+    except Exception as e:
+        logger.error(f"❌ Failed to cleanup DeepAgents: {e}")
 
     # Stop Feishu long connection (if started)
     if settings.FEISHU_ENABLED and settings.FEISHU_CONNECTION_MODE in ["longconn", "auto"]:
@@ -191,6 +230,11 @@ app.include_router(roles.router, prefix="/api/v1")
 app.include_router(settings_api.router, prefix="/api/v1")
 app.include_router(llm.router, prefix="/api/v1")
 app.include_router(integrations.router, prefix="/api/v1")
+# 工具权限管理 API
+from app.api.v1 import tools
+app.include_router(tools.router, prefix="/api/v1")
+# 审批配置管理 API
+app.include_router(approval_config.router, prefix="/api/v1")
 
 
 @app.get("/")

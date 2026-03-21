@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from app.core.state import OpsState
@@ -42,14 +42,45 @@ class AlertResponse(BaseModel):
     created_at: datetime
 
 
+async def run_alert_workflow(task_id: str, initial_state: OpsState):
+    """后台执行告警处理工作流
+
+    Args:
+        task_id: 任务ID
+        initial_state: 初始状态
+    """
+    try:
+        logger.info(f"开始执行告警处理工作流: {task_id}")
+
+        # 创建 Agent
+        agent = create_agent_for_session(
+            session_id=task_id,
+            enable_approval=True,
+            enable_security=True,
+        )
+
+        # 执行工作流（异步，不阻塞）
+        result = await agent.ainvoke(initial_state)
+
+        logger.info(f"告警处理工作流执行完成: {task_id}, 结果: {result.get('execution_success', False)}")
+
+    except Exception as e:
+        logger.error(f"告警处理工作流执行失败: {task_id}, 错误: {e}")
+        # 可以选择记录到数据库或发送通知
+
+
 @router.post("/webhook", response_model=AlertResponse)
-async def receive_alert(request: Request):
+async def receive_alert(
+    request: Request,
+    background_tasks: BackgroundTasks
+):
     """接收监控系统告警
 
     支持 Prometheus Alertmanager、Grafana 等监控系统的 Webhook
 
     Args:
         request: HTTP 请求
+        background_tasks: FastAPI 后台任务
 
     Returns:
         AlertResponse: 告警处理任务信息
@@ -88,13 +119,6 @@ async def receive_alert(request: Request):
         # 生成任务ID
         task_id = f"alert_{uuid.uuid4().hex[:8]}"
 
-        # 创建 Agent
-        agent = create_agent_for_session(
-            session_id=task_id,
-            enable_approval=True,
-            enable_security=True,
-        )
-
         # 构造初始状态
         initial_state: OpsState = {
             "session_id": task_id,
@@ -120,12 +144,15 @@ async def receive_alert(request: Request):
             "execution_history": [],
         }
 
-        # 异步执行工作流（后台任务）
-        logger.info(f"创建告警处理任务: {task_id}")
+        # 添加后台任务
+        background_tasks.add_task(
+            run_alert_workflow,
+            task_id=task_id,
+            initial_state=initial_state
+        )
 
-        # TODO: 实际应该使用 BackgroundTasks 或 Celery 执行工作流
-        # 这里简化处理，直接返回任务信息
-        # 可以使用: await agent.ainvoke(initial_state)
+        logger.info(f"告警处理任务已添加到后台队列: {task_id}")
+
         return AlertResponse(
             task_id=task_id,
             status="pending",

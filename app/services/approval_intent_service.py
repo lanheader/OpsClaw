@@ -1,12 +1,45 @@
 """批准意图识别服务"""
 
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from langchain_core.language_models import BaseChatModel
 from app.utils.logger import get_logger
 import json
 import re
 
 logger = get_logger(__name__)
+
+# 批准关键词列表
+APPROVAL_KEYWORDS: List[str] = [
+    "批准",
+    "同意",
+    "确认",
+    "可以",
+    "好的",
+    "没问题",
+    "执行",
+    "approve",
+    "yes",
+    "ok",
+    "go",
+    "proceed",
+    "continue",
+]
+
+# 拒绝关键词列表
+REJECTION_KEYWORDS: List[str] = [
+    "拒绝",
+    "取消",
+    "不要",
+    "不行",
+    "算了",
+    "停止",
+    "reject",
+    "no",
+    "cancel",
+    "stop",
+    "abort",
+    "deny",
+]
 
 
 async def classify_approval_intent(
@@ -148,22 +181,7 @@ def is_approval_keyword(text: str) -> bool:
         是否包含批准关键词
     """
     text = text.lower().strip()
-    approval_keywords = [
-        "批准",
-        "同意",
-        "确认",
-        "可以",
-        "好的",
-        "没问题",
-        "执行",
-        "approve",
-        "yes",
-        "ok",
-        "go",
-        "proceed",
-        "continue",
-    ]
-    return any(keyword in text for keyword in approval_keywords)
+    return any(keyword in text for keyword in APPROVAL_KEYWORDS)
 
 
 def is_rejection_keyword(text: str) -> bool:
@@ -177,18 +195,4 @@ def is_rejection_keyword(text: str) -> bool:
         是否包含拒绝关键词
     """
     text = text.lower().strip()
-    rejection_keywords = [
-        "拒绝",
-        "取消",
-        "不要",
-        "不行",
-        "算了",
-        "停止",
-        "reject",
-        "no",
-        "cancel",
-        "stop",
-        "abort",
-        "deny",
-    ]
-    return any(keyword in text for keyword in rejection_keywords)
+    return any(keyword in text for keyword in REJECTION_KEYWORDS)

@@ -6,12 +6,9 @@ from typing import List, Optional
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-LEGACY_DEFAULT_CHECKPOINT_DB_URL = "sqlite:///./data/checkpoints/langgraph.db"
-
 
 class Settings(BaseSettings):
-    """
-    应用配置类。
+    """应用配置类。
 
     从环境变量或 .env 文件加载配置。
     """
@@ -34,10 +31,18 @@ class Settings(BaseSettings):
 
     # ========== Database ==========
     DATABASE_URL: str = "sqlite:///./data/ops_agent_v2.db"
-    CHECKPOINT_DB_URL: Optional[str] = LEGACY_DEFAULT_CHECKPOINT_DB_URL
+    CHECKPOINT_DB_URL: Optional[str] = None
 
     # ========== LLM Provider ==========
-    DEFAULT_LLM_PROVIDER: str = Field(default="openai", description="openai, claude, ollama, zhipu")
+    DEFAULT_LLM_PROVIDER: str = Field(default="openai", description="openai, claude, ollama, zhipu, openrouter")
+
+    # OpenRouter
+    OPENROUTER_API_KEY: Optional[str] = None
+    OPENROUTER_MODEL: str = "anthropic/claude-3.5-sonnet"
+    OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
+    OPENROUTER_TEMPERATURE: float = 0.0
+    OPENROUTER_MAX_TOKENS: int = 4096
+    OPENROUTER_REQUEST_TIMEOUT: int = 120
 
     # OpenAI
     OPENAI_API_KEY: Optional[str] = None
@@ -45,21 +50,21 @@ class Settings(BaseSettings):
     OPENAI_BASE_URL: str = "https://api.openai.com/v1"
     OPENAI_TEMPERATURE: float = 0.0
     OPENAI_MAX_TOKENS: int = 4096
-    OPENAI_REQUEST_TIMEOUT: int = 120  # 请求超时时间（秒）
+    OPENAI_REQUEST_TIMEOUT: int = 120
 
     # Claude
     CLAUDE_API_KEY: Optional[str] = None
     CLAUDE_MODEL: str = "claude-3-sonnet-20240229"
     CLAUDE_TEMPERATURE: float = 0.0
     CLAUDE_MAX_TOKENS: int = 4096
-    CLAUDE_REQUEST_TIMEOUT: int = 120  # 请求超时时间（秒）
+    CLAUDE_REQUEST_TIMEOUT: int = 120
 
     # 智谱 AI (ZhipuAI)
     ZHIPU_API_KEY: Optional[str] = None
-    ZHIPU_MODEL: str = "glm-4"  # glm-4, glm-4-plus, glm-4-flash
+    ZHIPU_MODEL: str = "glm-4"
     ZHIPU_TEMPERATURE: float = 0.0
     ZHIPU_MAX_TOKENS: int = 4096
-    ZHIPU_REQUEST_TIMEOUT: int = 120  # 请求超时时间（秒）
+    ZHIPU_REQUEST_TIMEOUT: int = 120
 
     # Ollama
     OLLAMA_BASE_URL: str = "http://localhost:11434"
@@ -129,7 +134,7 @@ class Settings(BaseSettings):
     V2_INSPECTION_ENABLED: bool = False
     V2_HEALING_ENABLED: bool = False
     V2_SECURITY_ENABLED: bool = True
-    V2_PLUGINS: str = ""  # 逗号分隔的插件名称
+    V2_PLUGINS: str = ""
 
     # ========== API & CORS ==========
     ENABLE_DOCS: bool = False
@@ -144,51 +149,21 @@ class Settings(BaseSettings):
     USE_MOCK_DATA: bool = False
 
     # ========== Subagent LLM Configuration ==========
-    # 所有子智能体使用 DEFAULT_LLM_PROVIDER，只需配置模型名称
-    SUBAGENT_INTENT_MODEL: str = Field(
-        default="glm-4-flash",
-        description="意图识别子智能体使用的模型",
-    )
-    SUBAGENT_ANALYZE_MODEL: str = Field(
-        default="glm-4",
-        description="分析决策子智能体使用的模型",
-    )
-    SUBAGENT_DATA_MODEL: str = Field(
-        default="glm-4",
-        description="数据采集子智能体使用的模型",
-    )
-    SUBAGENT_EXECUTE_MODEL: str = Field(
-        default="glm-4",
-        description="执行操作子智能体使用的模型",
-    )
-    SUBAGENT_REPORT_MODEL: str = Field(
-        default="glm-4",
-        description="报告生成子智能体使用的模型",
-    )
-    SUBAGENT_FORMAT_MODEL: str = Field(
-        default="glm-4-flash",
-        description="响应格式化子智能体使用的模型",
-    )
+    SUBAGENT_INTENT_MODEL: str = Field(default="glm-4-flash", description="意图识别子智能体使用的模型")
+    SUBAGENT_ANALYZE_MODEL: str = Field(default="glm-4", description="分析决策子智能体使用的模型")
+    SUBAGENT_DATA_MODEL: str = Field(default="glm-4", description="数据采集子智能体使用的模型")
+    SUBAGENT_EXECUTE_MODEL: str = Field(default="glm-4", description="执行操作子智能体使用的模型")
+    SUBAGENT_REPORT_MODEL: str = Field(default="glm-4", description="报告生成子智能体使用的模型")
+    SUBAGENT_FORMAT_MODEL: str = Field(default="glm-4-flash", description="响应格式化子智能体使用的模型")
 
     def get_checkpoint_db_url(self) -> str:
-        """返回 LangGraph checkpoint 使用的数据库 URL。
-
-        默认情况下，如果主库是 SQLite，则复用主库，避免维护多份 SQLite 文件。
-        如果显式配置了非默认 checkpoint URL，则优先使用显式配置。
-        """
-        checkpoint_url = self.CHECKPOINT_DB_URL
+        """返回 LangGraph checkpoint 使用的数据库 URL。"""
         if self.DATABASE_URL.startswith("sqlite:///"):
-            if not checkpoint_url or checkpoint_url == LEGACY_DEFAULT_CHECKPOINT_DB_URL:
-                return self.DATABASE_URL
-        return checkpoint_url or LEGACY_DEFAULT_CHECKPOINT_DB_URL
+            return self.CHECKPOINT_DB_URL or self.DATABASE_URL
+        return self.CHECKPOINT_DB_URL or "sqlite:///./data/ops_agent_v2.db"
 
     def validate_llm_config(self) -> bool:
-        """
-        验证 LLM 配置是否有效。
-
-        返回：
-            True 如果至少配置了一个 LLM 提供商
-        """
+        """验证 LLM 配置是否有效。"""
         if self.DEFAULT_LLM_PROVIDER == "openai":
             return self.OPENAI_API_KEY is not None
         elif self.DEFAULT_LLM_PROVIDER == "claude":
@@ -196,25 +171,19 @@ class Settings(BaseSettings):
         elif self.DEFAULT_LLM_PROVIDER == "zhipu":
             return self.ZHIPU_API_KEY is not None
         elif self.DEFAULT_LLM_PROVIDER == "ollama":
-            return True  # Ollama 不需要 API key
+            return True
+        elif self.DEFAULT_LLM_PROVIDER == "openrouter":
+            return self.OPENROUTER_API_KEY is not None
         return False
 
     def get_v2_plugins_list(self) -> List[str]:
-        """
-        获取 v2 插件列表。
-
-        返回：
-            插件名称列表
-        """
+        """获取 v2 插件列表。"""
         if not self.V2_PLUGINS:
             return []
         return [p.strip() for p in self.V2_PLUGINS.split(",") if p.strip()]
 
     def get_subagent_model(self, subagent_name: str) -> str:
-        """
-        返回指定 subagent 的模型配置（模型名称）。
-        所有子智能体使用 DEFAULT_LLM_PROVIDER。
-        """
+        """返回指定 subagent 的模型配置。"""
         mapping = {
             "intent-agent": self.SUBAGENT_INTENT_MODEL,
             "analyze-agent": self.SUBAGENT_ANALYZE_MODEL,
@@ -231,12 +200,7 @@ _settings: Optional[Settings] = None
 
 
 def get_settings() -> Settings:
-    """
-    获取单例配置实例。
-
-    返回：
-        Settings 实例
-    """
+    """获取单例配置实例。"""
     global _settings
 
     if _settings is None:

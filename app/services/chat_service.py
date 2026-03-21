@@ -2,6 +2,7 @@
 """聊天服务 - 用于保存和管理聊天会话"""
 
 import uuid
+from datetime import datetime, timezone
 from typing import Optional
 from sqlalchemy.orm import Session
 from app.models.chat_session import ChatSession
@@ -108,12 +109,14 @@ def save_feishu_message(
     db.refresh(message)
 
     # 更新会话的 updated_at 时间
-    session = db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
+    session = (
+        db.query(ChatSession)
+        .filter(ChatSession.session_id == session_id)
+        .first()
+    )
 
     if session:
-        from datetime import datetime
-
-        session.updated_at = datetime.utcnow()
+        session.updated_at = datetime.now(timezone.utc)
 
         # 如果会话没有标题，使用第一条消息作为标题
         if not session.title and role == MessageRole.USER:

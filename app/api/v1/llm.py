@@ -3,7 +3,7 @@
 
 import logging
 import time
-from typing import Literal, Optional
+from typing import Literal, Optional, List, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 class LLMTestRequest(BaseModel):
     """LLM 测试请求"""
 
-    provider: Literal["openai", "claude", "zhipu", "ollama"] = Field(
+    provider: Literal["openai", "claude", "zhipu", "ollama", "openrouter"] = Field(
         ..., description="LLM 提供商"
     )
 
@@ -60,15 +60,21 @@ async def test_llm_connection(
     if provider == "ollama" and not settings.OLLAMA_BASE_URL:
         return LLMTestResponse(success=False, provider=provider, error="Ollama Base URL 未配置")
 
+    if provider == "openrouter" and not settings.OPENROUTER_API_KEY:
+        return LLMTestResponse(success=False, provider=provider, error="OpenRouter API Key 未配置")
+
     try:
         start_time = time.time()
 
         # 创建 LLM 实例
         llm = LLMFactory.create_llm(provider=provider)
 
-        # 发送测试消息
+        # 发送测试消息（使用字典格式，兼容 OpenRouter 各模型包括小米）
         test_prompt = "请回复'连接成功'（只需要这4个字）"
-        response = await llm.ainvoke(test_prompt)
+        messages: List[Dict[str, str]] = [
+            {"role": "user", "content": test_prompt},
+        ]
+        response = await llm.ainvoke(messages)
 
         end_time = time.time()
         response_time_ms = (end_time - start_time) * 1000
@@ -89,6 +95,8 @@ async def test_llm_connection(
             model_name = settings.ZHIPU_MODEL
         elif provider == "ollama":
             model_name = settings.OLLAMA_MODEL
+        elif provider == "openrouter":
+            model_name = settings.OPENROUTER_MODEL
 
         logger.info(
             f"Admin {current_user.username} tested {provider} LLM, response_time={response_time_ms:.2f}ms"

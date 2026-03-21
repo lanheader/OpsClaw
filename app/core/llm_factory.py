@@ -14,7 +14,7 @@ class LLMFactory:
     """
     LLM 工厂类。
 
-    根据配置创建不同的 LLM 客户端（OpenAI, Claude, ZhipuAI, Ollama）。
+    根据配置创建不同的 LLM 客户端（OpenAI, Claude, ZhipuAI, Ollama, OpenRouter）。
     """
 
     _client_cache: Dict[str, Any] = {}
@@ -28,7 +28,7 @@ class LLMFactory:
         创建 LLM 客户端。
 
         参数：
-            provider: LLM 提供商（openai, claude, zhipu, ollama）
+            provider: LLM 提供商（openai, claude, zhipu, ollama, openrouter）
             settings: 配置对象，如果为 None 则使用全局配置
         """
         if settings is None:
@@ -98,10 +98,12 @@ class LLMFactory:
             return LLMFactory._create_zhipu_llm(settings, model_override=model_override)
         elif provider == "ollama":
             return LLMFactory._create_ollama_llm(settings, model_override=model_override)
+        elif provider == "openrouter":
+            return LLMFactory._create_openrouter_llm(settings, model_override=model_override)
         else:
             raise ValueError(
                 f"Unsupported LLM provider: {provider}. "
-                f"Supported providers: openai, claude, zhipu, ollama"
+                f"Supported providers: openai, claude, zhipu, ollama, openrouter"
             )
 
     @staticmethod
@@ -282,6 +284,60 @@ class LLMFactory:
             "base_url": settings.OLLAMA_BASE_URL,
         }
         return cast(Any, ChatOllama)(**ollama_kwargs)
+
+    @staticmethod
+    def _create_openrouter_llm(
+        settings: Settings, model_override: Optional[str] = None
+    ) -> BaseChatModel:
+        """
+        创建 OpenRouter LLM 客户端。
+
+        OpenRouter 是一个聚合服务，提供对多个 LLM 提供商的统一访问接口。
+        使用 OpenAI 兼容的 API 格式。
+
+        参数：
+            settings: 配置对象
+            model_override: 可选的模型名称，用于覆盖配置中的模型
+
+        返回：
+            ChatOpenAI 实例（配置为使用 OpenRouter）
+
+        异常：
+            ValueError: 如果 API key 未配置
+
+        支持的模型示例：
+            - anthropic/claude-3.5-sonnet
+            - anthropic/claude-3-opus
+            - openai/gpt-4-turbo
+            - openai/o1-preview
+            - google/gemini-pro-1.5
+            - meta-llama/llama-3.1-405b-instruct
+            - mistralai/mistral-large
+        """
+        from langchain_openai import ChatOpenAI
+
+        if not settings.OPENROUTER_API_KEY:
+            raise ValueError(
+                "OPENROUTER_API_KEY is not configured. "
+                "Please set it in .env file or environment variables."
+            )
+
+        model_name = model_override or settings.OPENROUTER_MODEL
+        logger.info(
+            f"Creating OpenRouter client: model={model_name}, "
+            f"temperature={settings.OPENROUTER_TEMPERATURE}, "
+            f"timeout={settings.OPENROUTER_REQUEST_TIMEOUT}s"
+        )
+
+        openrouter_kwargs = {
+            "model": model_name,
+            "temperature": settings.OPENROUTER_TEMPERATURE,
+            "max_tokens": settings.OPENROUTER_MAX_TOKENS,
+            "api_key": cast(Any, settings.OPENROUTER_API_KEY),
+            "base_url": settings.OPENROUTER_BASE_URL,
+            "timeout": settings.OPENROUTER_REQUEST_TIMEOUT,
+        }
+        return cast(Any, ChatOpenAI)(**openrouter_kwargs)
 
 
 # LLM 客户端单例

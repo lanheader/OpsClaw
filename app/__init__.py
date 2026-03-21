@@ -1,4 +1,4 @@
 # app/__init__.py
-"""Ops Agent v2.0 - LangGraph Architecture"""
+"""Ops Agent v3.0 - DeepAgents Architecture"""
 
-__version__ = "2.0.0"
+__version__ = "3.0.0"

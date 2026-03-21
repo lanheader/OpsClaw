@@ -101,22 +101,24 @@ class LoggingMiddleware(AgentMiddleware):
 
         # 检测是否是 subagent 调用
         is_subagent = tool_name == "task"
-        subagent_name = tool_args.get("subagent") if is_subagent else None
+        subagent_name = tool_args.get("subagent_type", tool_args.get("subagent", "unknown")) if is_subagent else None
+        task_description = tool_args.get("description", tool_args.get("task", ""))[:80] if is_subagent else ""
 
         # 只显示参数的 key 和值的简短预览，避免日志过长
         args_preview = {k: str(v)[:60] for k, v in tool_args.items()}
 
+        # ========== 工具调用开始 ==========
         if is_subagent:
             logger.info(
-                f"🎯 [SubAgent] 调用 {subagent_name} | 任务: {tool_args.get('task', '')[:60]}"
+                f"🎯 [SubAgent 开始] {subagent_name} | 任务: {task_description}"
             )
             print(
-                f"[LoggingMiddleware] 🎯 SubAgent 调用: {subagent_name} | 任务: {tool_args.get('task', '')[:60]}",
+                f"[LoggingMiddleware] 🎯 [SubAgent 开始] {subagent_name}",
                 flush=True,
             )
         else:
-            logger.info(f"🔧 [Tool] 调用 {tool_name} | 参数: {args_preview}")
-            print(f"[LoggingMiddleware] 🔧 工具调用 {tool_name} | {args_preview}", flush=True)
+            logger.info(f"🔧 [工具开始] {tool_name} | 参数: {args_preview}")
+            print(f"[LoggingMiddleware] 🔧 [工具开始] {tool_name} | {args_preview}", flush=True)
 
         start = time.time()
 
@@ -126,28 +128,32 @@ class LoggingMiddleware(AgentMiddleware):
             elapsed = time.time() - start
             if is_subagent:
                 logger.error(
-                    f"❌ [SubAgent] {subagent_name} 失败 | 耗时={elapsed:.2f}s | {type(exc).__name__}: {exc}"
+                    f"❌ [SubAgent 失败] {subagent_name} | 耗时={elapsed:.2f}s | {type(exc).__name__}: {exc}"
                 )
+                print(f"[LoggingMiddleware] ❌ [SubAgent 失败] {subagent_name} | 耗时={elapsed:.2f}s", flush=True)
             else:
                 logger.error(
-                    f"❌ [Tool] {tool_name} 失败 | 耗时={elapsed:.2f}s | {type(exc).__name__}: {exc}"
+                    f"❌ [工具失败] {tool_name} | 耗时={elapsed:.2f}s | {type(exc).__name__}: {exc}"
                 )
+                print(f"[LoggingMiddleware] ❌ [工具失败] {tool_name} | 耗时={elapsed:.2f}s", flush=True)
             raise
 
         elapsed = time.time() - start
         result_preview = str(getattr(result, "content", ""))[:100]
 
+        # ========== 工具调用结束 ==========
         if is_subagent:
             logger.info(
-                f"✅ [SubAgent] {subagent_name} 完成 | 耗时={elapsed:.2f}s | 结果: {result_preview!r}"
+                f"✅ [SubAgent 完成] {subagent_name} | 耗时={elapsed:.2f}s | 结果: {result_preview!r}"
             )
             print(
-                f"[LoggingMiddleware] ✅ SubAgent {subagent_name} 完成 | 耗时={elapsed:.2f}s",
+                f"[LoggingMiddleware] ✅ [SubAgent 完成] {subagent_name} | 耗时={elapsed:.2f}s",
                 flush=True,
             )
         else:
             logger.info(
-                f"✅ [Tool] {tool_name} 完成 | 耗时={elapsed:.2f}s | 结果: {result_preview!r}"
+                f"✅ [工具完成] {tool_name} | 耗时={elapsed:.2f}s | 结果: {result_preview!r}"
             )
+            print(f"[LoggingMiddleware] ✅ [工具完成] {tool_name} | 耗时={elapsed:.2f}s", flush=True)
 
         return result

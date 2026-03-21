@@ -24,6 +24,7 @@ import { Diagnostics } from './pages/Diagnostics';
 import { Login } from './pages/Login';
 import { UserManagement } from './pages/UserManagement';
 import { RoleManagement } from './pages/RoleManagement';
+import { ApprovalConfigManagement } from './pages/ApprovalConfigManagement';
 import SystemSettings from './pages/SystemSettings';
 import Chat from './pages/Chat';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -107,6 +108,11 @@ const AppLayout: React.FC = () => {
       icon: <SafetyOutlined />,
       label: <Link to="/roles">角色权限</Link>,
     },
+    hasPermission('manage_roles') && {
+      key: '/approval-config',
+      icon: <SafetyOutlined />,
+      label: <Link to="/approval-config">审批配置</Link>,
+    },
     hasPermission('view_settings') && {
       key: '/settings',
       icon: <SettingOutlined />,
@@ -171,6 +177,7 @@ const AppLayout: React.FC = () => {
               <Route path="/diagnostics" element={<Diagnostics />} />
               <Route path="/users" element={<UserManagement />} />
               <Route path="/roles" element={<RoleManagement />} />
+              <Route path="/approval-config" element={<ApprovalConfigManagement />} />
               <Route path="/settings" element={<SystemSettings />} />
             </Routes>
           </Content>

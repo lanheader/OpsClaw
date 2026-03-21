@@ -2,8 +2,11 @@
 """权限点定义"""
 
 from enum import Enum
-from typing import List
+from typing import List, TYPE_CHECKING
 from dataclasses import dataclass
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
 
 
 class PermissionCategory(str, Enum):
@@ -79,79 +82,39 @@ MENU_PERMISSIONS = [
 ]
 
 
-# ============ Tool 权限 ============
-TOOL_PERMISSIONS = [
-    # ===== K8s 工具权限 =====
-    PermissionDef(
-        code="k8s.view",
-        name="K8s 查看权限",
-        category=PermissionCategory.TOOL,
-        resource="k8s",
-        description="允许查看 Kubernetes 资源（Pod、Deployment、Service、Node 等）",
-    ),
-    PermissionDef(
-        code="k8s.delete",
-        name="K8s 删除权限",
-        category=PermissionCategory.TOOL,
-        resource="k8s",
-        description="允许删除 Kubernetes 资源（Pod、Deployment、Service 等）",
-    ),
-    PermissionDef(
-        code="k8s.restart",
-        name="K8s 重启权限",
-        category=PermissionCategory.TOOL,
-        resource="k8s",
-        description="允许重启 Kubernetes Deployment",
-    ),
-    PermissionDef(
-        code="k8s.scale",
-        name="K8s 扩缩容权限",
-        category=PermissionCategory.TOOL,
-        resource="k8s",
-        description="允许扩缩容 Kubernetes Deployment",
-    ),
-    PermissionDef(
-        code="k8s.update",
-        name="K8s 更新权限",
-        category=PermissionCategory.TOOL,
-        resource="k8s",
-        description="允许更新 Kubernetes 资源（ConfigMap、Secret 等）",
-    ),
-    PermissionDef(
-        code="k8s.execute",
-        name="K8s 命令执行权限",
-        category=PermissionCategory.TOOL,
-        resource="k8s",
-        description="允许执行 kubectl 命令",
-    ),
-    # ===== Prometheus 工具权限 =====
-    PermissionDef(
-        code="prometheus.query",
-        name="Prometheus 查询权限",
-        category=PermissionCategory.TOOL,
-        resource="prometheus",
-        description="允许查询 Prometheus 指标数据",
-    ),
-    # ===== Loki 工具权限 =====
-    PermissionDef(
-        code="loki.query",
-        name="Loki 日志查询权限",
-        category=PermissionCategory.TOOL,
-        resource="loki",
-        description="允许查询 Loki 日志数据",
-    ),
-    # ===== 命令执行工具权限 =====
-    PermissionDef(
-        code="command.execute",
-        name="命令执行权限",
-        category=PermissionCategory.TOOL,
-        resource="command",
-        description="允许执行系统命令",
-    ),
-]
+# ============ Tool 权限（动态从 ToolRegistry 获取）============
+def get_tool_permissions() -> List[PermissionDef]:
+    """
+    动态从 ToolRegistry 获取工具权限
+
+    Returns:
+        工具权限列表
+    """
+    try:
+        from app.tools.registry import get_tool_registry
+
+        registry = get_tool_registry()
+        tool_permissions = registry.get_permissions()
+
+        return [
+            PermissionDef(
+                code=perm.code,
+                name=perm.name,
+                category=PermissionCategory.TOOL,
+                # 从权限代码提取 resource (如 k8s.view -> k8s)
+                resource=perm.code.split('.')[0] if '.' in perm.code else 'tool',
+                description=perm.description,
+            )
+            for perm in tool_permissions
+        ]
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"Failed to get tool permissions from registry: {e}")
+        return []
 
 
 # ============ API 权限 ============
+# 注意：API 权限为硬编码，新增 API 时需要手动添加
 API_PERMISSIONS = [
     PermissionDef(
         code="api:workflow:execute",
@@ -183,11 +146,19 @@ API_PERMISSIONS = [
     ),
 ]
 
-
-# ============ 辅助函数 ============
 def get_all_permissions() -> List[PermissionDef]:
-    """获取所有权限"""
-    return MENU_PERMISSIONS + TOOL_PERMISSIONS + API_PERMISSIONS
+    """
+    获取所有权限
+
+    注意：
+    - 菜单权限：硬编码
+    - 工具权限：动态从 ToolRegistry 获取
+    - API 权限：硬编码（新增 API 时需手动添加）
+
+    Returns:
+        所有权限列表（菜单 + 工具 + API）
+    """
+    return MENU_PERMISSIONS + get_tool_permissions() + API_PERMISSIONS
 
 
 def get_permissions_by_category(category: PermissionCategory) -> List[PermissionDef]:
@@ -203,3 +174,72 @@ def get_permission_by_code(code: str) -> PermissionDef | None:
         if perm.code == code:
             return perm
     return None
+
+
+def sync_tool_permissions_to_db(db: "Session") -> dict:
+    """
+    将工具权限同步到数据库
+
+    Args:
+        db: 数据库会话
+
+    Returns:
+        同步结果统计
+    """
+    from app.models.permission import Permission
+
+    # 获取当前工具权限
+    tool_perm_defs = get_tool_permissions()
+    tool_codes = {p.code for p in tool_perm_defs}
+
+    # 获取数据库中现有的 tool 类型的权限
+    existing_tool_perms = db.query(Permission).filter(Permission.category == "tool").all()
+    existing_codes = {p.code for p in existing_tool_perms}
+
+    # 找出需要添加和需要删除的权限
+    to_add = tool_codes - existing_codes
+    to_remove = existing_codes - tool_codes
+
+    # 添加新权限
+    added_count = 0
+    for code in to_add:
+        perm_def = next(p for p in tool_perm_defs if p.code == code)
+        # 从权限代码提取 resource (如 k8s.view -> k8s)
+        resource = perm_def.code.split('.')[0] if '.' in perm_def.code else 'tool'
+        db_perm = Permission(
+            code=perm_def.code,
+            name=perm_def.name,
+            category=perm_def.category.value,
+            resource=resource,
+            description=perm_def.description,
+        )
+        db.add(db_perm)
+        added_count += 1
+
+    # 删除过期权限（软删除：只删除不在 ToolRegistry 中的）
+    # 注意：如果权限已被角色使用，应该标记而不是直接删除
+    removed_count = 0
+    for code in to_remove:
+        db_perm = db.query(Permission).filter(Permission.code == code).first()
+        if db_perm:
+            # 检查是否有角色在使用此权限
+            from app.models.role_permission import RolePermission
+            usage_count = db.query(RolePermission).filter(RolePermission.permission_id == db_perm.id).count()
+            if usage_count == 0:
+                db.delete(db_perm)
+                removed_count += 1
+            else:
+                import logging
+                logging.getLogger(__name__).warning(
+                    f"权限 {code} 仍被 {usage_count} 个角色使用，跳过删除"
+                )
+
+    db.commit()
+
+    return {
+        "added": added_count,
+        "removed": removed_count,
+        "total": len(tool_perm_defs),
+        "added_codes": list(to_add),
+        "removed_codes": list(to_remove),
+    }

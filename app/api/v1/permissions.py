@@ -13,7 +13,7 @@ from app.models.user_role import UserRole
 from app.models.permission import Permission
 from app.core.deps import get_current_user
 from app.core.permission_checker import get_user_permission_codes
-from app.core.permissions import get_all_permissions, PermissionCategory
+from app.core.permissions import get_all_permissions, PermissionCategory, sync_tool_permissions_to_db
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/permissions", tags=["permissions"])
@@ -89,3 +89,79 @@ async def list_all_permissions(
     )
 
     return result
+
+
+@router.post("/sync-tool-permissions")
+async def sync_tool_permissions(
+    current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
+):
+    """
+    同步工具权限到数据库
+
+    从 ToolRegistry 获取最新的工具权限，并同步到数据库。
+    - 添加新权限
+    - 删除不再使用的权限（未被角色使用的）
+    """
+    # 只有管理员可以执行同步操作
+    from app.core.permission_checker import is_admin
+
+    if not is_admin(db, current_user.id):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=403, detail="只有管理员可以执行此操作")
+
+    result = sync_tool_permissions_to_db(db)
+
+    logger.info(
+        f"工具权限同步完成: 添加 {result['added']} 个, 删除 {result['removed']} 个, 总计 {result['total']} 个"
+    )
+
+    return {
+        "message": "工具权限同步完成",
+        "result": result,
+    }
+
+
+@router.get("/tools", response_model=List[PermissionResponse])
+async def get_tool_permissions_registry(
+    current_user: User = Depends(get_current_user),
+):
+    """
+    从 ToolRegistry 动态获取工具权限
+
+    直接从 ToolRegistry 获取最新的工具权限，不经过数据库。
+    用于前端展示当前系统支持的所有工具权限。
+    """
+    from app.tools import list_permissions
+
+    # 从 ToolRegistry 获取工具权限
+    tool_permissions = list_permissions()
+
+    return [
+        PermissionResponse(
+            code=perm["code"],
+            name=perm["name"],
+            category="tool",
+            resource=perm.get("resource", "tool"),
+            description=perm.get("description", ""),
+        )
+        for perm in tool_permissions
+    ]
+
+
+@router.get("/tools/groups")
+async def get_tool_groups(
+    current_user: User = Depends(get_current_user),
+):
+    """
+    获取工具分组信息
+
+    返回所有工具分组及其包含的工具数量。
+    """
+    from app.tools import list_groups
+
+    groups = list_groups()
+
+    return {
+        "groups": groups,
+        "total": len(groups),
+    }

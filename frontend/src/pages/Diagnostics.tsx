@@ -50,7 +50,7 @@ export const Diagnostics: React.FC = () => {
     }
   };
 
-  const testLLM = async (provider: 'openai' | 'claude' | 'zhipu' | 'ollama') => {
+  const testLLM = async (provider: 'openai' | 'claude' | 'zhipu' | 'ollama' | 'openrouter') => {
     setLlmLoading({ ...llmLoading, [provider]: true });
     try {
       const result = await llmAPI.test({ provider });
@@ -77,6 +77,7 @@ export const Diagnostics: React.FC = () => {
       testLLM('claude'),
       testLLM('zhipu'),
       testLLM('ollama'),
+      testLLM('openrouter'),
     ]);
   };
 
@@ -278,6 +279,25 @@ export const Diagnostics: React.FC = () => {
                 }
               >
                 {renderLLMResult('ollama')}
+              </Card>
+            </Col>
+
+            <Col span={12}>
+              <Card
+                size="small"
+                title="OpenRouter"
+                extra={
+                  <Button
+                    size="small"
+                    icon={<SyncOutlined />}
+                    onClick={() => testLLM('openrouter')}
+                    loading={llmLoading['openrouter']}
+                  >
+                    测试
+                  </Button>
+                }
+              >
+                {renderLLMResult('openrouter')}
               </Card>
             </Col>
           </Row>

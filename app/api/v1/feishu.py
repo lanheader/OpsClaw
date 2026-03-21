@@ -16,7 +16,7 @@ from app.integrations.feishu.callback import (
     send_approval_response,
 )
 from app.integrations.feishu.client import get_feishu_client
-from app.integrations.feishu.longconn import get_longconn_manager
+from app.integrations.feishu.lark_longconn import get_feishu_longconn_client
 from app.integrations.feishu.message import send_notification
 
 router = APIRouter(prefix="/feishu", tags=["feishu"])
@@ -167,16 +167,20 @@ async def feishu_status():
         client = get_feishu_client()
         is_healthy = await client.check_feishu_health()
 
-        # 获取长连接状态
+        # 获取长连接状态（简化检查）
         longconn_status = None
         if settings.FEISHU_CONNECTION_MODE in ["longconn", "auto"]:
-            manager = get_longconn_manager()
-            if manager:
-                longconn_status = manager.get_status()
+            longconn_client = get_feishu_longconn_client()
+            if longconn_client:
+                # lark_longconn 没有 get_status()，只返回基本连接信息
+                longconn_status = {
+                    "connected": longconn_client.ws_client is not None,
+                    "type": "lark_sdk"
+                }
 
         return {
             "enabled": True,
-            "connection_mode": client.connection_mode,
+            "connection_mode": settings.FEISHU_CONNECTION_MODE,
             "healthy": is_healthy,
             "app_id": client.app_id[:8] + "..." if client.app_id else None,
             "has_webhook_url": client.webhook_url is not None,

@@ -1,89 +1,114 @@
-"""工具包初始化"""
+"""
+工具包初始化
 
-from . import k8s_tools
-from . import prometheus_tools
-from . import log_tools
-from . import alert_tools
-from . import command_executor_tools
+使用 ToolRegistry 统一管理所有工具。
 
+新架构支持：
+- 自动发现和注册
+- 两级权限控制（分组 + 工具级）
+- SDK → CLI 降级机制
 
-def get_k8s_tools():
-    """获取所有 K8s 工具"""
-    # 返回 k8s_tools 模块中所有带 @tool 装饰器的函数
-    tools = []
-    for name in dir(k8s_tools):
-        if name.startswith("_"):
-            continue
-        obj = getattr(k8s_tools, name)
-        # LangChain tool 是 StructuredTool 类型
-        if hasattr(obj, "invoke") and hasattr(obj, "name"):
-            tools.append(obj)
-    return tools
+📚 扩展工具请参考：app/tools/EXTENSION_GUIDE.md
+"""
 
+import logging
+from typing import List, Any, Set, Optional
+from sqlalchemy.orm import Session
 
-def get_prometheus_tools():
-    """获取所有 Prometheus 工具"""
-    tools = []
-    for name in dir(prometheus_tools):
-        if name.startswith("_"):
-            continue
-        obj = getattr(prometheus_tools, name)
-        if hasattr(obj, "invoke") and hasattr(obj, "name"):
-            tools.append(obj)
-    return tools
+from app.tools.registry import get_tool_registry
+
+logger = logging.getLogger(__name__)
 
 
-def get_loki_tools():
-    """获取所有 Loki 工具"""
-    tools = []
-    for name in dir(log_tools):
-        if name.startswith("_"):
-            continue
-        obj = getattr(log_tools, name)
-        if hasattr(obj, "invoke") and hasattr(obj, "name"):
-            tools.append(obj)
-    return tools
+def get_all_tools(
+    permissions: Optional[Set[str]] = None,
+    user_id: Optional[int] = None,
+    db: Optional[Session] = None,
+) -> List[Any]:
+    """
+    获取所有已启用的工具
+
+    Args:
+        permissions: 用户权限集合（可选）
+        user_id: 用户 ID（可选，用于动态获取权限）
+        db: 数据库会话（可选，用于动态获取权限）
+
+    Returns:
+        LangChain 工具列表
+    """
+    registry = get_tool_registry()
+
+    # 如果提供了 user_id 和 db，动态获取权限
+    if permissions is None and user_id is not None and db is not None:
+        return registry.get_langchain_tools(user_id=user_id, db=db)
+
+    # 否则使用传入的权限或无权限过滤
+    return registry.get_langchain_tools(permissions=permissions)
 
 
-def get_command_executor_tools():
-    """获取所有命令执行工具"""
-    tools = []
-    for name in dir(command_executor_tools):
-        if name.startswith("_"):
-            continue
-        obj = getattr(command_executor_tools, name)
-        if hasattr(obj, "invoke") and hasattr(obj, "name"):
-            tools.append(obj)
-    return tools
+def get_tools_by_group(
+    group_code: str,
+    permissions: Optional[Set[str]] = None,
+) -> List[Any]:
+    """
+    获取指定分组的工具
+
+    Args:
+        group_code: 工具分组代码（如 "k8s.read", "prometheus.query"）
+        permissions: 用户权限集合（可选）
+
+    Returns:
+        LangChain 工具列表
+    """
+    registry = get_tool_registry()
+    return registry.get_langchain_tools(group_code=group_code, permissions=permissions)
 
 
-def get_approval_tools():
-    """获取所有批准工具"""
-    # TODO: 实现批准工具
-    return []
+def list_groups() -> List[dict]:
+    """
+    列出所有工具分组
+
+    Returns:
+        分组信息列表
+    """
+    registry = get_tool_registry()
+    groups = registry.list_groups()
+    return [
+        {
+            "code": g.code,
+            "name": g.name,
+            "category": g.category.value,
+            "operation_type": g.operation_type.value,
+            "description": g.description,
+            "tool_count": len(g.tools),
+        }
+        for g in groups
+    ]
 
 
-def get_all_tools():
-    """获取所有工具"""
-    tools = []
-    tools.extend(get_k8s_tools())
-    tools.extend(get_prometheus_tools())
-    tools.extend(get_loki_tools())
-    tools.extend(get_command_executor_tools())
-    tools.extend(get_approval_tools())
-    return tools
+def list_permissions() -> List[dict]:
+    """
+    列出所有工具权限
+
+    Returns:
+        权限信息列表
+    """
+    registry = get_tool_registry()
+    permissions = registry.get_permissions()
+    return [
+        {
+            "code": p.code,
+            "name": p.name,
+            "description": p.description,
+            "groups": p.groups,
+        }
+        for p in permissions
+    ]
 
 
 __all__ = [
-    "k8s_tools",
-    "prometheus_tools",
-    "log_tools",
-    "alert_tools",
-    "command_executor_tools",
-    "get_k8s_tools",
-    "get_prometheus_tools",
-    "get_loki_tools",
-    "get_command_executor_tools",
-    "get_approval_tools",
     "get_all_tools",
+    "get_tools_by_group",
+    "list_groups",
+    "list_permissions",
 ]

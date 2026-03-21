@@ -5,7 +5,7 @@
 import { apiClient } from './client';
 
 export interface LLMTestRequest {
-  provider: 'openai' | 'claude' | 'zhipu' | 'ollama';
+  provider: 'openai' | 'claude' | 'zhipu' | 'ollama' | 'openrouter';
 }
 
 export interface LLMTestResponse {

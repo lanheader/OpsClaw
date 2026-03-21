@@ -1,7 +1,7 @@
 [project]
 name = "ops-agent-langgraph"
-version = "2.0.0"
-description = "Intelligent ops automation platform with LangGraph workflow orchestration"
+version = "3.0.0"
+description = "Intelligent ops automation platform with DeepAgents multi-agent system"
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [

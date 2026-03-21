@@ -6,41 +6,19 @@ DeepAgents 主智能体配置
 from deepagents import create_deep_agent
 from langchain_core.language_models import BaseChatModel
 from typing import Any, Optional, Set
+from sqlalchemy.orm import Session
 
 from app.core.llm_factory import LLMFactory
 from app.core.checkpointer import get_checkpointer
-from app.core.tool_permission_mapper import filter_tools_by_permissions
 from app.prompts.main_agent import MAIN_AGENT_SYSTEM_PROMPT
 from app.deepagents.subagents import get_all_subagents
 from app.middleware.logging_middleware import LoggingMiddleware
 from app.middleware.message_trimming_middleware import MessageTrimmingMiddleware
-from app.tools import (
-    get_k8s_tools,
-    get_prometheus_tools,
-    get_loki_tools,
-    get_command_executor_tools,
-    get_approval_tools,
-)
+from app.tools.registry import get_tool_registry
+from app.tools.base import RiskLevel
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
-
-# 高风险工具列表（需要用户批准）
-# 注意：只包含真正的高风险操作，只读查询不应该在这里
-_HIGH_RISK_TOOLS = {
-    # K8s 高风险操作（删除、重启、扩缩容）
-    "delete_pod": True,
-    "delete_deployment": True,
-    "delete_service": True,
-    "restart_deployment": True,
-    "scale_deployment": True,
-    "update_configmap": True,
-    "update_secret": True,
-    # 命令执行 - 暂时禁用，因为无法区分只读和写操作
-    # TODO: 需要更精细的策略，或者分离只读和写操作工具
-    # "execute_command": True,
-    # "execute_kubectl_command": True,
-}
 
 # 单例 agent（所有会话共享同一个编译图，通过 thread_id 区分会话）
 _agent: Optional[Any] = None
@@ -50,6 +28,8 @@ async def get_ops_agent(
     llm: Optional[BaseChatModel] = None,
     enable_approval: bool = True,
     user_permissions: Optional[Set[str]] = None,
+    user_id: Optional[int] = None,
+    db: Optional[Session] = None,
 ) -> Any:
     """
     获取 Ops Agent 单例（懒加载，异步）
@@ -60,16 +40,18 @@ async def get_ops_agent(
     Args:
         llm: 语言模型实例 (默认使用 LLMFactory)
         enable_approval: 是否启用 interrupt_on 批准流程
-        user_permissions: 用户权限代码集合，用于过滤可用工具
+        user_permissions: 用户权限代码集合，用于过滤可用工具（静态权限）
+        user_id: 用户 ID（用于动态获取权限）
+        db: 数据库会话（用于动态获取权限）
 
     Returns:
         编译后的 DeepAgents 图
     """
     global _agent
 
-    # 注意：如果传入了 user_permissions，不使用缓存的 agent
+    # 注意：如果传入了 user_permissions 或 user_id，不使用缓存的 agent
     # 因为不同用户的权限不同，需要动态创建 agent
-    if _agent is not None and user_permissions is None:
+    if _agent is not None and user_permissions is None and user_id is None:
         return _agent
 
     if llm is None:
@@ -78,32 +60,118 @@ async def get_ops_agent(
 
     subagents = get_all_subagents()
 
-    # 获取所有工具
-    tools = []
-    tools.extend(get_k8s_tools())
-    tools.extend(get_prometheus_tools())
-    tools.extend(get_loki_tools())
-    tools.extend(get_command_executor_tools())
-    tools.extend(get_approval_tools())
+    # ========== 输出可用 Subagent 列表 ==========
+    logger.info("=" * 60)
+    logger.info("🤖 主智能体可用 Subagent 列表:")
+    logger.info("=" * 60)
+    for subagent in subagents:
+        name = subagent.get('name', 'unknown')
+        desc = subagent.get('description', 'No description')
+        tool_count = len(subagent.get('tools', []))
+        logger.info(f"  - {name}: {desc}")
+        logger.info(f"    工具数量: {tool_count}")
+    logger.info(f"📊 总计: {len(subagents)} 个 Subagent")
+    logger.info("=" * 60)
+    print(f"[MainAgent] ✅ 加载 {len(subagents)} 个 Subagent", flush=True)
 
-    # 根据用户权限过滤工具
-    if user_permissions is not None:
-        original_count = len(tools)
-        tools = filter_tools_by_permissions(tools, user_permissions)
-        filtered_count = len(tools)
+    # ========== 从 ToolRegistry 获取工具 ==========
+    registry = get_tool_registry()
+
+    # 优先使用动态权限（user_id + db），否则使用静态权限（user_permissions）
+    if user_id is not None and db is not None:
+        # 动态权限：从数据库获取用户权限
+        logger.info(f"🔐 使用动态权限过滤工具（user_id: {user_id}）")
+        tools = registry.get_langchain_tools(user_id=user_id, db=db)
+    elif user_permissions is not None:
+        # 静态权限：使用传入的权限集合
         logger.info(
-            f"🔐 根据用户权限过滤工具: {original_count} → {filtered_count} "
+            f"🔐 使用静态权限过滤工具 "
             f"(权限: {', '.join(sorted(user_permissions))})"
         )
+        tools = registry.get_langchain_tools(permissions=user_permissions)
     else:
-        logger.info(f"✅ 未指定用户权限，加载所有工具: {len(tools)} 个")
+        # 无权限过滤：加载所有工具
+        logger.info("✅ 未指定用户权限，加载所有工具")
+        tools = registry.get_langchain_tools()
+
+    logger.info(f"📊 加载工具数量: {len(tools)} 个")
 
     # 配置中间件
     middleware = [MessageTrimmingMiddleware(max_messages=20), LoggingMiddleware()]
     logger.info("✅ 消息截断中间件已启用（保留最近 20 条消息，智能截断）")
     logger.info("✅ 日志中间件已启用")
 
-    interrupt_on = _HIGH_RISK_TOOLS if enable_approval else None
+    # 动态构建需要审批的工具列表（从数据库配置获取）
+    interrupt_on = None
+    if enable_approval:
+        from app.services.approval_config_service import ApprovalConfigService
+        from app.models.database import SessionLocal
+
+        # 尝试从数据库获取审批配置
+        tools_need_approval = set()
+        config_db = SessionLocal()
+        try:
+            # 获取用户角色（如果有）
+            user_role = None
+            if user_id is not None and db is not None:
+                from app.models.user import User
+                user = db.query(User).filter(User.id == user_id).first()
+                if user:
+                    user_role = user.role
+
+            # 从审批配置获取需要审批的工具
+            tools_need_approval = ApprovalConfigService.get_tools_require_approval(
+                config_db, user_role=user_role
+            )
+            logger.info(
+                f"🔒 从审批配置获取需要审批的工具: {len(tools_need_approval)} 个"
+            )
+        except Exception as e:
+            # 如果数据库查询失败，回退到基于风险等级的判断
+            logger.warning(f"⚠️ 无法从数据库获取审批配置，使用风险等级判断: {e}")
+            registry = get_tool_registry()
+            for tool_class in registry.list_tools():
+                metadata = tool_class.get_metadata()
+                if metadata and metadata.risk_level == RiskLevel.HIGH:
+                    tools_need_approval.add(metadata.name)
+            logger.info(f"🔒 基于风险等级判断的高风险工具: {len(tools_need_approval)} 个")
+        finally:
+            config_db.close()
+
+        if tools_need_approval:
+            interrupt_on = {name: True for name in tools_need_approval}
+        else:
+            interrupt_on = None
+
+    # ========== 输出可用工具列表 ==========
+    logger.info("=" * 60)
+    logger.info("🛠️  主智能体可用工具列表:")
+    logger.info("=" * 60)
+
+    # 从 ToolRegistry 获取分组信息并按分组显示
+    from collections import defaultdict
+    tool_groups = defaultdict(list)
+    registry = get_tool_registry()
+
+    for tool in tools:
+        tool_name = getattr(tool, 'name', 'unknown')
+        # 从 registry 获取工具所属分组
+        tool_class = registry.get_tool(tool_name)
+        if tool_class:
+            metadata = tool_class.get_metadata()
+            if metadata:
+                # 使用分组名称进行分类
+                group_name = metadata.group.replace('.', ' ').title()
+                tool_groups[group_name].append(tool_name)
+
+    for group, tool_names in sorted(tool_groups.items()):
+        logger.info(f"  [{group}] {len(tool_names)} 个:")
+        for name in sorted(tool_names):
+            logger.info(f"    - {name}")
+
+    logger.info(f"📊 总计: {len(tools)} 个工具")
+    logger.info("=" * 60)
+    print(f"[MainAgent] ✅ 主智能体初始化完成，可用工具: {len(tools)} 个", flush=True)
 
     checkpointer = await get_checkpointer()
 
@@ -117,8 +185,8 @@ async def get_ops_agent(
         interrupt_on=interrupt_on,
     )
 
-    # 只有在没有指定用户权限时才缓存 agent（全局默认 agent）
-    if user_permissions is None:
+    # 只有在没有指定用户权限和 user_id 时才缓存 agent（全局默认 agent）
+    if user_permissions is None and user_id is None:
         _agent = agent
 
     return agent

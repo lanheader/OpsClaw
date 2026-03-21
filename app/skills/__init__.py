@@ -1,105 +1,140 @@
 """
-Skills 管理模块
+Skills 插件系统
 
-Skills 是可复用的提示词片段，用于增强 Agent 的能力。
-支持两种格式：
-1. 单个 .md 文件：skill-name.md
-2. 目录：skill-name/ (包含 README.md 或 index.md)
-
-使用方式：
-    from app.skills import get_skill, list_skills
-
-    # 获取 skill
-    skill_content = get_skill("k8s-troubleshooting")
-
-    # 在 SubAgent 配置中使用
-    subagent_config["skills"] = ["k8s-troubleshooting"]
+用户可以将自定义技能（.md 或 .py 文件）放在此目录，
+系统会自动扫描并加载这些技能。
 """
 
-from typing import Dict, List, Optional
+import os
+import glob
 from pathlib import Path
+from typing import Dict, List, Any
+from app.utils.logger import get_logger
 
-# Skills 注册表
-_SKILLS_REGISTRY: Dict[str, str] = {}
+logger = get_logger(__name__)
 
-
-def register_skill(name: str, content: str) -> None:
-    """注册一个 skill"""
-    _SKILLS_REGISTRY[name] = content
-
-
-def get_skill(name: str) -> Optional[str]:
-    """获取 skill 内容"""
-    return _SKILLS_REGISTRY.get(name)
+# Skills 目录路径
+SKILLS_DIR = Path(__file__).parent
 
 
-def list_skills() -> List[str]:
-    """列出所有已注册的 skill 名称"""
-    return sorted(_SKILLS_REGISTRY.keys())
-
-
-def _load_skill_from_file(skill_file: Path) -> tuple[str, str]:
-    """从文件加载 skill，返回 (name, content)"""
-    return skill_file.stem, skill_file.read_text(encoding="utf-8")
-
-
-def _load_skill_from_directory(skill_dir: Path) -> tuple[str, str]:
+def scan_skills() -> Dict[str, Any]:
     """
-    从目录加载 skill，返回 (name, content)
-    优先查找 README.md，其次 index.md
+    扫描 skills 目录中的所有技能文件
+
+    支持的格式：
+    - .md 文件 - Markdown 格式的技能文档
+    - .py 文件 - Python 技能模块
+
+    Returns:
+        包含所有找到的技能信息的字典
+        {
+            "skills": [
+                {"name": "skill_name", "type": "md", "path": "...", "content": "..."},
+                ...
+            ],
+            "total": N
+        }
     """
-    readme = skill_dir / "README.md"
-    index = skill_dir / "index.md"
+    skills = []
 
-    if readme.exists():
-        content = readme.read_text(encoding="utf-8")
-    elif index.exists():
-        content = index.read_text(encoding="utf-8")
-    else:
-        # 如果没有 README.md 或 index.md，合并所有 .md 文件
-        md_files = sorted(skill_dir.glob("*.md"))
-        content = "\n\n".join(f.read_text(encoding="utf-8") for f in md_files)
+    # 扫描 Markdown 技能文件
+    for md_file in SKILLS_DIR.glob("*.md"):
+        try:
+            with open(md_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+            skills.append({
+                "name": md_file.stem,
+                "type": "md",
+                "path": str(md_file),
+                "content": content,
+                "size": len(content)
+            })
+            logger.info(f"✅ 找到 Markdown 技能: {md_file.name}")
+        except Exception as e:
+            logger.error(f"❌ 读取技能文件失败 {md_file}: {e}")
 
-    return skill_dir.name, content
+    # 扫描 Python 技能文件
+    for py_file in SKILLS_DIR.glob("*.py"):
+        if py_file.name.startswith("_"):
+            continue  # 跳过 __init__.py
+        try:
+            with open(py_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+            skills.append({
+                "name": py_file.stem,
+                "type": "py",
+                "path": str(py_file),
+                "content": content,
+                "size": len(content)
+            })
+            logger.info(f"✅ 找到 Python 技能: {py_file.name}")
+        except Exception as e:
+            logger.error(f"❌ 读取技能文件失败 {py_file}: {e}")
+
+    logger.info(f"📊 Skills 扫描完成: 共找到 {len(skills)} 个技能")
+
+    return {
+        "skills": skills,
+        "total": len(skills),
+        "directory": str(SKILLS_DIR)
+    }
 
 
-def detect_and_load_skills(base_dir: Path) -> None:
+def get_skill(skill_name: str) -> Dict[str, Any]:
     """
-    自动检测并加载 skills
+    获取指定名称的技能
 
-    检测规则：
-    1. 单个 .md 文件（非 README/EXAMPLES）→ skill
-    2. 目录（包含 .md 文件）→ skill
+    Args:
+        skill_name: 技能名称（不含扩展名）
+
+    Returns:
+        技能信息字典，如果未找到返回 None
     """
-    if not base_dir.exists():
-        return
-
-    # 跳过的文件名
-    SKIP_FILES = {"README", "EXAMPLES"}
-
-    # 1. 加载单个 .md 文件
-    for md_file in base_dir.glob("*.md"):
-        if md_file.stem.upper() not in SKIP_FILES:
-            name, content = _load_skill_from_file(md_file)
-            register_skill(name, content)
-
-    # 2. 加载目录（作为 skill）
-    for item in base_dir.iterdir():
-        if item.is_dir() and not item.name.startswith((".", "_")):
-            # 检查目录是否包含 .md 文件
-            if any(item.glob("*.md")):
-                name, content = _load_skill_from_directory(item)
-                register_skill(name, content)
+    all_skills = scan_skills()
+    for skill in all_skills["skills"]:
+        if skill["name"] == skill_name:
+            return skill
+    return None
 
 
-# 自动加载当前目录下的 skills
-_SKILLS_DIR = Path(__file__).parent
-detect_and_load_skills(_SKILLS_DIR)
+def list_skill_names() -> List[str]:
+    """
+    列出所有可用的技能名称
+
+    Returns:
+        技能名称列表
+    """
+    all_skills = scan_skills()
+    return [skill["name"] for skill in all_skills["skills"]]
+
+
+def get_skills_info() -> str:
+    """
+    获取技能信息摘要（用于显示）
+
+    Returns:
+        格式化的技能信息字符串
+    """
+    result = scan_skills()
+    skills = result["skills"]
+
+    if not skills:
+        return "📁 Skills 目录为空\n\n用户可以将自定义技能文件（.md 或 .py）放入此目录。"
+
+    lines = ["📁 可用技能列表:\n"]
+    for skill in skills:
+        icon = "📄" if skill["type"] == "md" else "🐍"
+        lines.append(f"{icon} **{skill['name']}** ({skill['type']})")
+        lines.append(f"   路径: `{skill['path']}`")
+        lines.append(f"   大小: {skill['size']} 字节")
+        lines.append("")
+
+    return "\n".join(lines)
 
 
 __all__ = [
-    "register_skill",
+    "scan_skills",
     "get_skill",
-    "list_skills",
-    "detect_and_load_skills",
+    "list_skill_names",
+    "get_skills_info",
 ]

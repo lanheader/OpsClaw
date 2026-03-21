@@ -1,6 +1,6 @@
 """会话状态管理服务"""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
 from sqlalchemy.orm import Session
 import logging
@@ -40,7 +40,9 @@ class SessionStateManager:
             session.state = SessionState.AWAITING_APPROVAL.value
             session.pending_approval_data = approval_data
             # 记录过期时间，但不用于自动清理，仅供参考
-            session.approval_expires_at = datetime.utcnow() + timedelta(minutes=timeout_minutes)
+            session.approval_expires_at = datetime.now(timezone.utc) + timedelta(
+                minutes=timeout_minutes
+            )
 
             db.commit()
             logger.info(f"会话 {session_id} 已设置为等待批准状态")
@@ -66,29 +68,29 @@ class SessionStateManager:
         """
         db = SessionLocal()
         try:
-            logger.info(f"🔍 检查会话状态: session_id={session_id}")
+            logger.info(f"检查会话状态: session_id={session_id}")
 
             session = db.query(ChatSession).filter_by(session_id=session_id).first()
             if not session:
-                logger.warning(f"⚠️ 会话不存在: session_id={session_id}")
+                logger.warning(f"会话不存在: session_id={session_id}")
                 return None
 
-            logger.info(f"   会话状态: {session.state}")
-            logger.info(f"   批准数据存在: {session.pending_approval_data is not None}")
-            logger.info(f"   过期时间: {session.approval_expires_at}")
+            logger.info(f"  会话状态: {session.state}")
+            logger.info(f"  批准数据存在: {session.pending_approval_data is not None}")
+            logger.info(f"  过期时间: {session.approval_expires_at}")
 
             # 检查状态
             if session.state != SessionState.AWAITING_APPROVAL.value:
-                logger.warning(f"⚠️ 会话状态不是 awaiting_approval: {session.state}")
+                logger.warning(f"会话状态不是 awaiting_approval: {session.state}")
                 return None
 
             # 不检查过期时间，因为状态由用户操作驱动
             # 只要状态是 awaiting_approval，就返回批准数据
-            logger.info(f"✅ 会话处于等待批准状态，返回批准数据")
+            logger.info(f"会话处于等待批准状态，返回批准数据")
             return session.pending_approval_data
 
         except Exception as e:
-            logger.error(f"❌ 检查会话状态失败: {e}", exc_info=True)
+            logger.error(f"检查会话状态失败: {e}", exc_info=True)
             return None
         finally:
             db.close()

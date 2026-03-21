@@ -114,6 +114,7 @@ async def execute_kubectl_command(
             )
         except asyncio.TimeoutError:
             process.kill()
+            await process.wait()  # 等待进程真正结束，避免僵尸进程
             return {
                 "success": False,
                 "output": "",
@@ -242,6 +243,7 @@ async def execute_redis_command(
             )
         except asyncio.TimeoutError:
             process.kill()
+            await process.wait()  # 等待进程真正结束，避免僵尸进程
             return {
                 "success": False,
                 "output": "",
@@ -363,6 +365,7 @@ async def execute_mysql_query(
             )
         except asyncio.TimeoutError:
             process.kill()
+            await process.wait()  # 等待进程真正结束，避免僵尸进程
             return {
                 "success": False,
                 "output": "",
@@ -503,6 +506,7 @@ async def execute_safe_shell_command(
             )
         except asyncio.TimeoutError:
             process.kill()
+            await process.wait()  # 等待进程真正结束，避免僵尸进程
             return {
                 "success": False,
                 "output": "",

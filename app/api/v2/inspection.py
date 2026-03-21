@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -41,14 +41,44 @@ class InspectionResponse(BaseModel):
     created_at: datetime
 
 
+async def run_inspection_workflow(task_id: str, initial_state: OpsState):
+    """后台执行巡检工作流
+
+    Args:
+        task_id: 任务ID
+        initial_state: 初始状态
+    """
+    try:
+        logger.info(f"开始执行巡检工作流: {task_id}")
+
+        # 创建 Agent
+        agent = create_agent_for_session(
+            session_id=task_id,
+            enable_approval=False,
+            enable_security=True,
+        )
+
+        # 执行工作流（异步，不阻塞）
+        result = await agent.ainvoke(initial_state)
+
+        logger.info(f"巡检工作流执行完成: {task_id}, 结果: {result.get('execution_success', False)}")
+
+    except Exception as e:
+        logger.error(f"巡检工作流执行失败: {task_id}, 错误: {e}")
+        # 可以选择记录到数据库或发送通知
+
+
 @router.post("/trigger", response_model=InspectionResponse)
 async def trigger_inspection(
-    request: TriggerInspectionRequest, current_user: User = Depends(get_current_user)
+    request: TriggerInspectionRequest,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user)
 ):
     """手动触发巡检任务
 
     Args:
         request: 巡检请求参数
+        background_tasks: FastAPI 后台任务
         current_user: 当前用户
 
     Returns:
@@ -60,13 +90,6 @@ async def trigger_inspection(
     try:
         # 生成任务ID
         task_id = f"inspection_{uuid.uuid4().hex[:8]}"
-
-        # 创建 Agent（不需要批准）
-        agent = create_agent_for_session(
-            session_id=task_id,
-            enable_approval=False,  # 巡检不需要批准
-            enable_security=True,
-        )
 
         # 构造初始状态
         initial_state: OpsState = {
@@ -93,14 +116,15 @@ async def trigger_inspection(
             "execution_history": [],
         }
 
-        # 异步执行工作流（后台任务）
-        # 注意：这里应该使用后台任务或消息队列，避免阻塞 API 响应
-        # 简化实现：直接返回任务ID，实际执行在后台进行
-        logger.info(f"创建巡检任务: {task_id}")
+        # 添加后台任务
+        background_tasks.add_task(
+            run_inspection_workflow,
+            task_id=task_id,
+            initial_state=initial_state
+        )
 
-        # TODO: 实际应该使用 BackgroundTasks 或 Celery 执行工作流
-        # 这里简化处理，直接返回任务信息
-        # 可以使用: await agent.ainvoke(initial_state)
+        logger.info(f"巡检任务已添加到后台队列: {task_id}")
+
         return InspectionResponse(
             task_id=task_id,
             status="pending",
