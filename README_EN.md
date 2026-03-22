@@ -18,6 +18,8 @@ English | [简体中文](README.md)
 
 ## 📖 Project Overview
 
+**Current Version**: v3.0.0 | **Tools**: 24 tools across 6 groups | **Subagents**: 6 specialized agents
+
 Ops Agent is an intelligent operations automation platform built on the **DeepAgents Framework**. It achieves full-process automation from monitoring, diagnosis to self-healing through the collaboration of a main agent and multiple specialized sub-agents.
 
 ### ✨ Key Features
@@ -25,11 +27,12 @@ Ops Agent is an intelligent operations automation platform built on the **DeepAg
 - 🤖 **DeepAgents Architecture**: Main agent + 6 specialized sub-agents working together
 - 🎯 **Intelligent Task Planning**: Automatic decomposition of complex tasks using `write_todos`
 - 🔄 **Sub-agent Delegation**: Delegate professional tasks via `task()` tool
-- 🛡️ **Tool Fallback Mechanism**: SDK first, automatically fallback to CLI tools
+- 🛡️ **Tool Fallback Mechanism**: SDK first, automatically fallback to CLI tools (24 tools, 6 groups)
+- 🔒 **Dynamic Permissions**: Tool permissions auto-discovered, 11 fine-grained permissions
 - 🔐 **Middleware Architecture**: Approval process, security audit, intelligent routing
 - 📊 **Multi-channel Access**: Support for Web UI and Feishu integration
 - 🧠 **Session Memory**: Support for multi-turn conversations and context memory
-- 🔒 **Access Control**: RBAC permission management and user authentication
+- 🔐 **Access Control**: RBAC permission management and user authentication
 
 ### 🎯 Three Core Scenarios
 
@@ -190,6 +193,7 @@ CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "800
 Create `docker-compose.yml` in project root:
 
 ```yaml
+# Note: version field is optional in modern docker-compose
 version: '3.8'
 
 services:
@@ -844,7 +848,7 @@ Thanks to the following open source projects:
 
 <div align="center">
 
-**Last Updated**: 2026-03-22
+**Last Updated**: 2026-03-22 | **Version**: v3.0.0
 
 Made with ❤️ by Ops Team
 

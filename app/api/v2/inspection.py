@@ -58,8 +58,15 @@ async def run_inspection_workflow(task_id: str, initial_state: OpsState):
             enable_security=True,
         )
 
+        # 【重要】LangGraph checkpointer 需要 config 中的 thread_id
+        config = {
+            "configurable": {
+                "thread_id": task_id
+            }
+        }
+
         # 执行工作流（异步，不阻塞）
-        result = await agent.ainvoke(initial_state)
+        result = await agent.ainvoke(initial_state, config=config)
 
         logger.info(f"巡检工作流执行完成: {task_id}, 结果: {result.get('execution_success', False)}")
 

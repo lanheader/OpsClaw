@@ -382,7 +382,15 @@ async def send_message(
             start_time = time.time()
             timeout = 300  # 5 分钟超时
 
-            async for event in agent.astream(initial_state):
+            # 【重要】LangGraph checkpointer 需要 config 中的 thread_id
+            # 用于区分不同会话的状态
+            config = {
+                "configurable": {
+                    "thread_id": session_id
+                }
+            }
+
+            async for event in agent.astream(initial_state, config=config):
                 # 检查超时
                 elapsed = time.time() - start_time
                 if elapsed > timeout:
@@ -648,7 +656,15 @@ async def resume_workflow(
             start_time = time.time()
             timeout = 300  # 5 分钟超时
 
-            async for event in agent.astream(resume_state):
+            # 【重要】LangGraph checkpointer 需要 config 中的 thread_id
+            # 用于区分不同会话的状态
+            config = {
+                "configurable": {
+                    "thread_id": session_id
+                }
+            }
+
+            async for event in agent.astream(resume_state, config=config):
                 # 检查超时
                 elapsed = time.time() - start_time
                 if elapsed > timeout:

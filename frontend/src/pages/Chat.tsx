@@ -1,6 +1,6 @@
 // src/pages/Chat.tsx
 /**
- * AI 对话页面
+ * AI 对话页面 - 深度美化版
  */
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
@@ -9,12 +9,12 @@ import {
   List,
   Button,
   Input,
-  Card,
-  Avatar,
   Spin,
   message as antMessage,
   Modal,
-  Empty
+  Empty,
+  Tooltip,
+  Card
 } from 'antd';
 import {
   MessageOutlined,
@@ -23,9 +23,12 @@ import {
   DeleteOutlined,
   RobotOutlined,
   UserOutlined,
-  WechatOutlined
+  WechatOutlined,
+  ThunderboltOutlined,
+  ClockCircleOutlined,
+  CheckCircleOutlined
 } from '@ant-design/icons';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { chatApi, ChatSession, ChatMessage } from '@/api/chat';
 import { useAuth } from '@/contexts/AuthContext';
@@ -33,6 +36,13 @@ import './Chat.css';
 
 const { Sider, Content } = Layout;
 const { TextArea } = Input;
+
+// 审批命令类型定义
+interface ApprovalCommand {
+  type: string;
+  action: string;
+  reason?: string;
+}
 
 const Chat: React.FC = () => {
   const { sessionId } = useParams<{ sessionId: string }>();
@@ -47,17 +57,18 @@ const Chat: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingContent, setStreamingContent] = useState('');
-  const [statusMessage, setStatusMessage] = useState(''); // 新增：状态消息
+  const [statusMessage, setStatusMessage] = useState('');
   const [approvalRequest, setApprovalRequest] = useState<{
     message: string;
-    commands: any[];
+    commands: ApprovalCommand[];
     sessionId: string;
-  } | null>(null); // 新增：批准请求状态
+  } | null>(null);
 
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const streamingContentRef = useRef<string>('');
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   // 自动滚动到底部
   const scrollToBottom = () => {
@@ -119,7 +130,6 @@ const Chat: React.FC = () => {
           await chatApi.deleteSession(sid);
           setSessions(sessions.filter(s => s.session_id !== sid));
 
-          // 如果删除的是当前会话，跳转到首页
           if (sid === sessionId) {
             navigate('/chat');
           }
@@ -143,10 +153,10 @@ const Chat: React.FC = () => {
     setInputValue('');
     setIsStreaming(true);
     setStreamingContent('');
-    setStatusMessage(''); // 重置状态消息
-    streamingContentRef.current = ''; // 重置 ref
+    setStatusMessage('');
+    streamingContentRef.current = '';
 
-    // 乐观更新：立即显示用户消息
+    // 乐观更新
     const tempUserMessage: ChatMessage = {
       id: Date.now(),
       role: 'user',
@@ -160,46 +170,38 @@ const Chat: React.FC = () => {
         sessionId,
         userMessage,
         (chunk) => {
-          // 接收流式内容
-          streamingContentRef.current += chunk; // 更新 ref
+          streamingContentRef.current += chunk;
           setStreamingContent(prev => prev + chunk);
         },
         (_status, message) => {
-          // 接收状态更新
           setStatusMessage(message);
         },
         (message, commands, sid) => {
-          // 接收批准请求
           setApprovalRequest({ message, commands, sessionId: sid });
           setStatusMessage('⏸️ 等待您的确认...');
         },
         (messageId) => {
-          // 流式完成
           setIsStreaming(false);
-          setStatusMessage(''); // 清除状态消息
+          setStatusMessage('');
 
-          // 将流式内容添加到消息列表（使用 ref 的值）
           if (streamingContentRef.current) {
             const assistantMessage: ChatMessage = {
               id: messageId || Date.now(),
               role: 'assistant',
-              content: streamingContentRef.current, // 使用 ref 的值
+              content: streamingContentRef.current,
               created_at: new Date().toISOString()
             };
             setMessages(prev => [...prev, assistantMessage]);
           }
           setStreamingContent('');
-          streamingContentRef.current = ''; // 重置 ref
-
-          // 重新加载会话列表（更新 last_message）
+          streamingContentRef.current = '';
           loadSessions();
         },
         (error) => {
-          // 错误处理
           setIsStreaming(false);
           setStreamingContent('');
-          setStatusMessage(''); // 清除状态消息
-          streamingContentRef.current = ''; // 重置 ref
+          setStatusMessage('');
+          streamingContentRef.current = '';
           antMessage.error(`发送失败: ${error.message}`);
         }
       );
@@ -209,7 +211,8 @@ const Chat: React.FC = () => {
     } catch (error) {
       setIsStreaming(false);
       setStreamingContent('');
-      setStatusMessage(''); // 清除状态消息
+      setStatusMessage('');
+      streamingContentRef.current = '';
       console.error('Failed to send message:', error);
       antMessage.error('发送消息失败');
     }
@@ -220,7 +223,7 @@ const Chat: React.FC = () => {
     if (!approvalRequest) return;
 
     const { sessionId: sid } = approvalRequest;
-    setApprovalRequest(null); // 关闭对话框
+    setApprovalRequest(null);
     setIsStreaming(true);
     setStatusMessage(approved ? '✅ 已批准，继续执行...' : '❌ 已拒绝');
 
@@ -229,25 +232,20 @@ const Chat: React.FC = () => {
         sid,
         approved ? 'approved' : 'rejected',
         (chunk) => {
-          // 接收流式内容
           streamingContentRef.current += chunk;
           setStreamingContent(prev => prev + chunk);
         },
         (_status, message) => {
-          // 接收状态更新
           setStatusMessage(message);
         },
         (message, commands, sessionId) => {
-          // 可能有多个批准点
           setApprovalRequest({ message, commands, sessionId });
           setStatusMessage('⏸️ 等待您的确认...');
         },
         () => {
-          // 完成
           setIsStreaming(false);
           setStatusMessage('');
 
-          // 将流式内容添加到消息列表
           if (streamingContentRef.current) {
             const assistantMessage: ChatMessage = {
               id: Date.now(),
@@ -259,12 +257,9 @@ const Chat: React.FC = () => {
           }
           setStreamingContent('');
           streamingContentRef.current = '';
-
-          // 重新加载会话列表
           loadSessions();
         },
         (error) => {
-          // 错误处理
           setIsStreaming(false);
           setStreamingContent('');
           setStatusMessage('');
@@ -284,7 +279,7 @@ const Chat: React.FC = () => {
     }
   };
 
-  // 处理键盘事件（Enter 发送，Shift+Enter 换行）
+  // 处理键盘事件
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -292,248 +287,244 @@ const Chat: React.FC = () => {
     }
   };
 
-  // 初始化：加载会话列表
+  // 初始化
   useEffect(() => {
     loadSessions();
-
-    // 定时刷新会话列表（每10秒）
     const intervalId = setInterval(() => {
       loadSessions();
-    }, 10000); // 10秒
-
-    // 清理定时器
+    }, 10000);
     return () => {
       clearInterval(intervalId);
     };
   }, []);
 
-  // 当 sessionId 变化时，加载消息历史
+  // 当 sessionId 变化时加载消息
   useEffect(() => {
     if (sessionId) {
       loadMessages(sessionId);
-
-      // 从会话列表中找到当前会话
-      const session = sessions.find(s => s.session_id === sessionId);
-      setCurrentSession(session || null);
+      // 使用函数式更新避免依赖 sessions
+      setSessions(currentSessions => {
+        const session = currentSessions.find(s => s.session_id === sessionId);
+        setCurrentSession(session || null);
+        return currentSessions;
+      });
     } else {
       setMessages([]);
       setCurrentSession(null);
     }
   }, [sessionId]);
 
+  // 格式化时间
+  const formatTime = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+
+    if (diffMins < 1) return '刚刚';
+    if (diffMins < 60) return `${diffMins}分钟前`;
+    if (diffMins < 1440) return `${Math.floor(diffMins / 60)}小时前`;
+    return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
+  };
+
   // 渲染消息气泡
-  const renderMessage = (msg: ChatMessage) => {
+  const renderMessage = (msg: ChatMessage, index: number) => {
     const isUser = msg.role === 'user';
 
     return (
       <div
         key={msg.id}
+        className={`chat-message ${isUser ? 'user-message' : 'assistant-message'}`}
         style={{
-          display: 'flex',
-          justifyContent: isUser ? 'flex-end' : 'flex-start',
-          marginBottom: 16
+          opacity: 0,
+          animation: `messageSlideIn 0.4s ease-out ${index * 0.05}s forwards`
         }}
       >
-        <div
-          style={{
-            maxWidth: '70%',
-            display: 'flex',
-            flexDirection: isUser ? 'row-reverse' : 'row',
-            gap: 8
-          }}
-        >
-          <Avatar
-            icon={isUser ? <UserOutlined /> : <RobotOutlined />}
-            style={{
-              backgroundColor: isUser ? '#1890ff' : '#52c41a',
-              flexShrink: 0
-            }}
-          />
-          <Card
-            size="small"
-            style={{
-              backgroundColor: isUser ? '#e6f7ff' : '#f0f0f0',
-              border: 'none'
-            }}
-            bodyStyle={{ padding: '12px 16px' }}
-          >
+        <div className="message-bubble-wrapper">
+          <div className={`message-avatar ${isUser ? 'user-avatar' : 'assistant-avatar'}`}>
             {isUser ? (
-              <div style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>
+              <UserOutlined />
             ) : (
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                {msg.content}
-              </ReactMarkdown>
+              <>
+                <RobotOutlined />
+                <span className="avatar-badge">OPS</span>
+              </>
             )}
-            <div style={{ fontSize: 12, color: '#999', marginTop: 8 }}>
-              {new Date(msg.created_at).toLocaleTimeString()}
+          </div>
+          <div className={`message-bubble ${isUser ? 'user-bubble' : 'assistant-bubble'}`}>
+            <div className="message-content">
+              {isUser ? (
+                <span>{msg.content}</span>
+              ) : (
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={
+                    {
+                      code: (props: any) =>
+                        props.inline || (!props.className && !props.node?.position) ? (
+                          <code className="inline-code">{props.children}</code>
+                        ) : (
+                          <pre className="code-block">
+                            <code className={props.className}>{props.children}</code>
+                          </pre>
+                        ),
+                      p: ({ children }: any) => <p>{children}</p>,
+                      ul: ({ children }: any) => <ul>{children}</ul>,
+                      ol: ({ children }: any) => <ol>{children}</ol>,
+                      li: ({ children }: any) => <li>{children}</li>,
+                      strong: ({ children }: any) => <strong>{children}</strong>,
+                      em: ({ children }: any) => <em>{children}</em>,
+                    } as Components
+                  }
+                >
+                  {msg.content}
+                </ReactMarkdown>
+              )}
             </div>
-          </Card>
+            <div className="message-time">
+              <ClockCircleOutlined />
+              {formatTime(msg.created_at)}
+            </div>
+          </div>
         </div>
       </div>
     );
   };
 
   return (
-    <Layout style={{ height: '100vh' }}>
+    <Layout className="chat-layout">
       {/* 左侧会话列表 */}
-      <Sider width={280} theme="light" style={{ borderRight: '1px solid #f0f0f0', display: 'flex', flexDirection: 'column', height: '100vh' }}>
-        <div style={{ padding: 16, flexShrink: 0 }}>
+      <Sider width={320} className="chat-sider">
+        <div className="sider-header">
+          <div className="header-title">
+            <ThunderboltOutlined />
+            <span>Ops Agent</span>
+          </div>
           <Button
             type="primary"
             icon={<PlusOutlined />}
-            block
+            className="new-chat-btn"
             onClick={handleCreateSession}
           >
             新建对话
           </Button>
         </div>
 
-        <div className="session-list-container" style={{ maxHeight: 'calc(100vh - 80px)' }}>
-        <List
-          dataSource={sessions}
-          renderItem={(session) => (
-            <List.Item
-              key={session.session_id}
-              style={{
-                padding: '12px 16px',
-                cursor: 'pointer',
-                backgroundColor: session.session_id === sessionId ? '#e6f7ff' : 'transparent'
-              }}
-              onClick={() => navigate(`/chat/${session.session_id}`)}
-              actions={
-                // 显示删除按钮的条件：
-                // 1. 管理员可以删除任何会话
-                // 2. 普通用户只能删除自己创建的 Web 会话
-                (user?.is_superuser || (session.source === 'web')) ? [
-                  <Button
-                    type="text"
-                    size="small"
-                    danger
-                    icon={<DeleteOutlined />}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDeleteSession(session.session_id);
-                    }}
-                  />
-                ] : []
-              }
-            >
-              <List.Item.Meta
-                avatar={
-                  session.source === 'feishu' ? (
-                    <WechatOutlined style={{ fontSize: 20, color: '#52c41a' }} />
+        <div className="session-list-container">
+          <List
+            dataSource={sessions}
+            renderItem={(session, index) => (
+              <div
+                key={session.session_id}
+                className={`session-item ${session.session_id === sessionId ? 'active' : ''}`}
+                style={{
+                  animation: `sessionSlideIn 0.3s ease-out ${index * 0.03}s forwards`,
+                  opacity: 0
+                }}
+                onClick={() => navigate(`/chat/${session.session_id}`)}
+              >
+                <div className="session-icon">
+                  {session.source === 'feishu' ? (
+                    <WechatOutlined className="feishu-icon" />
                   ) : (
-                    <MessageOutlined style={{ fontSize: 20 }} />
-                  )
-                }
-                title={
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span>
+                    <MessageOutlined />
+                  )}
+                </div>
+                <div className="session-content">
+                  <div className="session-title-row">
+                    <span className="session-title">
                       {session.source === 'feishu' && session.external_user_name
-                        ? `${session.external_user_name} - ${session.title || '飞书对话'}`
+                        ? session.external_user_name
                         : session.source === 'web' && session.username
-                        ? `${session.username} - ${session.title || '新对话'}`
-                        : session.title || '新对话'}\n                    </span>
+                        ? session.username
+                        : session.title || '新对话'}
+                    </span>
                     {session.source === 'feishu' && (
-                      <span style={{
-                        fontSize: 12,
-                        color: '#52c41a',
-                        backgroundColor: '#f6ffed',
-                        padding: '2px 8px',
-                        borderRadius: 4,
-                        border: '1px solid #b7eb8f'
-                      }}>
-                        飞书
-                      </span>
+                      <span className="feishu-badge">飞书</span>
                     )}
                   </div>
-                }
-                description={
-                  <div style={{ fontSize: 12, color: '#999' }}>
+                  <div className="session-preview">
                     {session.last_message || '暂无消息'}
                   </div>
-                }
-              />
-            </List.Item>
-          )}
-          locale={{ emptyText: <Empty description="暂无会话" /> }}
-        />
+                </div>
+                {(user?.is_superuser || (session.source === 'web')) && (
+                  <Tooltip title="删除会话">
+                    <Button
+                      type="text"
+                      size="small"
+                      danger
+                      icon={<DeleteOutlined />}
+                      className="delete-btn"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteSession(session.session_id);
+                      }}
+                    />
+                  </Tooltip>
+                )}
+              </div>
+            )}
+            locale={{ emptyText: <Empty description="暂无会话" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
+          />
         </div>
       </Sider>
 
       {/* 右侧聊天区域 */}
-      <Content style={{ display: 'flex', flexDirection: 'column' }}>
+      <Content className="chat-content">
         {sessionId ? (
-          <>
+          <Card
+            className="chat-card"
+            styles={{ body: { padding: 0, height: '100%', display: 'flex', flexDirection: 'column' } }}
+          >
             {/* 消息列表 */}
-            <div
-              style={{
-                flex: 1,
-                overflowY: 'auto',
-                padding: 24,
-                backgroundColor: '#fafafa'
-              }}
-            >
+            <div className="messages-container">
               {isLoading ? (
-                <div style={{ textAlign: 'center', padding: 48 }}>
+                <div className="loading-state">
                   <Spin size="large" />
+                  <p>加载对话历史...</p>
                 </div>
               ) : (
                 <>
-                  {messages.map(renderMessage)}
+                  {messages.map((msg, idx) => renderMessage(msg, idx))}
 
                   {/* 状态消息 */}
                   {isStreaming && statusMessage && !streamingContent && (
-                    <div
-                      style={{
-                        display: 'flex',
-                        justifyContent: 'flex-start',
-                        marginBottom: 16
-                      }}
-                    >
-                      <div style={{ maxWidth: '70%', display: 'flex', gap: 8 }}>
-                        <Avatar
-                          icon={<RobotOutlined />}
-                          style={{ backgroundColor: '#52c41a', flexShrink: 0 }}
-                        />
-                        <Card
-                          size="small"
-                          style={{ backgroundColor: '#e6f7ff', border: '1px solid #91d5ff' }}
-                          bodyStyle={{ padding: '12px 16px' }}
-                        >
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div className="chat-message assistant-message">
+                      <div className="message-bubble-wrapper">
+                        <div className="message-avatar assistant-avatar">
+                          <RobotOutlined />
+                          <span className="avatar-badge">OPS</span>
+                        </div>
+                        <div className="message-bubble assistant-bubble status-bubble">
+                          <div className="status-indicator">
                             <Spin size="small" />
                             <span>{statusMessage}</span>
                           </div>
-                        </Card>
+                        </div>
                       </div>
                     </div>
                   )}
 
                   {/* 流式消息 */}
                   {isStreaming && streamingContent && (
-                    <div
-                      style={{
-                        display: 'flex',
-                        justifyContent: 'flex-start',
-                        marginBottom: 16
-                      }}
-                    >
-                      <div style={{ maxWidth: '70%', display: 'flex', gap: 8 }}>
-                        <Avatar
-                          icon={<RobotOutlined />}
-                          style={{ backgroundColor: '#52c41a', flexShrink: 0 }}
-                        />
-                        <Card
-                          size="small"
-                          style={{ backgroundColor: '#f0f0f0', border: 'none' }}
-                          bodyStyle={{ padding: '12px 16px' }}
-                        >
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                            {streamingContent}
-                          </ReactMarkdown>
-                          <Spin size="small" style={{ marginLeft: 8 }} />
-                        </Card>
+                    <div className="chat-message assistant-message streaming-message">
+                      <div className="message-bubble-wrapper">
+                        <div className="message-avatar assistant-avatar">
+                          <RobotOutlined />
+                          <span className="avatar-badge">OPS</span>
+                        </div>
+                        <div className="message-bubble assistant-bubble">
+                          <div className="message-content">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                              {streamingContent}
+                            </ReactMarkdown>
+                          </div>
+                          <div className="typing-indicator">
+                            <span></span>
+                            <span></span>
+                            <span></span>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   )}
@@ -544,75 +535,78 @@ const Chat: React.FC = () => {
             </div>
 
             {/* 输入区域 */}
-            <div
-              style={{
-                padding: 16,
-                borderTop: '1px solid #f0f0f0',
-                backgroundColor: '#fff'
-              }}
-            >
+            <div className="input-container">
               {currentSession?.source === 'feishu' ? (
-                // 飞书会话只读提示
-                <div style={{
-                  textAlign: 'center',
-                  padding: '12px',
-                  backgroundColor: '#f6ffed',
-                  border: '1px solid #b7eb8f',
-                  borderRadius: 4,
-                  color: '#52c41a'
-                }}>
-                  <WechatOutlined style={{ marginRight: 8 }} />
-                  这是飞书会话，只能在飞书中回复
+                <div className="feishu-notice">
+                  <WechatOutlined />
+                  <span>这是飞书会话，请在飞书中回复</span>
                 </div>
               ) : (
-                // Web 会话输入框
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <TextArea
-                    value={inputValue}
-                    onChange={(e) => setInputValue(e.target.value)}
-                    onKeyDown={handleKeyDown}
-                    placeholder="输入消息... (Enter 发送, Shift+Enter 换行)"
-                    autoSize={{ minRows: 1, maxRows: 6 }}
-                    disabled={isStreaming}
-                    style={{ flex: 1 }}
-                  />
-                  <Button
-                    type="primary"
-                    icon={<SendOutlined />}
-                    onClick={handleSendMessage}
-                    disabled={!inputValue.trim() || isStreaming}
-                    loading={isStreaming}
-                  >
-                    发送
-                  </Button>
+                <div className="input-wrapper">
+                  <div className="input-box">
+                    <TextArea
+                      ref={inputRef}
+                      value={inputValue}
+                      onChange={(e) => setInputValue(e.target.value)}
+                      onKeyDown={handleKeyDown}
+                      placeholder="输入消息... (Enter 发送，Shift+Enter 换行)"
+                      autoSize={{ minRows: 1, maxRows: 8 }}
+                      disabled={isStreaming}
+                      className="message-input"
+                    />
+                    <div className="input-actions">
+                      <span className="input-hint">
+                        {inputValue.length > 0 && `${inputValue.length} 字符`}
+                      </span>
+                      <Button
+                        type="primary"
+                        icon={<SendOutlined />}
+                        onClick={handleSendMessage}
+                        disabled={!inputValue.trim() || isStreaming}
+                        loading={isStreaming}
+                        className="send-btn"
+                      >
+                        发送
+                      </Button>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
-          </>
+          </Card>
         ) : (
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              height: '100%'
-            }}
-          >
+          <Card className="chat-card empty-card">
             <Empty
-              description="请选择或创建一个会话"
-              image={Empty.PRESENTED_IMAGE_SIMPLE}
+              description={
+                <div className="empty-description">
+                  <RobotOutlined className="empty-icon" />
+                  <h3>欢迎使用 Ops Agent</h3>
+                  <p>选择一个会话或创建新对话开始</p>
+                </div>
+              }
+              image={null}
             >
-              <Button type="primary" icon={<PlusOutlined />} onClick={handleCreateSession}>
+              <Button
+                type="primary"
+                icon={<PlusOutlined />}
+                onClick={handleCreateSession}
+                className="create-first-btn"
+              >
                 创建新对话
               </Button>
             </Empty>
-          </div>
+          </Card>
         )}
       </Content>
 
       {/* 批准请求 Modal */}
       <Modal
-        title="📋 命令执行确认"
+        title={
+          <div className="approval-modal-title">
+            <CheckCircleOutlined />
+            <span>命令执行确认</span>
+          </div>
+        }
         open={approvalRequest !== null}
         onOk={() => handleApprovalDecision(true)}
         onCancel={() => handleApprovalDecision(false)}
@@ -620,26 +614,31 @@ const Chat: React.FC = () => {
         cancelText="❌ 拒绝执行"
         width={700}
         maskClosable={false}
+        className="approval-modal"
       >
         {approvalRequest && (
-          <div>
-            <div style={{ marginBottom: 16, whiteSpace: 'pre-wrap' }}>
-              {approvalRequest.message}
-            </div>
+          <div className="approval-content">
+            <div className="approval-message">{approvalRequest.message}</div>
             {approvalRequest.commands && approvalRequest.commands.length > 0 && (
-              <div>
-                <div style={{ fontWeight: 'bold', marginBottom: 8 }}>计划执行的命令：</div>
-                <div style={{ background: '#f5f5f5', padding: 12, borderRadius: 4 }}>
+              <div className="approval-commands">
+                <div className="commands-header">
+                  <ThunderboltOutlined />
+                  <span>计划执行的命令</span>
+                </div>
+                <div className="commands-list">
                   {approvalRequest.commands.map((cmd, idx) => (
-                    <div key={idx} style={{ marginBottom: 8 }}>
-                      <div style={{ fontWeight: 'bold' }}>
-                        {idx + 1}. {cmd.type}: {cmd.action}
+                    <div key={idx} className="command-item">
+                      <div className="command-number">{idx + 1}</div>
+                      <div className="command-details">
+                        <div className="command-type">{cmd.type}</div>
+                        <div className="command-action">{cmd.action}</div>
+                        {cmd.reason && (
+                          <div className="command-reason">
+                            <span>💡 </span>
+                            {cmd.reason}
+                          </div>
+                        )}
                       </div>
-                      {cmd.reason && (
-                        <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
-                          💡 {cmd.reason}
-                        </div>
-                      )}
                     </div>
                   ))}
                 </div>

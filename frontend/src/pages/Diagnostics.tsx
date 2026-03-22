@@ -9,12 +9,28 @@ import { workflowAPI } from '@/api/workflow';
 import { feishuAPI } from '@/api/feishu';
 import { llmAPI, LLMTestResponse } from '@/api/llm';
 
+// 健康状态类型定义
+interface HealthStatus {
+  status: string;
+  version: string;
+  environment: string;
+  [key: string]: any;
+}
+
+// 飞书状态类型定义
+interface FeishuStatus {
+  enabled: boolean;
+  connection_mode?: string;
+  healthy?: boolean;
+  [key: string]: any;
+}
+
 export const Diagnostics: React.FC = () => {
-  const [healthStatus, setHealthStatus] = useState<any>(null);
+  const [healthStatus, setHealthStatus] = useState<HealthStatus | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
   const [healthLoading, setHealthLoading] = useState(false);
 
-  const [feishuStatus, setFeishuStatus] = useState<any>(null);
+  const [feishuStatus, setFeishuStatus] = useState<FeishuStatus | null>(null);
   const [feishuError, setFeishuError] = useState<string | null>(null);
   const [feishuLoading, setFeishuLoading] = useState(false);
 
@@ -28,8 +44,8 @@ export const Diagnostics: React.FC = () => {
     try {
       const data = await workflowAPI.getHealth();
       setHealthStatus(data);
-    } catch (error: any) {
-      setHealthError(error.message || '请求失败');
+    } catch (error: unknown) {
+      setHealthError(error instanceof Error ? error.message : '请求失败');
       console.error('Health check error:', error);
     } finally {
       setHealthLoading(false);
@@ -55,7 +71,7 @@ export const Diagnostics: React.FC = () => {
     try {
       const result = await llmAPI.test({ provider });
       setLlmResults({ ...llmResults, [provider]: result });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error(`LLM test error for ${provider}:`, error);
       setLlmResults({
         ...llmResults,
@@ -63,7 +79,7 @@ export const Diagnostics: React.FC = () => {
           success: false,
           provider,
           model: 'unknown',
-          error: error.message || '请求失败',
+          error: error instanceof Error ? error.message : '请求失败',
         },
       });
     } finally {

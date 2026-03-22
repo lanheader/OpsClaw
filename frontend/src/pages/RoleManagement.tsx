@@ -10,10 +10,10 @@ import {
   message,
   Popconfirm,
   Tag,
-  Typography,
   Checkbox,
   Divider,
-  Alert
+  Alert,
+  Card
 } from 'antd';
 import {
   PlusOutlined,
@@ -31,7 +31,6 @@ import {
 } from '../api/roles';
 import { usePermission } from '../contexts/PermissionContext';
 
-const { Title } = Typography;
 const { TextArea } = Input;
 
 export const RoleManagement: React.FC = () => {
@@ -282,25 +281,28 @@ export const RoleManagement: React.FC = () => {
   ];
 
   return (
-    <div>
-      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Title level={3} style={{ margin: 0 }}>角色管理</Title>
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={() => setIsCreateModalOpen(true)}
-        >
-          创建角色
-        </Button>
-      </div>
-
-      <Table
-        columns={columns}
-        dataSource={roles}
+    <Space direction="vertical" size="large" style={{ width: '100%' }}>
+      <Card
+        title="角色管理"
+        extra={
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={() => setIsCreateModalOpen(true)}
+          >
+            创建角色
+          </Button>
+        }
+      >
+        <Table
+          columns={columns}
+          dataSource={roles}
         rowKey="id"
         loading={isLoading}
+        scroll={{ x: 'max-content' }}
         pagination={{ pageSize: 10 }}
       />
+      </Card>
 
       {/* Create Role Modal */}
       <Modal
@@ -383,7 +385,7 @@ export const RoleManagement: React.FC = () => {
         confirmLoading={updatePermissionsMutation.isPending}
         width={700}
       >
-        <div style={{ maxHeight: '60vh', overflowY: 'auto' }}>
+        <div style={{ maxHeight: 'calc(80vh - 200px)', overflowY: 'auto' }}>
           {Object.entries(groupedPermissions).map(([category, permissions]) => (
             <div key={category} style={{ marginBottom: 24 }}>
               <Divider orientation="left">
@@ -417,6 +419,6 @@ export const RoleManagement: React.FC = () => {
           ))}
         </div>
       </Modal>
-    </div>
+    </Space>
   );
 };

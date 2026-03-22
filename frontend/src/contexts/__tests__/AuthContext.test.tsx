@@ -72,6 +72,7 @@ describe('AuthContext', () => {
         created_at: '2024-01-01',
         updated_at: '2024-01-01',
         last_login_at: null,
+        feishu_user_id: null,
       };
 
       vi.mocked(authUtils.getToken).mockReturnValue('test-token');
@@ -104,6 +105,7 @@ describe('AuthContext', () => {
         created_at: '2024-01-01',
         updated_at: '2024-01-01',
         last_login_at: null,
+        feishu_user_id: null,
       };
 
       const mockLoginResponse = {
@@ -148,6 +150,7 @@ describe('AuthContext', () => {
         created_at: '2024-01-01',
         updated_at: '2024-01-01',
         last_login_at: null,
+        feishu_user_id: null,
       };
 
       vi.mocked(authUtils.getToken).mockReturnValue('test-token');

@@ -84,10 +84,11 @@ async def execute_workflow(
         )
 
         # 2. 初始化状态
+        session_id = f"workflow_{current_user.id}"
         state: OpsState = {
             "user_id": str(current_user.id),
             "user_role": "admin" if current_user.is_superuser else "user",
-            "session_id": f"workflow_{current_user.id}",
+            "session_id": session_id,
             "user_input": request.user_input,
             "trigger_source": request.trigger_source,
             "workflow_status": "running",
@@ -105,8 +106,15 @@ async def execute_workflow(
             "execution_history": [],
         }
 
+        # 【重要】LangGraph checkpointer 需要 config 中的 thread_id
+        config = {
+            "configurable": {
+                "thread_id": session_id
+            }
+        }
+
         # 3. 执行 Agent (同步)
-        result = await agent.ainvoke(state)
+        result = await agent.ainvoke(state, config=config)
 
         # 4. 返回结果
         return WorkflowExecuteResponse(

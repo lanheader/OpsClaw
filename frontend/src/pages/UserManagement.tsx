@@ -13,7 +13,8 @@ import {
   Tag,
   Typography,
   Checkbox,
-  Spin
+  Spin,
+  Card
 } from 'antd';
 import {
   PlusOutlined,
@@ -28,8 +29,6 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { usersApi, type UserCreateRequest, type UserUpdateRequest, type UserRole } from '../api/users';
 import { rolesApi, type Role } from '../api/roles';
 import type { User } from '../api/auth';
-
-const { Title } = Typography;
 
 export const UserManagement: React.FC = () => {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -342,25 +341,28 @@ export const UserManagement: React.FC = () => {
   ];
 
   return (
-    <div>
-      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Title level={3} style={{ margin: 0 }}>用户管理</Title>
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={() => setIsCreateModalOpen(true)}
-        >
-          创建用户
-        </Button>
-      </div>
-
-      <Table
-        columns={columns}
-        dataSource={users}
-        rowKey="id"
-        loading={isLoading}
-        pagination={{ pageSize: 10 }}
-      />
+    <Space direction="vertical" size="large" style={{ width: '100%' }}>
+      <Card
+        title="用户管理"
+        extra={
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={() => setIsCreateModalOpen(true)}
+          >
+            创建用户
+          </Button>
+        }
+      >
+        <Table
+          columns={columns}
+          dataSource={users}
+          rowKey="id"
+          loading={isLoading}
+          scroll={{ x: 'max-content' }}
+          pagination={{ pageSize: 10 }}
+        />
+      </Card>
 
       {/* Create User Modal */}
       <Modal
@@ -497,7 +499,7 @@ export const UserManagement: React.FC = () => {
             </Typography.Text>
           </div>
           {allRoles && allRoles.length > 0 ? (
-            <div style={{ maxHeight: 400, overflowY: 'auto' }}>
+            <div style={{ maxHeight: 'calc(70vh - 150px)', overflowY: 'auto' }}>
               {allRoles.map((role: Role) => (
                 <div
                   key={role.id}
@@ -534,6 +536,6 @@ export const UserManagement: React.FC = () => {
           )}
         </Spin>
       </Modal>
-    </div>
+    </Space>
   );
 };

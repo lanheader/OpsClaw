@@ -48,7 +48,7 @@ export const Dashboard: React.FC = () => {
     <Space direction="vertical" size="large" style={{ width: '100%' }}>
       {/* 统计卡片 */}
       <Row gutter={16}>
-        <Col span={6}>
+        <Col xs={24} sm={12} md={6} lg={6}>
           <Card>
             <Statistic
               title="总工作流数"
@@ -58,7 +58,7 @@ export const Dashboard: React.FC = () => {
             />
           </Card>
         </Col>
-        <Col span={6}>
+        <Col xs={24} sm={12} md={6} lg={6}>
           <Card>
             <Statistic
               title="执行中"
@@ -68,7 +68,7 @@ export const Dashboard: React.FC = () => {
             />
           </Card>
         </Col>
-        <Col span={6}>
+        <Col xs={24} sm={12} md={6} lg={6}>
           <Card>
             <Statistic
               title="成功完成"
@@ -78,7 +78,7 @@ export const Dashboard: React.FC = () => {
             />
           </Card>
         </Col>
-        <Col span={6}>
+        <Col xs={24} sm={12} md={6} lg={6}>
           <Card>
             <Statistic
               title="执行失败"
@@ -92,7 +92,7 @@ export const Dashboard: React.FC = () => {
 
       {/* 系统状态 */}
       <Row gutter={16}>
-        <Col span={12}>
+        <Col xs={24} sm={24} md={12} lg={12}>
           <Card
             title="系统健康状态"
             loading={healthLoading}
@@ -113,7 +113,7 @@ export const Dashboard: React.FC = () => {
           </Card>
         </Col>
 
-        <Col span={12}>
+        <Col xs={24} sm={24} md={12} lg={12}>
           <Card
             title="飞书集成状态"
             extra={

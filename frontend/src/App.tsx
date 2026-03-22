@@ -27,6 +27,7 @@ import { RoleManagement } from './pages/RoleManagement';
 import { ApprovalConfigManagement } from './pages/ApprovalConfigManagement';
 import SystemSettings from './pages/SystemSettings';
 import Chat from './pages/Chat';
+import Profile from './pages/Profile';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { PermissionProvider, usePermission } from './contexts/PermissionContext';
 import { PrivateRoute } from './components/PrivateRoute';
@@ -59,6 +60,7 @@ const AppLayout: React.FC = () => {
       key: 'profile',
       icon: <UserOutlined />,
       label: '个人信息',
+      onClick: () => navigate('/profile'),
     },
     {
       type: 'divider' as const,
@@ -134,7 +136,7 @@ const AppLayout: React.FC = () => {
       <Header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#001529' }}>
         <div style={{ display: 'flex', alignItems: 'center' }}>
           <div style={{ color: 'white', fontSize: 20, fontWeight: 'bold', marginRight: 40 }}>
-            🤖 Ops Agent v2.0
+            🤖 Ops Agent v3.0
           </div>
           <Title level={5} style={{ color: 'white', margin: 0 }}>
             智能运维管理平台
@@ -158,15 +160,16 @@ const AppLayout: React.FC = () => {
             items={menuItems}
           />
         </Sider>
-        <Layout style={{ padding: '24px' }}>
-          <Content
-            style={{
-              padding: 24,
-              margin: 0,
-              minHeight: 280,
-              background: '#fff',
-            }}
-          >
+        <Content
+          style={{
+            margin: 0,
+            minHeight: 280,
+            background: '#fff',
+          }}
+        >
+          <div className={location.pathname.startsWith('/chat') ? 'content-no-padding' : ''} style={{
+            padding: location.pathname.startsWith('/chat') ? 0 : 24,
+          }}>
             <Routes>
               <Route path="/" element={<Dashboard />} />
               <Route path="/execute" element={<WorkflowExecute />} />
@@ -178,10 +181,11 @@ const AppLayout: React.FC = () => {
               <Route path="/users" element={<UserManagement />} />
               <Route path="/roles" element={<RoleManagement />} />
               <Route path="/approval-config" element={<ApprovalConfigManagement />} />
+              <Route path="/profile" element={<Profile />} />
               <Route path="/settings" element={<SystemSettings />} />
             </Routes>
-          </Content>
-        </Layout>
+          </div>
+        </Content>
       </Layout>
     </Layout>
   );

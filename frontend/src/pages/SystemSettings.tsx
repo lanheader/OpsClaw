@@ -18,7 +18,7 @@ import { SaveOutlined, ReloadOutlined, ApiOutlined, CheckCircleOutlined, CloseCi
 import { settingsApi, GroupedSettings, SystemSetting } from '../api/settings';
 import { integrationsAPI, IntegrationTestResponse } from '../api/integrations';
 
-const { Title, Text } = Typography;
+const { Text } = Typography;
 const { TabPane } = Tabs;
 const { TextArea } = Input;
 
@@ -283,9 +283,29 @@ const SystemSettings: React.FC = () => {
   }
 
   return (
-    <div style={{ padding: '24px' }}>
-      <Card>
-        <Title level={2}>系统设置</Title>
+    <Space direction="vertical" size="large" style={{ width: '100%' }}>
+      <Card
+        title="系统设置"
+        extra={
+          <Space>
+            <Button
+              icon={<ReloadOutlined />}
+              onClick={handleReset}
+              disabled={saving}
+            >
+              重置
+            </Button>
+            <Button
+              type="primary"
+              icon={<SaveOutlined />}
+              loading={saving}
+              onClick={handleSave}
+            >
+              保存设置
+            </Button>
+          </Space>
+        }
+      >
         <Text type="secondary">
           配置系统的运行时参数，修改后点击保存按钮即可立即生效，无需重启服务。
         </Text>
@@ -315,29 +335,9 @@ const SystemSettings: React.FC = () => {
               </TabPane>
             ))}
           </Tabs>
-
-          <Divider />
-
-          <Space>
-            <Button
-              type="primary"
-              icon={<SaveOutlined />}
-              loading={saving}
-              onClick={handleSave}
-            >
-              保存设置
-            </Button>
-            <Button
-              icon={<ReloadOutlined />}
-              onClick={handleReset}
-              disabled={saving}
-            >
-              重置
-            </Button>
-          </Space>
         </Form>
       </Card>
-    </div>
+    </Space>
   );
 };
 
