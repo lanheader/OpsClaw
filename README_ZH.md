@@ -2,7 +2,7 @@
 
 <div align="center">
 
-**Intelligent Operations Automation Platform - Powered by DeepAgents Framework**
+**智能运维自动化平台 - 基于 DeepAgents 框架**
 
 [![Python Version](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
 [![DeepAgents](https://img.shields.io/badge/DeepAgents-latest-green)](https://github.com/langchain-ai/deepagents)
@@ -10,191 +10,189 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688)](https://fastapi.tiangolo.com/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-English | [简体中文](README.md)
+[English](README.md) | 简体中文
 
 </div>
 
 ---
 
-## 📖 Project Overview
+## 📖 项目简介
 
-**Current Version**: v3.0.0 | **Tools**: 24 tools across 6 groups | **Subagents**: 6 specialized agents
+Ops Agent 是一个基于 **DeepAgents 框架**的智能运维自动化平台，通过主智能体和多个专业化子智能体协同工作，实现从监控、诊断到自愈的全流程自动化。
 
-Ops Agent is an intelligent operations automation platform built on the **DeepAgents Framework**. It achieves full-process automation from monitoring, diagnosis to self-healing through the collaboration of a main agent and multiple specialized sub-agents.
+**当前版本**: v3.0.0 | **工具数量**: 24 个 | **子智能体**: 6 个
 
-### ✨ Key Features
+### ✨ 核心特性
 
-- 🤖 **DeepAgents Architecture**: Main agent + 6 specialized sub-agents working together
-- 🎯 **Intelligent Task Planning**: Automatic decomposition of complex tasks using `write_todos`
-- 🔄 **Sub-agent Delegation**: Delegate professional tasks via `task()` tool
-- 🛡️ **Tool Fallback Mechanism**: SDK first, automatically fallback to CLI tools (24 tools, 6 groups)
-- 🔒 **Dynamic Permissions**: Tool permissions auto-discovered, 11 fine-grained permissions
-- 🔐 **Middleware Architecture**: Approval process, security audit, intelligent routing
-- 📊 **Multi-channel Access**: Support for Web UI and Feishu integration
-- 🧠 **Session Memory**: Support for multi-turn conversations and context memory
-- 🔐 **Access Control**: RBAC permission management and user authentication
+- 🤖 **DeepAgents 架构**: 主智能体 + 6 个专业子智能体协同工作
+- 🎯 **智能任务规划**: 使用 `write_todos` 自动分解复杂任务
+- 🔄 **子智能体委派**: 通过 `task()` 工具委派专业任务
+- 🛡️ **工具降级机制**: SDK 优先，自动降级到命令行工具（24 个工具，6 个分组）
+- 🔐 **中间件架构**: 批准流程、安全审核、智能路由
+- 📊 **多渠道接入**: 支持 Web UI 和飞书集成
+- 🧠 **会话记忆**: 支持多轮对话和上下文记忆
+- 🔒 **动态权限**: 工具权限自动发现，11 个细粒度权限
 
-### 🎯 Three Core Scenarios
+### 🎯 三大核心场景
 
-1. **Interactive Cluster Status Query** 🔍 - Query K8s cluster real-time status via natural language
-2. **Scheduled Inspection Reports** 📅 - Automatically execute cluster inspections on schedule and generate health reports
-3. **Alert Automatic Diagnosis and Handling** 🚨 - Receive monitoring alerts, automatically diagnose and provide remediation plans
+1. **交互式集群状态查询** 🔍 - 通过自然语言查询 K8s 集群实时状态
+2. **定时巡检报告** 📅 - 按计划自动执行集群巡检，生成健康报告
+3. **告警自动诊断与处理** 🚨 - 接收监控告警，自动诊断并提供修复方案
 
 ---
 
-## 🚀 Quick Start
+## 🚀 快速开始
 
-### Method 1: Local Development Environment
+### 方式一：本地开发环境
 
-#### 1. Prerequisites
+#### 1. 环境要求
 
 - Python 3.11+
 - Node.js 18+
-- UV (Python package manager)
+- UV (Python 包管理器)
 
-#### 2. Clone Project
+#### 2. 克隆项目
 
 ```bash
 git clone https://github.com/your-org/ops-agent-langgraph.git
 cd ops-agent-langgraph
 ```
 
-#### 3. Install Dependencies
+#### 3. 安装依赖
 
 ```bash
-# Install Python dependencies using UV (recommended)
+# 使用 UV 安装 Python 依赖（推荐）
 uv sync
 
-# Or use pip
+# 或使用 pip
 pip install -e .
 ```
 
-#### 4. Configure Environment Variables
+#### 4. 配置环境变量
 
 ```bash
-# Copy environment variable example
+# 复制环境变量示例
 cp .env.example .env
 
-# Edit .env to configure necessary parameters
+# 编辑 .env，配置必要的参数
 vim .env
 ```
 
-**Minimum Configuration**:
+**最小配置**：
 ```bash
-# LLM Configuration (required)
+# LLM 配置（必须）
 DEFAULT_LLM_PROVIDER=zhipu
 ZHIPU_API_KEY=your_key_here
 
-# Database (required)
+# 数据库（必须）
 DATABASE_URL=sqlite:///./data/ops_agent_v2.db
 
-# JWT Secret (required, change in production)
+# JWT 密钥（必须，生产环境请修改）
 JWT_SECRET_KEY=your-secret-key-here-change-in-production
 ```
 
-#### 5. Initialize Database
+#### 5. 初始化数据库
 
 ```bash
-# Create data directory
+# 创建数据目录
 mkdir -p data
 
-# Initialize database (includes RBAC tables and initial admin account)
+# 初始化数据库（包含 RBAC 表和初始管理员账号）
 uv run python scripts/init_auth_db.py
 ```
 
-#### 6. Start Services
+#### 6. 启动服务
 
 ```bash
-# Start backend service
+# 启动后端服务
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
-# Start frontend service (new terminal)
+# 启动前端服务（新终端）
 cd frontend
 npm install
 npm run dev
 ```
 
-#### 7. Access Application
+#### 7. 访问应用
 
 - **Web UI**: http://localhost:5173
-- **API Docs**: http://localhost:8000/docs
-- **Default Account**: `admin` / `admin123`
+- **API 文档**: http://localhost:8000/docs
+- **默认账号**: `admin` / `admin123`
 
 ---
 
-### Method 2: Docker Deployment (Recommended for Production)
+### 方式二：Docker 部署（推荐生产环境）
 
-#### 1. Create Dockerfile
+#### 1. 创建 Dockerfile
 
-Create `Dockerfile` in project root:
+在项目根目录创建 `Dockerfile`：
 
 ```dockerfile
-# Multi-stage build - Frontend build stage
+# 多阶段构建 - 前端构建阶段
 FROM node:18-alpine AS frontend-builder
 
 WORKDIR /app/frontend
 
-# Copy frontend dependency files
+# 复制前端依赖文件
 COPY frontend/package*.json ./
 
-# Install frontend dependencies
+# 安装前端依赖
 RUN npm ci
 
-# Copy frontend source
+# 复制前端源码
 COPY frontend/ ./
 
-# Build frontend
+# 构建前端
 RUN npm run build
 
-# Multi-stage build - Backend runtime stage
+# 多阶段构建 - 后端运行阶段
 FROM python:3.11-slim
 
-# Set working directory
+# 设置工作目录
 WORKDIR /app
 
-# Install system dependencies
+# 安装系统依赖
 RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install UV
+# 安装 UV
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.cargo/bin:$PATH"
 
-# Copy project files
+# 复制项目文件
 COPY pyproject.toml uv.lock ./
 COPY app/ ./app/
 COPY scripts/ ./scripts/
 COPY config/ ./config/
 COPY .env.example ./.env
 
-# Install Python dependencies
+# 安装 Python 依赖
 RUN uv sync --frozen
 
-# Copy frontend build artifacts
+# 复制前端构建产物
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 
-# Create data directory
+# 创建数据目录
 RUN mkdir -p /app/data
 
-# Expose port
+# 暴露端口
 EXPOSE 8000
 
-# Health check
+# 健康检查
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Start command
+# 启动命令
 CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 ```
 
-#### 2. Create docker-compose.yml
+#### 2. 创建 docker-compose.yml
 
-Create `docker-compose.yml` in project root:
+在项目根目录创建 `docker-compose.yml`：
 
 ```yaml
-# Note: version field is optional in modern docker-compose
-version: '3.8'
+version: '3.8'  # Docker Compose 格式版本（非项目版本）
 
 services:
   ops-agent:
@@ -205,48 +203,48 @@ services:
     ports:
       - "8000:8000"
     environment:
-      # LLM Configuration
+      # LLM 配置
       - DEFAULT_LLM_PROVIDER=${DEFAULT_LLM_PROVIDER:-zhipu}
       - ZHIPU_API_KEY=${ZHIPU_API_KEY}
       - ZHIPU_MODEL=${ZHIPU_MODEL:-glm-4}
 
-      # Database
+      # 数据库
       - DATABASE_URL=sqlite:///./data/ops_agent_v2.db
 
       # JWT
       - JWT_SECRET_KEY=${JWT_SECRET_KEY}
 
-      # Feishu Configuration (optional)
+      # 飞书配置（可选）
       - FEISHU_ENABLED=${FEISHU_ENABLED:-false}
       - FEISHU_APP_ID=${FEISHU_APP_ID}
       - FEISHU_APP_SECRET=${FEISHU_APP_SECRET}
 
-      # K8s Configuration (optional)
+      # K8s 配置（可选）
       - K8S_ENABLED=${K8S_ENABLED:-false}
       - KUBECONFIG=/app/.kube/config
 
-      # Prometheus Configuration (optional)
+      # Prometheus 配置（可选）
       - PROMETHEUS_ENABLED=${PROMETHEUS_ENABLED:-false}
       - PROMETHEUS_URL=${PROMETHEUS_URL}
 
-      # Loki Configuration (optional)
+      # Loki 配置（可选）
       - LOKI_ENABLED=${LOKI_ENABLED:-false}
       - LOKI_URL=${LOKI_URL}
 
-      # Security Configuration
+      # 安全配置
       - SECURITY_ENVIRONMENT=${SECURITY_ENVIRONMENT:-production}
 
-      # API Configuration
+      # API 配置
       - ENABLE_DOCS=${ENABLE_DOCS:-false}
       - ENABLE_CORS=${ENABLE_CORS:-true}
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:5173}
 
     volumes:
-      # Persistent data
+      # 持久化数据
       - ./data:/app/data
-      # K8s configuration (if needed)
+      # K8s 配置（如果需要）
       - ~/.kube:/app/.kube:ro
-      # Security policy configuration
+      # 安全策略配置
       - ./config:/app/config:ro
 
     restart: unless-stopped
@@ -266,9 +264,9 @@ networks:
     driver: bridge
 ```
 
-#### 3. Create .dockerignore
+#### 3. 创建 .dockerignore
 
-Create `.dockerignore` in project root:
+在项目根目录创建 `.dockerignore`：
 
 ```
 # Python
@@ -297,7 +295,7 @@ wheels/
 .installed.cfg
 *.egg
 
-# Tests and coverage
+# 测试和覆盖率
 .pytest_cache/
 .coverage
 htmlcov/
@@ -311,22 +309,22 @@ htmlcov/
 *.swo
 *~
 
-# Environment variables
+# 环境变量
 .env
 .env.local
 .env.*.local
 
-# Database
+# 数据库
 *.db
 *.sqlite
 *.sqlite3
 data/
 
-# Logs
+# 日志
 *.log
 logs/
 
-# Frontend
+# 前端
 frontend/node_modules/
 frontend/dist/
 frontend/.next/
@@ -336,59 +334,59 @@ frontend/out/
 .git/
 .gitignore
 
-# Documentation
+# 文档
 docs/
 *.md
 !README.md
 
-# Others
+# 其他
 .DS_Store
 *.bak
 *.tmp
 ```
 
-#### 4. Build and Start
+#### 4. 构建和启动
 
 ```bash
-# Build image
+# 构建镜像
 docker-compose build
 
-# Start service
+# 启动服务
 docker-compose up -d
 
-# View logs
+# 查看日志
 docker-compose logs -f
 
-# Stop service
+# 停止服务
 docker-compose down
 ```
 
-#### 5. Initialize Database (First Start)
+#### 5. 初始化数据库（首次启动）
 
 ```bash
-# Enter container
+# 进入容器
 docker-compose exec ops-agent bash
 
-# Initialize database
+# 初始化数据库
 uv run python scripts/init_auth_db.py
 
-# Exit container
+# 退出容器
 exit
 ```
 
-#### 6. Access Application
+#### 6. 访问应用
 
 - **Web UI**: http://localhost:8000
-- **API Docs**: http://localhost:8000/docs (set `ENABLE_DOCS=true` in .env)
-- **Default Account**: `admin` / `admin123`
+- **API 文档**: http://localhost:8000/docs（需要在 .env 中设置 `ENABLE_DOCS=true`）
+- **默认账号**: `admin` / `admin123`
 
 ---
 
-### Method 3: Kubernetes Deployment
+### 方式三：Kubernetes 部署
 
-#### 1. Create Kubernetes Deployment File
+#### 1. 创建 Kubernetes 部署文件
 
-Create `k8s/deployment.yaml`:
+创建 `k8s/deployment.yaml`：
 
 ```yaml
 apiVersion: v1
@@ -535,154 +533,154 @@ spec:
               number: 8000
 ```
 
-#### 2. Deploy to Kubernetes
+#### 2. 部署到 Kubernetes
 
 ```bash
-# Build and push image
+# 构建并推送镜像
 docker build -t your-registry/ops-agent:latest .
 docker push your-registry/ops-agent:latest
 
-# Apply Kubernetes configuration
+# 应用 Kubernetes 配置
 kubectl apply -f k8s/deployment.yaml
 
-# View deployment status
+# 查看部署状态
 kubectl get pods -n ops-agent
 
-# View logs
+# 查看日志
 kubectl logs -f -n ops-agent deployment/ops-agent
 
-# Initialize database (first deployment)
+# 初始化数据库（首次部署）
 kubectl exec -it -n ops-agent deployment/ops-agent -- uv run python scripts/init_auth_db.py
 ```
 
 ---
 
-## 🏗️ System Architecture
+## 🏗️ 系统架构
 
-### DeepAgents Architecture Diagram
+### DeepAgents 架构图
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                      User Layer                                 │
-│                  Web UI / Feishu / API / Webhook                   │
+│                      用户层 (User Layer)                         │
+│                  Web UI / 飞书 / API / Webhook                   │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
-│              Main Agent Layer                                    │
+│              主智能体层 (Main Agent Layer)                        │
 │                                                                  │
 │  ┌────────────────────────────────────────────────────────┐    │
-│  │         DeepAgents Main Agent                            │    │
+│  │         DeepAgents Main Agent (主智能体)                │    │
 │  │                                                          │    │
-│  │  🎯 Core Capabilities:                                  │    │
-│  │  • write_todos: Task planning and decomposition          │    │
-│  │  • task(subagent, task): Delegate tasks to sub-agents   │    │
-│  │  • request_approval(action): Request user approval       │    │
-│  │  • Intelligent routing: Decide workflow based on intent │    │
+│  │  🎯 核心能力:                                            │    │
+│  │  • write_todos: 任务规划和分解                          │    │
+│  │  • task(subagent, task): 委派任务给子智能体             │    │
+│  │  • request_approval(action): 请求用户批准               │    │
+│  │  • 智能路由: 根据意图和上下文决策工作流                 │    │
 │  └────────────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
-│                Middleware Layer                                  │
+│                中间件层 (Middleware Layer)                        │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐         │
 │  │  Approval    │  │  Security    │  │  Routing     │         │
 │  │  Middleware  │  │  Middleware  │  │  Middleware  │         │
-│  │  (Approval)  │  │  (Security)  │  │  (Routing)   │         │
+│  │  (批准流程)  │  │  (安全审核)  │  │  (智能路由)  │         │
 │  └──────────────┘  └──────────────┘  └──────────────┘         │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
-│              Subagents Layer                                     │
+│              子智能体层 (Subagents Layer)                         │
 │                                                                  │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐         │
 │  │ intent-agent │  │  data-agent  │  │analyze-agent │         │
-│  │  (Intent)    │  │  (Data)      │  │  (Analysis)  │         │
+│  │  (意图识别)  │  │  (数据采集)  │  │  (分析决策)  │         │
 │  └──────────────┘  └──────────────┘  └──────────────┘         │
 │                                                                  │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐         │
 │  │execute-agent │  │ report-agent │  │ format-agent │         │
-│  │  (Execute)   │  │  (Report)    │  │  (Format)    │         │
+│  │  (执行操作)  │  │  (报告生成)  │  │  (响应格式化)│         │
 │  └──────────────┘  └──────────────┘  └──────────────┘         │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
-│                    Tools Layer                                   │
+│                    工具层 (Tools Layer)                          │
 │  K8s Tools / Prometheus Tools / Loki Tools / Command Executor   │
-│  (All tools support SDK first, auto fallback to CLI)            │
+│  (所有工具支持 SDK 优先，自动降级到 CLI)                         │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-For detailed architecture documentation, see [DeepAgents Architecture Design](./docs/DEEPAGENTS_ARCHITECTURE_DESIGN.md).
+详细架构说明请查看 [DeepAgents 架构设计文档](./docs/DEEPAGENTS_ARCHITECTURE_DESIGN.md)。
 
 ---
 
-## 📦 Tech Stack
+## 📦 技术栈
 
-### Backend
+### 后端
 
-- **Framework**: FastAPI 0.115+
-- **AI Framework**: DeepAgents + LangGraph + LangChain
-- **Database**: SQLAlchemy 2.0 + SQLite
-- **Authentication**: JWT + Passlib
-- **LLM**: OpenAI / Claude / Zhipu AI / Ollama
+- **框架**: FastAPI 0.115+
+- **AI 框架**: DeepAgents + LangGraph + LangChain
+- **数据库**: SQLAlchemy 2.0 + SQLite
+- **认证**: JWT + Passlib
+- **LLM**: OpenAI / Claude / 智谱 AI / Ollama
 
-### Frontend
+### 前端
 
-- **Framework**: React 18 + TypeScript
-- **UI Library**: Ant Design 5
-- **State Management**: React Query
-- **Build Tool**: Vite
+- **框架**: React 18 + TypeScript
+- **UI 库**: Ant Design 5
+- **状态管理**: React Query
+- **构建工具**: Vite
 
-### Integrations
+### 集成
 
-- **Feishu**: lark-oapi SDK (long connection mode)
+- **飞书**: lark-oapi SDK（长连接模式）
 - **Kubernetes**: kubernetes Python SDK
 - **Prometheus**: prometheus-api-client
 - **Loki**: HTTP API
 
 ---
 
-## 📚 Documentation
+## 📚 文档
 
-### Core Documentation
+### 核心文档
 
-- **[📖 Complete Project Documentation](./PROJECT_DOCUMENTATION.md)** - Complete details on all features, architecture, API, deployment, etc.
-- **[📑 Documentation Index](./DOCUMENTATION_INDEX.md)** - Categorized index of all documentation
-- **[🤖 Claude Guide](./CLAUDE.md)** - Claude Code project guide
+- **[📖 项目完整文档](./PROJECT_DOCUMENTATION.md)** - 包含所有功能、架构、API、部署等详细说明
+- **[📑 文档索引](./DOCUMENTATION_INDEX.md)** - 所有文档的分类索引
+- **[🤖 Claude 指南](./CLAUDE.md)** - Claude Code 项目指南
 
-### Feature Documentation
+### 功能文档
 
-- **[🔧 Tool Fallback Mechanism](./docs/TOOL_FALLBACK_SUMMARY.md)** - SDK first, auto fallback to command line
-- **[✅ User Approval Flow](./docs/APPROVAL_FLOW_IMPLEMENTATION_SUMMARY.md)** - Pause after command planning waiting for approval
-- **[🔗 Feishu Integration](./docs/FEISHU_INTEGRATION.md)** - Feishu long connection and card interaction
-- **[💬 Web Chat Integration](./docs/WEB_CHAT_AGENT_INTEGRATION.md)** - Web UI streaming conversation
+- **[🔧 工具降级机制](./docs/TOOL_FALLBACK_SUMMARY.md)** - SDK 优先，自动降级到命令行
+- **[✅ 用户确认流程](./docs/APPROVAL_FLOW_IMPLEMENTATION_SUMMARY.md)** - 命令规划后暂停等待批准
+- **[🔗 飞书集成](./docs/FEISHU_INTEGRATION.md)** - 飞书长连接和卡片交互
+- **[💬 Web 聊天集成](./docs/WEB_CHAT_AGENT_INTEGRATION.md)** - Web UI 流式对话
 
-### API Documentation
+### API 文档
 
-- **[API Guide (English)](./docs/api-guide.md)**
 - **[API 指南（中文）](./docs/api-guide-cn.md)**
+- **[API 指南（英文）](./docs/api-guide.md)**
 
 ---
 
-## 🔧 Configuration
+## 🔧 配置说明
 
-### Environment Variables
+### 环境变量配置
 
-For detailed environment variable documentation, see [.env.example](./.env.example).
+详细的环境变量说明请查看 [.env.example](./.env.example) 文件。
 
-### Key Configuration Items
+### 关键配置项
 
-#### LLM Configuration
+#### LLM 配置
 
 ```bash
-# Select LLM provider
+# 选择 LLM 提供商
 DEFAULT_LLM_PROVIDER=zhipu  # openai, claude, zhipu, ollama
 
-# Zhipu AI configuration
+# 智谱 AI 配置
 ZHIPU_API_KEY=your_key_here
 ZHIPU_MODEL=glm-4
 ```
 
-#### Feishu Configuration
+#### 飞书配置
 
 ```bash
 FEISHU_ENABLED=true
@@ -691,151 +689,151 @@ FEISHU_APP_SECRET=xxxxxxxxxxxxxxxxxxxxx
 FEISHU_CONNECTION_MODE=auto  # webhook | longconn | auto
 ```
 
-#### Kubernetes Configuration
+#### Kubernetes 配置
 
 ```bash
 K8S_ENABLED=true
 KUBECONFIG=/path/to/kubeconfig
 ```
 
-#### Security Configuration
+#### 安全配置
 
 ```bash
-# JWT Secret (must change in production)
+# JWT 密钥（生产环境必须修改）
 JWT_SECRET_KEY=your-secret-key-here-change-in-production
 
-# Security Environment
+# 安全环境
 SECURITY_ENVIRONMENT=production  # production | testing | development
 ```
 
 ---
 
-## 🛠️ Development Guide
+## 🛠️ 开发指南
 
-### Project Structure
+### 项目结构
 
 ```
 ops-agent-langgraph/
-├── app/                         # Application main directory
-│   ├── main.py                  # FastAPI application entry
-│   ├── deepagents/              # DeepAgents main agent and sub-agents
-│   ├── middleware/              # Middleware layer
-│   ├── tools/                   # Agent tools
-│   ├── integrations/            # External service integrations
-│   ├── api/                     # API route layer
-│   ├── core/                    # Core modules
-│   ├── models/                  # Database models
-│   ├── services/                # Business service layer
-│   └── schemas/                 # Pydantic schemas
-├── frontend/                    # React frontend
-├── config/                      # Configuration files
-├── scripts/                     # Script tools
-├── tests/                       # Test suite
-└── docs/                        # Documentation
+├── app/                         # 应用主目录
+│   ├── main.py                  # FastAPI 应用入口
+│   ├── deepagents/              # DeepAgents 主智能体和子智能体
+│   ├── middleware/              # 中间件层
+│   ├── tools/                   # Agent 工具集
+│   ├── integrations/            # 外部服务集成
+│   ├── api/                     # API 路由层
+│   ├── core/                    # 核心模块
+│   ├── models/                  # 数据库模型
+│   ├── services/                # 业务服务层
+│   └── schemas/                 # Pydantic 模式
+├── frontend/                    # React 前端
+├── config/                      # 配置文件
+├── scripts/                     # 脚本工具
+├── tests/                       # 测试套件
+└── docs/                        # 文档
 ```
 
-### Running Tests
+### 运行测试
 
 ```bash
-# All tests
+# 所有测试
 pytest tests/ -v
 
-# Unit tests
+# 单元测试
 pytest tests/unit/ -v
 
-# Integration tests
+# 集成测试
 pytest tests/integration/ -v
 
-# With coverage
+# 带覆盖率
 pytest --cov=app --cov-report=html
 ```
 
-### Code Quality
+### 代码质量
 
 ```bash
-# Format code
+# 格式化代码
 black app/ tests/
 
-# Check code
+# 代码检查
 ruff check app/ tests/
 
-# Type check
+# 类型检查
 mypy app/
 ```
 
 ---
 
-## 🐛 Troubleshooting
+## 🐛 故障排查
 
-### Common Issues
+### 常见问题
 
-#### 1. Database Initialization Failed
+#### 1. 数据库初始化失败
 
 ```bash
-# Remove old database
+# 删除旧数据库
 rm -rf data/ops_agent_v2.db
 
-# Re-initialize
+# 重新初始化
 uv run python scripts/init_auth_db.py
 ```
 
-#### 2. LLM API Call Failed
+#### 2. LLM API 调用失败
 
-Check API Key configuration in `.env`:
+检查 `.env` 文件中的 API Key 配置：
 ```bash
-# Verify API Key
+# 验证 API Key
 echo $ZHIPU_API_KEY
 ```
 
-#### 3. Feishu Long Connection Failed
+#### 3. 飞书长连接失败
 
-Check Feishu configuration:
+检查飞书配置：
 ```bash
-# Verify Feishu configuration
+# 验证飞书配置
 FEISHU_ENABLED=true
 FEISHU_CONNECTION_MODE=longconn
 ```
 
-#### 4. Docker Container Failed to Start
+#### 4. Docker 容器无法启动
 
-View container logs:
+查看容器日志：
 ```bash
 docker-compose logs -f ops-agent
 ```
 
 ---
 
-## 🤝 Contributing
+## 🤝 贡献
 
-Contributions are welcome! Feel free to submit issues, fork the repository, and create pull requests.
+欢迎贡献代码、报告问题或提出建议！
 
-### Contribution Flow
+### 贡献流程
 
-1. Fork this repository
-2. Create feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to branch (`git push origin feature/AmazingFeature`)
-5. Open Pull Request
-
----
-
-## 📄 License
-
-This project is licensed under the MIT License. See [LICENSE](LICENSE) file for details.
+1. Fork 本仓库
+2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
+3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
+4. 推送到分支 (`git push origin feature/AmazingFeature`)
+5. 开启 Pull Request
 
 ---
 
-## 📞 Contact
+## 📄 许可证
 
-- **Maintainer**: lanheader
-- **Project URL**: https://github.com/your-org/ops-agent-langgraph
-- **Issue Tracker**: https://github.com/your-org/ops-agent-langgraph/issues
+本项目采用 MIT 许可证。详见 [LICENSE](LICENSE) 文件。
 
 ---
 
-## 🙏 Acknowledgments
+## 📞 联系方式
 
-Thanks to the following open source projects:
+- **维护者**: lanheader
+- **项目地址**: https://github.com/your-org/ops-agent-langgraph
+- **问题反馈**: https://github.com/your-org/ops-agent-langgraph/issues
+
+---
+
+## 🙏 致谢
+
+感谢以下开源项目：
 
 - [LangChain](https://github.com/langchain-ai/langchain)
 - [LangGraph](https://github.com/langchain-ai/langgraph)
@@ -848,7 +846,7 @@ Thanks to the following open source projects:
 
 <div align="center">
 
-**Last Updated**: 2026-03-22 | **Version**: v3.0.0
+**最后更新**: 2026-03-20
 
 Made with ❤️ by Ops Team
 

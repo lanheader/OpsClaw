@@ -1,98 +1,98 @@
-# 工具扩展快速参考
+# Tool Extension Guide
 
-> 📖 完整指南请参考：[EXTENSION_GUIDE.md](./EXTENSION_GUIDE.md)
+> 📖 For the complete guide, see: [EXTENSION_GUIDE.md](EXTENSION_GUIDE_ZH.md)
 
 ---
 
-## 🚀 30 秒创建新工具
+## 🚀 Create a New Tool in 30 Seconds
 
 ```python
 from app.tools.base import BaseOpTool, register_tool, OperationType, RiskLevel
 
 @register_tool(
-    group="k8s.read",                    # 分组
-    operation_type=OperationType.READ,   # 类型: READ/WRITE/UPDATE/DELETE
-    risk_level=RiskLevel.LOW,            # 风险: LOW/MEDIUM/HIGH
-    permissions=["k8s.view"],            # 权限
-    description="获取 Pod 列表",          # 描述
+    group="k8s.read",                    # Group
+    operation_type=OperationType.READ,   # Type: READ/WRITE/UPDATE/DELETE
+    risk_level=RiskLevel.LOW,            # Risk: LOW/MEDIUM/HIGH
+    permissions=["k8s.view"],            # Permissions
+    description="Get Pod list",          # Description
 )
 class GetPodsTool(BaseOpTool):
     async def execute(self, namespace: str = "default", **kwargs):
-        # 实现逻辑
+        # Implementation
         return {"success": True, "data": [...]}
 ```
 
-✅ **就这么简单！** 工具会自动注册到系统。
+✅ **That's it!** The tool is automatically registered to the system.
 
 ---
 
-## 📋 参数速查表
+## 📋 Parameter Quick Reference
 
-| 参数 | 值 | 说明 |
-|------|-----|------|
-| `group` | `"k8s.read"` | 分组代码 |
-| `operation_type` | `READ/WRITE/UPDATE/DELETE` | 操作类型 |
-| `risk_level` | `LOW/MEDIUM/HIGH` | HIGH 需要批准 |
-| `permissions` | `["k8s.view"]` | 所需权限列表 |
+| Parameter | Values | Description |
+|-----------|---------|-------------|
+| `group` | `"k8s.read"` | Group code |
+| `operation_type` | `READ/WRITE/UPDATE/DELETE` | Operation type |
+| `risk_level` | `LOW/MEDIUM/HIGH` | HIGH requires approval |
+| `permissions` | `["k8s.view"]` | Required permissions list |
 
 ---
 
-## 🔧 降级模式（必须）
+## 🔧 Fallback Pattern (Required)
 
 ```python
 async def execute(self, **kwargs):
     try:
-        return await self._execute_with_sdk(**kwargs)  # SDK 优先
+        return await self._execute_with_sdk(**kwargs)  # SDK first
     except Exception:
-        return await self.fallback.execute(...)         # CLI 降级
+        return await self.fallback.execute(...)         # CLI fallback
 ```
 
 ---
 
-## 📦 工具位置
+## 📦 Tool Locations
 
 ```
 app/tools/
-├── k8s/read_tools.py      # K8s 读操作
-├── k8s/write_tools.py     # K8s 写操作
-├── k8s/delete_tools.py    # K8s 删除操作
-├── prometheus/read_tools.py  # Prometheus 查询
-└── loki/read_tools.py     # Loki 日志查询
+├── k8s/read_tools.py      # K8s read operations
+├── k8s/write_tools.py     # K8s write operations
+├── k8s/delete_tools.py    # K8s delete operations
+├── prometheus/read_tools.py  # Prometheus query
+└── loki/read_tools.py     # Loki log query
 ```
 
 ---
 
-## ✅ 验证工具
+## ✅ Verify Tools
 
 ```python
 from app.tools.registry import get_tool_registry
 
 registry = get_tool_registry()
-print(f"工具数: {len(registry.list_tools())}")  # 应显示 24+
+print(f"Tool count: {len(registry.list_tools())}")  # Should show 24+
 ```
 
 ---
 
-## 🔐 权限命名规范
+## 🔐 Permission Naming Convention
 
 ```
-{系统}.{资源}.{操作}
+{system}.{resource}.{operation}
 
-k8s.view          # K8s 查看权限
-k8s.delete_pods   # K8s 删除 Pod 权限
-prometheus.view   # Prometheus 查询权限
-loki.view         # Loki 日志查看权限
+k8s.view          # K8s view permission
+k8s.delete_pods   # K8s delete Pod permission
+prometheus.view   # Prometheus query permission
+loki.view         # Loki log view permission
 ```
 
 ---
 
-## 💡 最佳实践
+## 💡 Best Practices
 
-1. **SDK → CLI 降级**：所有工具必须支持
-2. **类型注解**：使用 `Optional[str]`、`Dict[str, Any]` 等
-3. **错误处理**：返回 `{"success": False, "error": "..."}`
-4. **工具命名**：类名 `GetPodsTool`，工具名自动提取为 `get_pods`
+1. **SDK → CLI Fallback**: All tools must support it
+2. **Type Annotations**: Use `Optional[str]`, `Dict[str, Any]`, etc.
+3. **Error Handling**: Return `{"success": False, "error": "..."}`
+4. **Tool Naming**: Class `GetPodsTool`, tool name auto-extracted as `get_pods`
 
 ---
 
-**详细文档**: [EXTENSION_GUIDE.md](./EXTENSION_GUIDE.md)
+**Detailed Docs**: [EXTENSION_GUIDE.md](EXTENSION_GUIDE_ZH.md)

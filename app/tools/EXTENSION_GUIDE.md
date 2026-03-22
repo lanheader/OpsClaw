@@ -1,44 +1,44 @@
-# 工具扩展使用说明
+# Tool Extension Guide
 
-本指南说明如何扩展 Ops Agent 工具系统，包括新增工具、创建工具分组和配置权限。
+This guide explains how to extend the Ops Agent tool system, including adding new tools, creating tool groups, and configuring permissions.
 
 ---
 
-## 📁 目录结构
+## 📁 Directory Structure
 
 ```
 app/tools/
-├── __init__.py              # 工具导出和便捷函数
-├── base.py                  # BaseOpTool 基类和装饰器
-├── registry.py              # ToolRegistry 工具注册表
-├── fallback.py              # CLI 降级机制
+├── __init__.py              # Tool exports and utility functions
+├── base.py                  # BaseOpTool base class and decorator
+├── registry.py              # ToolRegistry tool registry
+├── fallback.py              # CLI fallback mechanism
 │
-├── k8s/                     # K8s 工具组
+├── k8s/                     # K8s tool group
 │   ├── __init__.py
-│   ├── read_tools.py        # 读操作工具
-│   ├── write_tools.py       # 写操作工具
-│   └── delete_tools.py      # 删除操作工具
+│   ├── read_tools.py        # Read operation tools
+│   ├── write_tools.py       # Write operation tools
+│   └── delete_tools.py      # Delete operation tools
 │
-├── prometheus/              # Prometheus 工具组
+├── prometheus/              # Prometheus tool group
 │   ├── __init__.py
-│   └── read_tools.py        # 查询工具
+│   └── read_tools.py        # Query tools
 │
-└── loki/                    # Loki 工具组
+└── loki/                    # Loki tool group
     ├── __init__.py
-    └── read_tools.py        # 日志查询工具
+    └── read_tools.py        # Log query tools
 ```
 
 ---
 
-## 🚀 快速开始：新增一个工具
+## 🚀 Quick Start: Add a New Tool
 
-### 步骤 1：创建工具文件
+### Step 1: Create Tool File
 
-在对应分组目录下创建工具文件，例如 `app/tools/k8s/read_tools.py`：
+Create a tool file in the corresponding group directory, e.g., `app/tools/k8s/read_tools.py`:
 
 ```python
 """
-K8s 读操作工具
+K8s Read Operation Tools
 """
 
 from typing import Dict, Any, Optional
@@ -56,21 +56,21 @@ logger = logging.getLogger(__name__)
 
 
 @register_tool(
-    group="k8s.read",                    # 工具分组代码
-    operation_type=OperationType.READ,   # 操作类型
-    risk_level=RiskLevel.LOW,            # 风险等级
-    permissions=["k8s.view"],            # 所需权限
-    description="获取 Pod 列表",          # 工具描述
-    examples=[                           # 使用示例
+    group="k8s.read",                    # Tool group code
+    operation_type=OperationType.READ,   # Operation type
+    risk_level=RiskLevel.LOW,            # Risk level
+    permissions=["k8s.view"],            # Required permissions
+    description="Get Pod list",           # Tool description
+    examples=[                           # Usage examples
         "get_pods(namespace='default')",
         "get_pods(namespace='production', label_selector='app=api')",
     ],
 )
 class GetPodsTool(BaseOpTool):
     """
-    获取 Pod 列表工具
+    Get Pod List Tool
 
-    通过 SDK 或 kubectl 查询指定命名空间下的所有 Pod。
+    Query all Pods in a specified namespace via SDK or kubectl.
     """
 
     def __init__(self):
@@ -85,22 +85,22 @@ class GetPodsTool(BaseOpTool):
         **kwargs
     ) -> Dict[str, Any]:
         """
-        执行工具操作
+        Execute tool operation
 
         Args:
-            namespace: 命名空间
-            label_selector: 标签选择器
+            namespace: Namespace
+            label_selector: Label selector
 
         Returns:
-            操作结果字典
+            Operation result dictionary
         """
         try:
-            # 优先使用 SDK
+            # Prefer SDK
             logger.info(f"Using K8s SDK to list pods in {namespace}")
             result = await self._execute_with_sdk(namespace, label_selector)
             return result
         except Exception as e:
-            # SDK 失败，降级到 CLI
+            # SDK failed, fallback to CLI
             logger.warning(f"K8s SDK failed: {e}, falling back to CLI")
             result = await self.fallback.execute(
                 operation="get pods",
@@ -114,7 +114,7 @@ class GetPodsTool(BaseOpTool):
         namespace: str,
         label_selector: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """使用 SDK 执行"""
+        """Execute using SDK"""
         pods = await self.k8s_client.list_namespaced_pod(
             namespace=namespace,
             label_selector=label_selector
@@ -138,89 +138,89 @@ class GetPodsTool(BaseOpTool):
         }
 
     def _is_pod_ready(self, pod) -> bool:
-        """检查 Pod 是否就绪"""
+        """Check if Pod is ready"""
         if not pod.status.container_statuses:
             return False
         return all(cs.ready for cs in pod.status.container_statuses)
 ```
 
-### 步骤 2：工具自动注册
+### Step 2: Tool Auto-Registration
 
-使用 `@register_tool` 装饰器后，工具会**自动注册**到 `ToolRegistry`，无需手动配置！
+Using the `@register_tool` decorator, tools are **automatically registered** to `ToolRegistry` - no manual configuration needed!
 
-### 步骤 3：验证工具
+### Step 3: Verify Tool
 
 ```python
-# 验证工具是否注册成功
+# Verify tool is registered successfully
 from app.tools.registry import get_tool_registry
 
 registry = get_tool_registry()
-print(f"工具数量: {len(registry.list_tools())}")
+print(f"Tool count: {len(registry.list_tools())}")
 
-# 获取特定工具
+# Get specific tool
 tool_class = registry.get_tool("get_pods")
-print(f"工具名称: {tool_class.get_metadata().name}")
+print(f"Tool name: {tool_class.get_metadata().name}")
 ```
 
 ---
 
-## 🔧 工具配置参数
+## 🔧 Tool Configuration Parameters
 
-### @register_tool 装饰器参数
+### @register_tool Decorator Parameters
 
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `group` | str | ✅ | 工具分组代码，如 `"k8s.read"` |
-| `operation_type` | OperationType | ✅ | 操作类型：READ/WRITE/UPDATE/DELETE |
-| `risk_level` | RiskLevel | ✅ | 风险等级：LOW/MEDIUM/HIGH |
-| `permissions` | List[str] | ✅ | 所需权限列表，如 `["k8s.view"]` |
-| `description` | str | ✅ | 工具描述，用于 AI 理解工具功能 |
-| `examples` | List[str] | ❌ | 使用示例，帮助 AI 理解如何调用 |
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `group` | str | ✅ | Tool group code, e.g., `"k8s.read"` |
+| `operation_type` | OperationType | ✅ | Operation type: READ/WRITE/UPDATE/DELETE |
+| `risk_level` | RiskLevel | ✅ | Risk level: LOW/MEDIUM/HIGH |
+| `permissions` | List[str] | ✅ | Required permissions list, e.g., `["k8s.view"]` |
+| `description` | str | ✅ | Tool description for AI to understand tool functionality |
+| `examples` | List[str] | ❌ | Usage examples to help AI understand how to call |
 
-### RiskLevel（风险等级）
+### RiskLevel
 
-| 等级 | 说明 | 示例 |
-|------|------|------|
-| `RiskLevel.LOW` | 只读操作，无副作用 | `get_pods`, `get_logs` |
-| `RiskLevel.MEDIUM` | 修改操作，可能影响服务 | `scale_deployment` |
-| `RiskLevel.HIGH` | 破坏性操作，需要批准 | `delete_pod`, `restart_deployment` |
+| Level | Description | Example |
+|-------|-------------|---------|
+| `RiskLevel.LOW` | Read-only operations, no side effects | `get_pods`, `get_logs` |
+| `RiskLevel.MEDIUM` | Modify operations, may affect service | `scale_deployment` |
+| `RiskLevel.HIGH` | Destructive operations, requires approval | `delete_pod`, `restart_deployment` |
 
-### OperationType（操作类型）
+### OperationType
 
-| 类型 | 说明 |
-|------|------|
-| `OperationType.READ` | 查询操作 |
-| `OperationType.WRITE` | 创建/更新操作 |
-| `OperationType.UPDATE` | 修改操作 |
-| `OperationType.DELETE` | 删除操作 |
+| Type | Description |
+|------|-------------|
+| `OperationType.READ` | Query operations |
+| `OperationType.WRITE` | Create/update operations |
+| `OperationType.UPDATE` | Modify operations |
+| `OperationType.DELETE` | Delete operations |
 
 ---
 
-## 📦 创建新的工具分组
+## 📦 Create New Tool Group
 
-### 步骤 1：定义工具分组
+### Step 1: Define Tool Group
 
-在 `app/tools/registry.py` 中的 `ToolRegistry._init_groups()` 添加新分组：
+Add new group in `ToolRegistry._init_groups()` in `app/tools/registry.py`:
 
 ```python
-# 在 _init_groups 方法中添加
+# Add in _init_groups method
 ToolGroup(
     code="custom.query",
-    name="自定义查询",
-    category=ToolCategory.CUSTOM,  # 需要在 ToolCategory 中添加
+    name="Custom Query",
+    category=ToolCategory.CUSTOM,  # Need to add in ToolCategory
     operation_type=OperationType.READ,
-    description="自定义系统查询操作"
+    description="Custom system query operations"
 ),
 ```
 
-### 步骤 2：创建工具目录
+### Step 2: Create Tool Directory
 
 ```bash
 mkdir -p app/tools/custom
 touch app/tools/custom/__init__.py
 ```
 
-### 步骤 3：实现工具
+### Step 3: Implement Tool
 
 ```python
 # app/tools/custom/query_tools.py
@@ -237,11 +237,11 @@ from app.tools.base import (
     operation_type=OperationType.READ,
     risk_level=RiskLevel.LOW,
     permissions=["custom.view"],
-    description="查询自定义数据",
+    description="Query custom data",
 )
 class QueryCustomDataTool(BaseOpTool):
     async def execute(self, **kwargs) -> Dict[str, Any]:
-        # 实现查询逻辑
+        # Implement query logic
         return {
             "success": True,
             "data": {...},
@@ -250,11 +250,11 @@ class QueryCustomDataTool(BaseOpTool):
 
 ---
 
-## 🛡️ CLI 降级机制
+## 🛡️ CLI Fallback Mechanism
 
-所有工具**必须**支持 SDK → CLI 降级！
+All tools **must** support SDK → CLI fallback!
 
-### 实现降级
+### Implement Fallback
 
 ```python
 from app.tools.fallback import get_k8s_fallback
@@ -265,24 +265,24 @@ class MyTool(BaseOpTool):
 
     async def execute(self, **kwargs):
         try:
-            # 1. 优先使用 SDK
+            # 1. Prefer SDK
             return await self._execute_with_sdk(**kwargs)
         except Exception as e:
             logger.warning(f"SDK failed: {e}, falling back to CLI")
-            # 2. 降级到 CLI
+            # 2. Fallback to CLI
             return await self.fallback.execute(
                 operation="kubectl get pods",
                 **kwargs
             )
 ```
 
-### 自定义 FallbackExecutor
+### Custom FallbackExecutor
 
-如需添加新的降级执行器，在 `app/tools/fallback.py` 中实现：
+To add a new fallback executor, implement in `app/tools/fallback.py`:
 
 ```python
 class CustomFallback(FallbackExecutor):
-    """自定义系统降级执行器"""
+    """Custom system fallback executor"""
 
     async def execute(self, operation: str, **kwargs) -> Dict[str, Any]:
         cmd = self._build_command(operation, **kwargs)
@@ -297,26 +297,26 @@ def get_custom_fallback() -> CustomFallback:
 
 ---
 
-## 🔐 权限系统
+## 🔐 Permission System
 
-### 权限命名规范
+### Permission Naming Convention
 
 ```
-{系统}.{资源}.{操作}
+{system}.{resource}.{operation}
 
-示例：
-- k8s.pods.view    # K8s Pod 查看权限
-- k8s.deployments.delete  # K8s Deployment 删除权限
-- prometheus.metrics.query  # Prometheus 查询权限
-- loki.logs.view   # Loki 日志查看权限
+Examples:
+- k8s.pods.view    # K8s Pod view permission
+- k8s.deployments.delete  # K8s Deployment delete permission
+- prometheus.metrics.query  # Prometheus query permission
+- loki.logs.view   # Loki log view permission
 ```
 
-### 权限过滤
+### Permission Filtering
 
 ```python
 from app.tools import get_all_tools
 
-# 获取用户有权限的工具
+# Get tools user has permission for
 tools = get_all_tools(
     permissions={"k8s.view", "prometheus.view"},
     user_id=1,
@@ -324,9 +324,9 @@ tools = get_all_tools(
 )
 ```
 
-### 高风险工具自动批准
+### High-Risk Tool Auto-Approval
 
-`RiskLevel.HIGH` 的工具会自动触发用户批准流程：
+`RiskLevel.HIGH` tools automatically trigger user approval flow:
 
 ```python
 from app.tools.registry import get_tool_registry, RiskLevel
@@ -337,63 +337,63 @@ high_risk_tools = [
     for t in registry.list_tools()
     if t.get_metadata().risk_level == RiskLevel.HIGH
 ]
-# 自动包含：delete_pod, delete_deployment, restart_deployment 等
+# Auto-includes: delete_pod, delete_deployment, restart_deployment, etc.
 ```
 
 ---
 
-## 📊 工具状态查询
+## 📊 Tool Status Query
 
-### 查询所有工具
+### Query All Tools
 
 ```python
 from app.tools.registry import get_tool_registry
 
 registry = get_tool_registry()
 
-# 所有工具类
+# All tool classes
 tools = registry.list_tools()
 
-# 所有分组
+# All groups
 groups = registry.list_groups()
 
-# 所有权限
+# All permissions
 permissions = registry.get_permissions()
 ```
 
-### 按分组查询
+### Query by Group
 
 ```python
 from app.tools import get_tools_by_group
 
-# 获取 K8s 读操作工具
+# Get K8s read operation tools
 tools = get_tools_by_group("k8s.read")
 ```
 
-### 按权限查询
+### Query by Permission
 
 ```python
 from app.tools import get_all_tools
 
-# 获取有 k8s.view 权限的工具
+# Get tools with k8s.view permission
 tools = get_all_tools(permissions={"k8s.view"})
 ```
 
 ---
 
-## ✅ 最佳实践
+## ✅ Best Practices
 
-### 1. 工具命名
+### 1. Tool Naming
 
-- 类名：使用 `PascalCase` + `Tool` 后缀，如 `GetPodsTool`
-- 工具名：使用 `snake_case`，装饰器会自动从类名提取，如 `get_pods`
+- Class name: Use `PascalCase` + `Tool` suffix, e.g., `GetPodsTool`
+- Tool name: Use `snake_case`, decorator auto-extracts from class name, e.g., `get_pods`
 
-### 2. 错误处理
+### 2. Error Handling
 
 ```python
 async def execute(self, **kwargs):
     try:
-        # SDK 逻辑
+        # SDK logic
         result = await self._execute_with_sdk(**kwargs)
         return {"success": True, "data": result}
     except Exception as e:
@@ -401,39 +401,39 @@ async def execute(self, **kwargs):
         return {"success": False, "error": str(e)}
 ```
 
-### 3. 类型注解
+### 3. Type Annotations
 
 ```python
 async def execute(
     self,
     namespace: str,
     label_selector: Optional[str] = None,
-    **kwargs  # 接收额外参数
-) -> Dict[str, Any]:  # 明确返回类型
+    **kwargs  # Accept extra parameters
+) -> Dict[str, Any]:  # Explicit return type
     ...
 ```
 
-### 4. 文档字符串
+### 4. Docstrings
 
 ```python
 class GetPodsTool(BaseOpTool):
     """
-    获取 Pod 列表工具
+    Get Pod List Tool
 
-    功能：
-    - 查询指定命名空间下的所有 Pod
-    - 支持标签过滤
-    - 返回 Pod 状态信息
+    Features:
+    - Query all Pods in specified namespace
+    - Support label filtering
+    - Return Pod status information
 
-    降级：SDK 失败时使用 kubectl
+    Fallback: Use kubectl when SDK fails
     """
 ```
 
 ---
 
-## 🧪 测试工具
+## 🧪 Testing Tools
 
-### 单元测试
+### Unit Tests
 
 ```python
 import pytest
@@ -453,7 +453,7 @@ async def test_get_pods_tool():
     assert result["execution_mode"] == "sdk"
 ```
 
-### 集成测试
+### Integration Tests
 
 ```python
 @pytest.mark.asyncio
@@ -469,71 +469,71 @@ async def test_tool_registry():
 
 ---
 
-## 🔌 API 权限管理
+## 🔌 API Permission Management
 
-### 注意：API 权限为硬编码
+### Note: API Permissions are Hardcoded
 
-与工具权限不同，API 权限采用**硬编码方式**管理。
+Unlike tool permissions, API permissions are managed using **hardcoded method**.
 
-**原因**：
-- API 权限相对稳定，不会频繁变更
-- 硬编码更简单、更直接
-- 新增 API 时手动添加权限即可
+**Reasons**:
+- API permissions are relatively stable and don't change frequently
+- Hardcoding is simpler and more direct
+- Just add permissions manually when creating new APIs
 
-### 新增 API 权限步骤
+### Steps to Add API Permission
 
-在 `app/core/permissions.py` 的 `API_PERMISSIONS` 列表中添加：
+Add in `API_PERMISSIONS` list in `app/core/permissions.py`:
 
 ```python
 # app/core/permissions.py
 
 API_PERMISSIONS = [
-    # ... 现有权限 ...
+    # ... existing permissions ...
 
-    # 新增的 API 权限
+    # New API permission
     PermissionDef(
         code="api:reports:generate",
-        name="生成报告API",
+        name="Generate Report API",
         category=PermissionCategory.API,
         resource="api:reports:generate",
-        description="允许调用报告生成API",
+        description="Allow calling report generation API",
     ),
 ]
 ```
 
-### API 权限代码规范
+### API Permission Code Convention
 
 ```
-api:{资源}:{操作}
+api:{resource}:{operation}
 
-示例：
-- api:workflow:execute  # 执行工作流
-- api:workflow:resume   # 恢复工作流
-- api:users:read        # 读取用户
-- api:users:write       # 写入用户
+Examples:
+- api:workflow:execute  # Execute workflow
+- api:workflow:resume   # Resume workflow
+- api:users:read        # Read users
+- api:users:write       # Write users
 ```
 
-### 同步权限到数据库
+### Sync Permissions to Database
 
 ```bash
-# 同步工具权限到数据库（API 权限已在代码中定义）
+# Sync tool permissions to database (API permissions already defined in code)
 curl -X POST http://localhost:8000/api/v1/permissions/sync-tool-permissions \
   -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
 
-**注意**：API 权限不需要同步，它们直接从 `app/core/permissions.py` 读取。
+**Note**: API permissions don't need syncing, they're read directly from `app/core/permissions.py`.
 
 ---
 
-## 📚 相关文档
+## 📚 Related Documentation
 
-- [base.py](./base.py) - 工具基类和装饰器实现
-- [registry.py](./registry.py) - 工具注册表实现
-- [fallback.py](./fallback.py) - CLI 降级机制实现
-- [k8s/read_tools.py](./k8s/read_tools.py) - K8s 工具示例
-- [../core/permissions.py](../core/permissions.py) - 权限定义（含 API 权限）
+- [base.py](./base.py) - Tool base class and decorator implementation
+- [registry.py](./registry.py) - Tool registry implementation
+- [fallback.py](./fallback.py) - CLI fallback mechanism implementation
+- [k8s/read_tools.py](./k8s/read_tools.py) - K8s tool examples
+- [../core/permissions.py](../core/permissions.py) - Permission definitions (including API permissions)
 
 ---
 
-**最后更新**: 2026-03-22
-**适用版本**: Ops Agent v3.0+
+**Last Updated**: 2026-03-22
+**Version**: Ops Agent v3.0+
