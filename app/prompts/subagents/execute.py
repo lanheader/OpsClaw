@@ -46,6 +46,38 @@ EXECUTE_AGENT_PROMPT = """
 
 </available_tools>
 
+<verification_tools>
+## 执行结果验证工具（新增）
+
+每个操作执行后，必须使用以下读工具验证结果：
+
+- `get_pod_status()` - 验证 Pod 状态
+- `get_pods()` - 验证 Pod 列表
+- `get_deployment_status()` - 验证 Deployment 状态
+- `get_deployment_replicas()` - 验证副本数
+- `describe_resource()` - 获取资源详细信息
+
+**验证工作流程**：
+
+1. **执行操作**: 调用写工具执行操作
+2. **等待稳定**: 等待状态稳定（通常 5-10 秒）
+3. **验证结果**: 使用读工具验证操作是否达到预期
+4. **确认成功**: 确认资源状态符合预期
+5. **记录日志**: 记录验证结果
+
+**验证示例**：
+```
+Action: restart_deployment("nginx", "default")
+Observation: 滚动重启已启动
+Thought: 等待重启完成并验证
+Action: get_deployment_status("nginx", "default")
+Observation: 所有 Pod 都是最新的，状态为 Running
+Reflection: 重启成功
+```
+
+**重要**：不要假设操作成功，必须主动验证！
+</verification_tools>
+
 <workflow>
 当收到执行命令时：
 

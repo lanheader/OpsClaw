@@ -3,158 +3,37 @@
 from typing import Dict, Any, Optional, List
 from langchain_core.tools import tool
 import asyncio
-import logging
 import os
 import re
 
-logger = logging.getLogger(__name__)
+from app.utils.logger import get_logger, get_request_context
+
+logger = get_logger(__name__)
 
 
-@tool
-async def execute_kubectl_command(
-    command: str,
-    namespace: Optional[str] = None,
-    timeout: int = 30
-) -> Dict[str, Any]:
-    """
-    执行 kubectl 命令并返回结果。
+def _log_tool_start(tool_name: str, **kwargs):
+    """记录工具开始执行的日志"""
+    ctx = get_request_context()
+    session_id = ctx.get('session_id', 'no-sess')
+    params = {k: v for k, v in kwargs.items() if v is not None}
+    logger.info(f"🔧 [{session_id}] 执行工具: {tool_name} | 参数: {params}")
 
-    参数：
-        command: kubectl 子命令（如 "get pods", "describe pod xxx"）
-        namespace: 可选的命名空间（如果提供，会自动添加 -n 参数）
-        timeout: 命令超时时间（秒）
 
-    返回：
-        包含以下内容的字典：
-        - success: bool（命令是否成功执行）
-        - output: str（命令输出）
-        - error: Optional[str]（错误信息）
-        - exit_code: int（退出码）
-        - execution_mode: str（执行模式，固定为 "cli"）
-        - needs_fallback: bool（是否需要降级，CLI 工具固定为 False）
-
-    示例：
-        # 查看所有 Pod
-        result = await execute_kubectl_command.ainvoke({
-            "command": "get pods -A"
-        })
-
-        # 查看特定命名空间的 Pod
-        result = await execute_kubectl_command.ainvoke({
-            "command": "get pods",
-            "namespace": "production"
-        })
-
-        # 查看 Pod 详情
-        result = await execute_kubectl_command.ainvoke({
-            "command": "describe pod my-pod",
-            "namespace": "default"
-        })
-    """
-    # 安全检查：只允许读取操作
-    dangerous_patterns = [
-        r'\bdelete\b',
-        r'\bremove\b',
-        r'\brm\b',
-        r'\bapply\b',
-        r'\bcreate\b',
-        r'\bedit\b',
-        r'\bpatch\b',
-        r'\breplace\b',
-        r'\bexec\b',
-        r'\battach\b',
-        r'\bcp\b'
-    ]
-
-    for pattern in dangerous_patterns:
-        if re.search(pattern, command, re.IGNORECASE):
-            return {
-                "success": False,
-                "output": "",
-                "error": f"Dangerous operation detected: {pattern}. Only read operations are allowed.",
-                "exit_code": -1,
-                "execution_mode": "cli",
-                "needs_fallback": False
-            }
-
-    # 构建完整命令
-    # 检查命令是否已经包含 kubectl
-    if command.strip().startswith('kubectl'):
-        # 命令已经包含 kubectl，直接使用
-        full_command = command
-        if namespace and "-n" not in command and "--namespace" not in command and "-A" not in command:
-            # 在 kubectl 后面插入 namespace
-            full_command = command.replace('kubectl', f'kubectl -n {namespace}', 1)
+def _log_tool_success(tool_name: str, message: str = None):
+    """记录工具执行成功的日志"""
+    ctx = get_request_context()
+    session_id = ctx.get('session_id', 'no-sess')
+    if message:
+        logger.info(f"✅ [{session_id}] 工具完成: {tool_name} | {message}")
     else:
-        # 命令不包含 kubectl，添加前缀
-        full_command = f"kubectl {command}"
-        if namespace and "-n" not in command and "--namespace" not in command and "-A" not in command:
-            full_command = f"kubectl -n {namespace} {command}"
+        logger.info(f"✅ [{session_id}] 工具完成: {tool_name}")
 
-    logger.info(f"Executing kubectl command: {full_command}")
 
-    try:
-        # 获取当前环境变量（继承系统环境）
-        env = os.environ.copy()
-
-        # 执行命令（继承环境变量）
-        process = await asyncio.create_subprocess_shell(
-            full_command,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            shell=True,
-            env=env  # 传递环境变量
-        )
-
-        # 等待命令完成（带超时）
-        try:
-            stdout, stderr = await asyncio.wait_for(
-                process.communicate(),
-                timeout=timeout
-            )
-        except asyncio.TimeoutError:
-            process.kill()
-            await process.wait()  # 等待进程真正结束，避免僵尸进程
-            return {
-                "success": False,
-                "output": "",
-                "error": f"Command timed out after {timeout} seconds",
-                "exit_code": -1,
-                "execution_mode": "cli",
-                "needs_fallback": False
-            }
-
-        # 解码输出
-        output = stdout.decode('utf-8') if stdout else ""
-        error = stderr.decode('utf-8') if stderr else ""
-        exit_code = process.returncode
-
-        success = exit_code == 0
-
-        if not success:
-            logger.error(f"kubectl command failed: {error}")
-        else:
-            logger.info(f"kubectl command succeeded, output length: {len(output)}")
-
-        return {
-            "success": success,
-            "output": output,
-            "error": error if error else None,
-            "exit_code": exit_code,
-            "execution_mode": "cli",
-            "needs_fallback": False
-        }
-
-    except Exception as e:
-        logger.exception(f"Error executing kubectl command: {e}")
-        return {
-            "success": False,
-            "output": "",
-            "error": str(e),
-            "exit_code": -1,
-            "execution_mode": "cli",
-            "needs_fallback": False
-        }
+def _log_tool_error(tool_name: str, error: str):
+    """记录工具执行失败的日志"""
+    ctx = get_request_context()
+    session_id = ctx.get('session_id', 'no-sess')
+    logger.error(f"❌ [{session_id}] 工具失败: {tool_name} | 错误: {error}")
 
 
 @tool
@@ -195,6 +74,8 @@ async def execute_redis_command(
             "command": "KEYS *"
         })
     """
+    _log_tool_start("execute_redis_command", command=command, host=host, port=port)
+
     # 安全检查：禁止危险操作
     dangerous_patterns = [
         r'\bFLUSHALL\b',
@@ -207,10 +88,14 @@ async def execute_redis_command(
 
     for pattern in dangerous_patterns:
         if re.search(pattern, command, re.IGNORECASE):
+            error_msg = f"危险操作被拒绝: {pattern}。只允许只读操作。"
+            _log_tool_error("execute_redis_command", error_msg)
             return {
                 "success": False,
                 "output": "",
-                "error": f"Dangerous operation detected: {pattern}. Only read operations are allowed.",
+                "error": error_msg,
+                "error_type": "SecurityViolation",
+                "suggestion": "请使用只读命令（如 INFO, GET, KEYS）来查询数据",
                 "exit_code": -1,
                 "execution_mode": "cli",
                 "needs_fallback": False
@@ -221,8 +106,6 @@ async def execute_redis_command(
     if password:
         full_command += f" -a {password}"
     full_command += f" {command}"
-
-    logger.info(f"Executing redis command: redis-cli -h {host} -p {port} {command}")
 
     try:
         # 获取当前环境变量
@@ -244,10 +127,14 @@ async def execute_redis_command(
         except asyncio.TimeoutError:
             process.kill()
             await process.wait()  # 等待进程真正结束，避免僵尸进程
+            error_msg = f"命令执行超时（{timeout}秒）"
+            _log_tool_error("execute_redis_command", error_msg)
             return {
                 "success": False,
                 "output": "",
-                "error": f"Command timed out after {timeout} seconds",
+                "error": error_msg,
+                "error_type": "Timeout",
+                "suggestion": "请增加超时时间或简化查询",
                 "exit_code": -1,
                 "execution_mode": "cli",
                 "needs_fallback": False
@@ -259,21 +146,43 @@ async def execute_redis_command(
 
         success = exit_code == 0
 
+        if success:
+            _log_tool_success("execute_redis_command", f"Redis 命令执行成功")
+        else:
+            _log_tool_error("execute_redis_command", error or f"退出码: {exit_code}")
+
         return {
             "success": success,
             "output": output,
             "error": error if error else None,
+            "error_type": "CommandFailed" if not success and error else None,
+            "suggestion": "请检查 Redis 服务是否运行，以及命令语法是否正确" if not success else None,
             "exit_code": exit_code,
             "execution_mode": "cli",
             "needs_fallback": False
         }
 
-    except Exception as e:
-        logger.exception(f"Error executing redis command: {e}")
+    except FileNotFoundError:
+        error_msg = "redis-cli 命令未找到"
+        _log_tool_error("execute_redis_command", error_msg)
         return {
             "success": False,
             "output": "",
-            "error": str(e),
+            "error": error_msg,
+            "error_type": "CommandNotFound",
+            "suggestion": "请确保已安装 Redis 客户端工具",
+            "exit_code": -1,
+            "execution_mode": "cli",
+            "needs_fallback": False
+        }
+    except Exception as e:
+        error_msg = str(e)
+        _log_tool_error("execute_redis_command", error_msg)
+        return {
+            "success": False,
+            "output": "",
+            "error": error_msg,
+            "error_type": type(e).__name__,
             "exit_code": -1,
             "execution_mode": "cli",
             "needs_fallback": False
@@ -322,15 +231,21 @@ async def execute_mysql_query(
             "query": "SELECT * FROM mysql.slow_log LIMIT 10"
         })
     """
+    _log_tool_start("execute_mysql_query", query=query[:100], host=host, database=database)
+
     # 安全检查：只允许 SELECT 和 SHOW 语句
     query_upper = query.strip().upper()
     allowed_prefixes = ['SELECT', 'SHOW', 'DESCRIBE', 'EXPLAIN']
 
     if not any(query_upper.startswith(prefix) for prefix in allowed_prefixes):
+        error_msg = "只允许 SELECT, SHOW, DESCRIBE, 和 EXPLAIN 查询"
+        _log_tool_error("execute_mysql_query", error_msg)
         return {
             "success": False,
             "output": "",
-            "error": "Only SELECT, SHOW, DESCRIBE, and EXPLAIN queries are allowed",
+            "error": error_msg,
+            "error_type": "SecurityViolation",
+            "suggestion": "请使用只读查询语句",
             "exit_code": -1,
             "execution_mode": "cli",
             "needs_fallback": False
@@ -343,8 +258,6 @@ async def execute_mysql_query(
     if database:
         full_command += f" {database}"
     full_command += f" -e \"{query}\""
-
-    logger.info(f"Executing mysql query: {query}")
 
     try:
         # 获取当前环境变量
@@ -366,11 +279,17 @@ async def execute_mysql_query(
         except asyncio.TimeoutError:
             process.kill()
             await process.wait()  # 等待进程真正结束，避免僵尸进程
+            error_msg = f"查询执行超时（{timeout}秒）"
+            _log_tool_error("execute_mysql_query", error_msg)
             return {
                 "success": False,
                 "output": "",
-                "error": f"Query timed out after {timeout} seconds",
-                "exit_code": -1
+                "error": error_msg,
+                "error_type": "Timeout",
+                "suggestion": "请增加超时时间或优化查询",
+                "exit_code": -1,
+                "execution_mode": "cli",
+                "needs_fallback": False
             }
 
         output = stdout.decode('utf-8') if stdout else ""
@@ -379,21 +298,43 @@ async def execute_mysql_query(
 
         success = exit_code == 0
 
+        if success:
+            _log_tool_success("execute_mysql_query", "MySQL 查询执行成功")
+        else:
+            _log_tool_error("execute_mysql_query", error or f"退出码: {exit_code}")
+
         return {
             "success": success,
             "output": output,
             "error": error if error else None,
+            "error_type": "QueryFailed" if not success and error else None,
+            "suggestion": "请检查 MySQL 服务是否运行，SQL 语法是否正确" if not success else None,
             "exit_code": exit_code,
             "execution_mode": "cli",
             "needs_fallback": False
         }
 
-    except Exception as e:
-        logger.exception(f"Error executing mysql query: {e}")
+    except FileNotFoundError:
+        error_msg = "mysql 命令未找到"
+        _log_tool_error("execute_mysql_query", error_msg)
         return {
             "success": False,
             "output": "",
-            "error": str(e),
+            "error": error_msg,
+            "error_type": "CommandNotFound",
+            "suggestion": "请确保已安装 MySQL 客户端工具",
+            "exit_code": -1,
+            "execution_mode": "cli",
+            "needs_fallback": False
+        }
+    except Exception as e:
+        error_msg = str(e)
+        _log_tool_error("execute_mysql_query", error_msg)
+        return {
+            "success": False,
+            "output": "",
+            "error": error_msg,
+            "error_type": type(e).__name__,
             "exit_code": -1,
             "execution_mode": "cli",
             "needs_fallback": False
@@ -436,6 +377,8 @@ async def execute_safe_shell_command(
             "command": "df -h"
         })
     """
+    _log_tool_start("execute_safe_shell_command", command=command)
+
     # 默认白名单：只允许安全的读取命令
     default_allowed = [
         'uptime', 'df', 'free', 'top', 'ps', 'netstat',
@@ -458,10 +401,14 @@ async def execute_safe_shell_command(
             break
 
     if not is_allowed:
+        error_msg = f"命令 '{command_base}' 不在允许列表中"
+        _log_tool_error("execute_safe_shell_command", error_msg)
         return {
             "success": False,
             "output": "",
-            "error": f"Command '{command_base}' is not in the allowed list. Allowed: {', '.join(allowed_commands)}",
+            "error": error_msg,
+            "error_type": "NotAllowed",
+            "suggestion": f"允许的命令: {', '.join(allowed_commands[:10])}...",
             "exit_code": -1,
             "execution_mode": "cli",
             "needs_fallback": False
@@ -476,16 +423,18 @@ async def execute_safe_shell_command(
 
     for pattern in dangerous_patterns:
         if re.search(pattern, command):
+            error_msg = f"检测到危险模式: {pattern}"
+            _log_tool_error("execute_safe_shell_command", error_msg)
             return {
                 "success": False,
                 "output": "",
-                "error": f"Dangerous pattern detected: {pattern}",
+                "error": error_msg,
+                "error_type": "DangerousPattern",
+                "suggestion": "此命令被安全策略禁止",
                 "exit_code": -1,
                 "execution_mode": "cli",
                 "needs_fallback": False
             }
-
-    logger.info(f"Executing safe shell command: {command}")
 
     try:
         # 获取当前环境变量
@@ -507,10 +456,14 @@ async def execute_safe_shell_command(
         except asyncio.TimeoutError:
             process.kill()
             await process.wait()  # 等待进程真正结束，避免僵尸进程
+            error_msg = f"命令执行超时（{timeout}秒）"
+            _log_tool_error("execute_safe_shell_command", error_msg)
             return {
                 "success": False,
                 "output": "",
-                "error": f"Command timed out after {timeout} seconds",
+                "error": error_msg,
+                "error_type": "Timeout",
+                "suggestion": "请增加超时时间或简化命令",
                 "exit_code": -1,
                 "execution_mode": "cli",
                 "needs_fallback": False
@@ -522,21 +475,30 @@ async def execute_safe_shell_command(
 
         success = exit_code == 0
 
+        if success:
+            _log_tool_success("execute_safe_shell_command", "Shell 命令执行成功")
+        else:
+            _log_tool_error("execute_safe_shell_command", error or f"退出码: {exit_code}")
+
         return {
             "success": success,
             "output": output,
             "error": error if error else None,
+            "error_type": "CommandFailed" if not success and error else None,
+            "suggestion": None if success else "请检查命令语法和参数",
             "exit_code": exit_code,
             "execution_mode": "cli",
             "needs_fallback": False
         }
 
     except Exception as e:
-        logger.exception(f"Error executing shell command: {e}")
+        error_msg = str(e)
+        _log_tool_error("execute_safe_shell_command", error_msg)
         return {
             "success": False,
             "output": "",
-            "error": str(e),
+            "error": error_msg,
+            "error_type": type(e).__name__,
             "exit_code": -1,
             "execution_mode": "cli",
             "needs_fallback": False

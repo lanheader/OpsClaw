@@ -63,7 +63,19 @@ apiClient.interceptors.response.use(
           errorMessage = '服务器内部错误';
           break;
         default:
-          errorMessage = data?.detail || data?.message || `请求失败 (${status})`;
+          // 处理 FastAPI 验证错误（detail 可能是数组）
+          if (data?.detail) {
+            if (typeof data.detail === 'string') {
+              errorMessage = data.detail;
+            } else if (Array.isArray(data.detail)) {
+              // FastAPI 验证错误格式
+              errorMessage = data.detail.map((err: any) => err.msg || err.message).join('; ');
+            } else if (typeof data.detail === 'object') {
+              errorMessage = data.detail.msg || data.detail.message || JSON.stringify(data.detail);
+            }
+          } else {
+            errorMessage = data?.message || `请求失败 (${status})`;
+          }
       }
 
       console.error('API Error:', {
@@ -81,8 +93,8 @@ apiClient.interceptors.response.use(
       console.error('Error:', error.message);
     }
 
-    // 显示错误提示
-    message.error(errorMessage);
+    // 使用 setTimeout 避免 React 18 concurrent 警告
+    setTimeout(() => message.error(errorMessage), 0);
     return Promise.reject(error);
   }
 );

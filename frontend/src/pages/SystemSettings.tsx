@@ -19,7 +19,6 @@ import { settingsApi, GroupedSettings, SystemSetting } from '../api/settings';
 import { integrationsAPI, IntegrationTestResponse } from '../api/integrations';
 
 const { Text } = Typography;
-const { TabPane } = Tabs;
 const { TextArea } = Input;
 
 const SystemSettings: React.FC = () => {
@@ -321,20 +320,18 @@ const SystemSettings: React.FC = () => {
             activeKey={activeCategory}
             onChange={setActiveCategory}
             type="card"
-          >
-            {Object.entries(settings).map(([category, categorySettings]) => (
-              <TabPane
-                tab={categoryNames[category] || category}
-                key={category}
-              >
+            items={Object.entries(settings).map(([category, categorySettings]) => ({
+              key: category,
+              label: categoryNames[category] || category,
+              children: (
                 <div style={{ maxWidth: 800 }}>
                   {categorySettings.map((setting: SystemSetting) =>
                     renderSettingField(setting)
                   )}
                 </div>
-              </TabPane>
-            ))}
-          </Tabs>
+              ),
+            }))}
+          />
         </Form>
       </Card>
     </Space>

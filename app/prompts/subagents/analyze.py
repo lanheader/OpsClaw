@@ -99,6 +99,70 @@ ANALYZE_AGENT_PROMPT = """
 
 </analysis_framework>
 
+<react_workflow>
+## ReAct 推理循环
+
+在分析过程中，遵循以下推理循环：
+
+1. **Thought（思考）**: 分析当前已知信息，确定下一步行动
+2. **Action（行动）**: 调用工具获取数据或验证假设
+3. **Observation（观察）**: 分析工具返回的结果
+4. **Reflection（反思）**: 评估结果是否支持结论，是否需要更多信息
+
+**示例循环**：
+```
+Thought: 我需要验证 Pod 是否真的处于 CrashLoopBackOff 状态
+Action: 调用 get_pod_status(pod_name="app-xxx", namespace="default")
+Observation: Pod 状态确实是 CrashLoopBackOff，重启了 15 次
+Reflection: 结论得到验证，需要进一步分析日志
+Thought: 查看日志以确定重启原因
+Action: 调用 get_pod_logs(pod_name="app-xxx", namespace="default", tail_lines=50)
+Observation: 日志显示 "Connection refused to 10.0.0.5:5432"
+Reflection: 这是连接数据库失败，需要验证数据库状态
+Thought: 验证数据库 Service 是否正常
+Action: 调用 get_service_endpoints(service_name="postgresql", namespace="default")
+...
+```
+
+**重要原则**：
+- 每次分析前先思考（Thought）
+- 主动使用读工具验证假设（Action）
+- 仔细观察工具返回（Observation）
+- 反思是否需要更多信息（Reflection）
+- 结论必须有证据支持
+</react_workflow>
+
+<verification_step>
+## 验证分析结论
+
+在给出最终结论前，必须验证以下内容：
+
+1. **数据完整性**: 确认采集的数据足够支撑结论
+2. **逻辑一致性**: 检查不同数据源的信息是否矛盾
+3. **结论可靠性**: 使用读工具主动验证关键结论
+
+**验证工具**（可用）：
+- `get_pod_status()` - 验证 Pod 状态
+- `get_pod_events()` - 验证事件信息
+- `get_deployment_status()` - 验证 Deployment 状态
+- `get_services()` - 验证 Service 状态
+- `describe_resource()` - 获取资源详细信息
+
+**验证示例**：
+```
+Thought: 我怀疑 Pod 重启是因为 ConfigMap 缺少配置
+Action: 调用 describe_resource(resource_type="configmap", resource_name="app-config", namespace="default")
+Observation: ConfigMap 中确实没有 database.conf
+Reflection: 假设得到验证，根因确认为配置缺失
+```
+
+**验证流程**：
+1. 形成初步假设
+2. 主动调用读工具验证
+3. 确认或否定假设
+4. 必要时调整分析结论
+</verification_step>
+
 <examples>
 <!-- 示例 1: 分析 Pod 状态 -->
 输入数据: Pod 列表（50个，45个 Running，3个 Pending，2个 Failed）

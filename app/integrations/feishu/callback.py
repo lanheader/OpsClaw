@@ -22,6 +22,7 @@ from app.integrations.feishu.callback_extensions import (
 )
 from app.integrations.feishu.client import get_feishu_client
 from app.integrations.feishu.message_formatter import (
+    clean_xml_tags,
     format_clarification_request,
     format_error_message,
     format_help_message,
@@ -34,9 +35,99 @@ from app.models.user import User
 from app.services.approval_intent_service import classify_approval_intent
 from app.services.chat_service import get_or_create_feishu_session, save_feishu_message
 from app.services.session_state_manager import SessionStateManager
-from app.utils.logger import get_logger
+from app.utils.logger import get_logger, set_request_context, clear_request_context
 
 logger = get_logger(__name__)
+
+
+def _convert_card_to_readable_text(card: Dict[str, Any]) -> str:
+    """
+    将飞书卡片转换为可读的文本格式，用于保存到数据库和 Web 显示
+
+    Args:
+        card: 飞书卡片 JSON
+
+    Returns:
+        可读的文本格式
+    """
+    lines = []
+
+    # 提取标题
+    header = card.get("header", {})
+    title_obj = header.get("title", {})
+    title = title_obj.get("content", "")
+    if title:
+        lines.append(f"## {title}\n")
+
+    # 提取元素内容
+    # 飞书卡片结构：card.body.elements 或 card.elements（兼容两种格式）
+    body = card.get("body", {})
+    elements = body.get("elements", []) if body else card.get("elements", [])
+
+    for element in elements:
+        tag = element.get("tag")
+
+        # 分隔线
+        if tag == "hr":
+            lines.append("---")
+
+        # 文本内容
+        elif tag == "div":
+            text_obj = element.get("text", {})
+            text_tag = text_obj.get("tag")
+            content = text_obj.get("content", "")
+
+            if text_tag == "lark_md":
+                # Markdown 内容
+                lines.append(content)
+            elif text_tag == "plain_text":
+                # 纯文本
+                lines.append(content)
+
+        # Markdown 内容（飞书卡片 body.elements 中的 markdown tag）
+        elif tag == "markdown":
+            content = element.get("content", "")
+            if content:
+                lines.append(content)
+
+        # 列（用于表格布局）
+        elif tag == "column_set":
+            columns = element.get("columns", [])
+            column_texts = []
+            for col in columns:
+                col_elements = col.get("elements", [])
+                for col_el in col_elements:
+                    if col_el.get("tag") == "div":
+                        text_obj = col_el.get("text", {})
+                        content = text_obj.get("content", "")
+                        if content:
+                            # 移除 markdown 加粗标记以保持表格简洁
+                            content = content.replace("**", "")
+                            column_texts.append(content)
+            if column_texts:
+                lines.append(" | ".join(column_texts))
+
+        # 交互按钮
+        elif tag == "action":
+            actions = element.get("actions", [])
+            button_texts = []
+            for action in actions:
+                if action.get("tag") == "button":
+                    text_obj = action.get("text", {})
+                    button_text = text_obj.get("content", "")
+                    if button_text:
+                        button_texts.append(f"[{button_text}]")
+            if button_texts:
+                lines.append(f"\n操作: {' '.join(button_texts)}")
+
+    # 组合内容，清理多余的空行
+    result = "\n".join(lines)
+    # 替换连续的多个换行为最多两个
+    import re
+    result = re.sub(r"\n{3,}", "\n\n", result)
+
+    return result.strip()
+
 
 # 确认关键词
 CONFIRMATION_KEYWORDS = {
@@ -77,6 +168,9 @@ def unwrap_overwrite(obj: Any) -> Any:
 
 async def format_tool_output(content: str) -> dict:
     """格式化输出为飞书卡片格式。"""
+    # 清理 XML 标签
+    content = clean_xml_tags(content)
+
     title = "💬 回复"
     for line in content.split("\n"):
         if line.startswith("##"):
@@ -212,6 +306,14 @@ async def _handle_message_receive_impl(message: Dict[str, Any]) -> None:
         sender_id = message.get("sender", {}).get("sender_id", {}).get("user_id", "unknown")
         raw_content = message.get("content", {})
 
+        # 设置请求上下文（用于日志追踪）- 使用 chat_id 作为临时 session_id
+        set_request_context(
+            session_id=chat_id or "unknown",
+            user_id=sender_id,
+            channel="feishu"
+        )
+        logger.info(f"📥 收到飞书消息: sender={sender_id}, chat_id={chat_id}")
+
         await _try_add_message_reaction(message_id)
 
         if message_type != "text":
@@ -229,6 +331,15 @@ async def _handle_message_receive_impl(message: Dict[str, Any]) -> None:
 
         sender_name = await _fetch_sender_name(sender_id)
         session_id = await _persist_user_message(chat_id, sender_id, sender_name, text)
+
+        # 更新请求上下文中的 session_id（现在有了真正的 session_id）
+        if session_id:
+            set_request_context(
+                session_id=session_id,
+                user_id=sender_id,
+                channel="feishu"
+            )
+            logger.info(f"🔄 已更新 session_id: {session_id}")
 
         if await _handle_special_command(text, chat_id, sender_id, sender_name, session_id):
             return
@@ -253,7 +364,7 @@ async def _handle_message_receive_impl(message: Dict[str, Any]) -> None:
             chat_id=chat_id, session_id=session_id, text=text, sender_id=sender_id
         )
     except Exception as exc:
-        logger.exception(f"❌ Error handling message: {exc}")
+        logger.exception(f"❌ 处理飞书消息失败: {exc}")
         print(f"❌ [feishu_callback] Error handling message: {exc}")
         traceback.print_exc()
         try:
@@ -266,6 +377,10 @@ async def _handle_message_receive_impl(message: Dict[str, Any]) -> None:
             await _send_text_reply(chat_id, detailed_error)
         except Exception:
             pass
+    finally:
+        # 清除请求上下文
+        clear_request_context()
+        logger.info("📤 飞书消息处理完成，已清除请求上下文")
 
 
 async def _try_send_not_implemented_error(message: Dict[str, Any]) -> None:
@@ -293,14 +408,9 @@ def _print_critical_error(error_type: str, exc: Exception) -> None:
 def _log_received_message(message: Dict[str, Any]) -> None:
     """记录收到的飞书消息。"""
     logger.info("=" * 60)
-    logger.info("🎯 handle_message_receive 被调用 (新架构)")
-    logger.info(f"📨 收到消息: {message}")
+    logger.info("🎯 飞书消息回调被触发 (DeepAgents 架构)")
+    logger.info(f"📨 消息内容: {message}")
     logger.info("=" * 60)
-
-    print("=" * 60)
-    print("🎯 [feishu_callback] handle_message_receive 被调用")
-    print(f"📨 [feishu_callback] 收到消息: {message}")
-    print("=" * 60)
 
 
 async def _try_add_message_reaction(message_id: Optional[str]) -> None:
@@ -701,10 +811,10 @@ async def _send_formatted_result(
         logger.info("📤 准备发送飞书卡片")
         client = get_feishu_client()
         await client.send_card_message(chat_id, formatted_result["card"])
-        card_title = (
-            formatted_result["card"].get("header", {}).get("title", {}).get("content", "查询结果")
-        )
-        all_replies.append(f"[卡片消息] {card_title}")
+
+        # 将卡片转换为可读文本保存到数据库
+        readable_text = _convert_card_to_readable_text(formatted_result["card"])
+        all_replies.append(readable_text)
         logger.info("✅ 已发送飞书卡片")
         return
 

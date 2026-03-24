@@ -1,5 +1,5 @@
 """
-命令执行工具（从 command_executor_tools.py 迁移）
+命令执行工具
 
 所有工具都需要 command.execute 权限才能使用。
 """
@@ -12,33 +12,6 @@ from sqlalchemy.orm import Session
 from app.core.permission_checker import check_tool_permission
 
 logger = logging.getLogger(__name__)
-
-
-@tool
-async def execute_kubectl_command_tool(
-    command: str,
-    user_id: int,
-    db: Session,
-    namespace: Optional[str] = None,
-    timeout: int = 30,
-) -> Dict[str, Any]:
-    """
-    执行 kubectl 命令（只允许读操作）
-
-    需要权限: command.execute
-
-    Args:
-        command: kubectl 子命令
-        user_id: 用户ID（用于权限检查）
-        db: 数据库会话（用于权限检查）
-        namespace: 可选的命名空间
-        timeout: 命令超时时间
-    """
-    # 权限检查
-    check_tool_permission(db, user_id, "command.execute", raise_exception=True)
-
-    from app.tools.command_executor_tools import execute_kubectl_command
-    return await execute_kubectl_command.ainvoke({"command": command, "namespace": namespace, "timeout": timeout})
 
 
 @tool
@@ -123,7 +96,6 @@ async def execute_safe_shell_command_tool(
 
 
 __all__ = [
-    "execute_kubectl_command_tool",
     "execute_redis_command_tool",
     "execute_mysql_query_tool",
     "execute_safe_shell_command_tool",

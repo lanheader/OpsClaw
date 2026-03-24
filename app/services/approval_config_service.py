@@ -21,13 +21,26 @@ class ApprovalConfigService:
         """
         将 ToolRegistry 中的工具同步到 approval_configs 表
 
+        同步逻辑：
+        - 新工具：创建记录，默认 HIGH 风险需要审批
+        - 现有工具：更新基础信息（保留手动配置的 requires_approval）
+        - 缺失工具：仅更新（不删除数据库中已存在但代码中已删除的工具）
+
         Returns:
-            同步的工具数量
+            同步的工具数量（新增数量）
         """
         registry = ToolRegistry()
         tool_classes = registry.list_tools()
 
         synced_count = 0
+        updated_count = 0
+
+        # 获取数据库中所有已存在的工具
+        existing_tools = {
+            config.tool_name: config
+            for config in db.query(ApprovalConfig).all()
+        }
+
         for tool_class in tool_classes:
             metadata = tool_class.get_metadata()
             if not metadata:
@@ -37,28 +50,24 @@ class ApprovalConfigService:
             tool_group = metadata.group or "default"
             risk_level = metadata.risk_level.value if metadata.risk_level else "unknown"
             description = metadata.description or ""
-            permissions = metadata.permissions or []
 
             # 默认：HIGH 风险需要审批，其他不需要
             requires_approval = metadata.risk_level == RiskLevel.HIGH
 
             # 查找现有记录
-            existing = (
-                db.query(ApprovalConfig)
-                .filter(ApprovalConfig.tool_name == tool_name)
-                .first()
-            )
+            existing = existing_tools.get(tool_name)
 
             if existing:
                 # 更新现有记录（保留 requires_approval 的手动配置）
                 existing.tool_group = tool_group
                 existing.risk_level = risk_level
                 existing.description = description
-                # 如果是新同步的工具，才设置默认值
+                # 确保默认值存在
                 if existing.approval_roles is None:
                     existing.approval_roles = []
                 if existing.exempt_roles is None:
                     existing.exempt_roles = []
+                updated_count += 1
             else:
                 # 创建新记录
                 new_config = ApprovalConfig(
@@ -74,7 +83,9 @@ class ApprovalConfigService:
                 synced_count += 1
 
         db.commit()
-        logger.info(f"同步工具到审批配置表: 新增 {synced_count} 个工具")
+        logger.info(
+            f"同步工具到审批配置表: 新增 {synced_count} 个工具, 更新 {updated_count} 个工具"
+        )
         return synced_count
 
     @staticmethod

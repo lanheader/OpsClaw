@@ -4,6 +4,7 @@
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
+from sqlalchemy import desc
 from sqlalchemy.orm import Session
 from app.models.chat_session import ChatSession
 from app.models.chat_message import ChatMessage, MessageRole
@@ -33,21 +34,48 @@ async def get_or_create_feishu_session(
     Returns:
         ChatSession 对象
     """
-    # 查找是否已存在该飞书会话
+    # 优先查找活跃会话
     session = (
         db.query(ChatSession)
-        .filter(ChatSession.external_chat_id == chat_id, ChatSession.source == "feishu")
+        .filter(
+            ChatSession.external_chat_id == chat_id,
+            ChatSession.source == "feishu",
+            ChatSession.is_active == True,
+        )
         .first()
     )
 
     if session:
-        logger.info(f"Found existing Feishu session: {session.session_id}")
+        logger.info(f"Found active Feishu session: {session.session_id}")
         # 如果会话存在但没有用户名，更新用户名
         if sender_name and not session.external_user_name:
             session.external_user_name = sender_name
             db.commit()
             logger.info(f"Updated Feishu session user name: {sender_name}")
         return session
+
+    # 没有活跃会话，检查是否有非活跃会话
+    inactive_session = (
+        db.query(ChatSession)
+        .filter(
+            ChatSession.external_chat_id == chat_id,
+            ChatSession.source == "feishu",
+        )
+        .order_by(desc(ChatSession.created_at))
+        .first()
+    )
+
+    if inactive_session:
+        # 重新激活最近的非活跃会话
+        inactive_session.is_active = True
+        inactive_session.state = "normal"
+        inactive_session.pending_approval_data = None
+        if sender_name:
+            inactive_session.external_user_name = sender_name
+        db.commit()
+        db.refresh(inactive_session)
+        logger.info(f"Reactivated inactive Feishu session: {inactive_session.session_id}")
+        return inactive_session
 
     # 创建新会话
     # 使用默认用户（admin）或创建一个飞书专用用户

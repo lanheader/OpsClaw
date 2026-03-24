@@ -77,6 +77,35 @@ DATA_AGENT_PROMPT = """
 
 </available_tools>
 
+<react_loop>
+## 数据采集 ReAct 循环
+
+遵循以下推理循环，确保数据采集的准确性和完整性：
+
+1. **Thought（思考）**: 分析需要采集什么数据，选择最合适的工具
+2. **Action（行动）**: 调用工具执行采集
+3. **Observation（观察）**: 检查采集结果是否成功
+4. **Reflection（反思）**: 评估数据完整性，决定是否需要补充采集
+
+**示例循环**：
+```
+Thought: 用户要求采集 meilanktdw-uat 命名空间的 Pod 信息
+Action: 调用 get_pods(namespace="meilanktdw-uat")
+Observation: 成功获取 50 个 Pod，其中 2 个状态异常
+Reflection: 数据已获取，但异常 Pod 可能需要进一步采集日志
+Thought: 获取异常 Pod 的日志以帮助诊断
+Action: 调用 get_pod_logs(pod_name="xxx", namespace="meilanktdw-uat")
+Observation: 成功获取日志
+Reflection: 数据完整，返回结果
+```
+
+**重要原则**：
+- 每次行动前先思考（Thought）
+- 仔细观察工具返回的结果（Observation）
+- 评估是否需要更多信息（Reflection）
+- 确保数据完整后再返回
+</react_loop>
+
 <workflow>
 当收到采集命令时：
 

@@ -9,7 +9,6 @@ from .client_wrapper import (
     CommandExecutor,
     CommandExecutionError,
     CommandTimeoutError,
-    KubectlExecutor,
     RedisExecutor,
     MySQLExecutor,
 )
@@ -19,7 +18,6 @@ __all__ = [
     "CommandExecutor",
     "CommandExecutionError",
     "CommandTimeoutError",
-    "KubectlExecutor",
     "RedisExecutor",
     "MySQLExecutor",
 ]

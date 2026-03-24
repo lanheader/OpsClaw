@@ -48,6 +48,36 @@ class IntegrationConfig:
         return IntegrationConfig.get_setting(db, "k8s.enabled", False)
 
     @staticmethod
+    def get_k8s_auth_mode(db: Session) -> str:
+        """
+        获取 K8s 认证模式
+
+        Returns:
+            "config" (kubeconfig 文件) 或 "token" (ServiceAccount Token)
+        """
+        return IntegrationConfig.get_setting(db, "k8s.auth_mode", "config")
+
+    @staticmethod
+    def get_k8s_kubeconfig(db: Session) -> Optional[str]:
+        """获取 K8s kubeconfig 内容或路径"""
+        return IntegrationConfig.get_setting(db, "k8s.kubeconfig")
+
+    @staticmethod
+    def get_k8s_token(db: Session) -> Optional[str]:
+        """获取 K8s ServiceAccount Token"""
+        return IntegrationConfig.get_setting(db, "k8s.token")
+
+    @staticmethod
+    def get_k8s_api_host(db: Session) -> Optional[str]:
+        """获取 K8s API Server 地址"""
+        return IntegrationConfig.get_setting(db, "k8s.api_host")
+
+    @staticmethod
+    def get_k8s_ca_cert(db: Session) -> Optional[str]:
+        """获取 K8s CA 证书"""
+        return IntegrationConfig.get_setting(db, "k8s.ca_cert")
+
+    @staticmethod
     def is_prometheus_enabled(db: Session) -> bool:
         """检查 Prometheus 集成是否启用"""
         return IntegrationConfig.get_setting(db, "prometheus.enabled", False)
@@ -78,6 +108,11 @@ class IntegrationConfig:
         return {
             "k8s": {
                 "enabled": IntegrationConfig.is_k8s_enabled(db),
+                "auth_mode": IntegrationConfig.get_k8s_auth_mode(db),
+                "kubeconfig": IntegrationConfig.get_k8s_kubeconfig(db),
+                "token": IntegrationConfig.get_k8s_token(db),
+                "api_host": IntegrationConfig.get_k8s_api_host(db),
+                "ca_cert": IntegrationConfig.get_k8s_ca_cert(db),
             },
             "prometheus": {
                 "enabled": IntegrationConfig.is_prometheus_enabled(db),

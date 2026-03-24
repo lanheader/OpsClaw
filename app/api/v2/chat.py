@@ -25,9 +25,10 @@ from app.schemas.chat import (
     ChatMessageCreate,
     ChatMessageResponse,
 )
+from app.utils.logger import set_request_context, clear_request_context, get_logger
 
 router = APIRouter(prefix="/v2/chat", tags=["chat"])
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @router.post("/sessions", response_model=ChatSessionResponse, status_code=status.HTTP_201_CREATED)
@@ -73,13 +74,19 @@ async def get_sessions(
 ):
     """获取当前用户的会话列表"""
     # 查询用户的会话（关联 User 表获取用户名）
-    # 注意：飞书会话对所有用户可见（source='feishu'），Web 会话只对创建者可见
+    # 注意：
+    # - 飞书会话对所有用户可见（source='feishu'），包括已结束的会话
+    # - Web 会话只对创建者可见，且只显示活跃的会话
     sessions_query = (
         db.query(ChatSession, User)
         .join(User, ChatSession.user_id == User.id)
         .filter(
-            (ChatSession.source == "feishu") | (ChatSession.user_id == current_user.id),
-            ChatSession.is_active == True,
+            (
+                (ChatSession.source == "feishu") |
+                ((ChatSession.source == "web") & (ChatSession.user_id == current_user.id))
+            ),
+            # 只对 Web 会话过滤 is_active，飞书会话显示所有（包括已结束的）
+            ((ChatSession.source == "feishu") | (ChatSession.is_active == True)),
         )
         .order_by(desc(ChatSession.updated_at))
     )
@@ -280,6 +287,14 @@ async def send_message(
     current_user: User = Depends(get_current_user),
 ):
     """发送消息并通过 Agent 工作流处理（SSE）"""
+    # 设置请求上下文（用于日志追踪）
+    request_id = set_request_context(
+        session_id=session_id,
+        user_id=str(current_user.id),
+        channel="web"
+    )
+    logger.info(f"📥 收到 Web 聊天请求: session={session_id}, user={current_user.username}")
+
     # 验证会话所有权
     # 注意：飞书会话对所有用户可见，Web 会话只对创建者可见
     session = (
@@ -293,6 +308,7 @@ async def send_message(
     )
 
     if not session:
+        logger.warning(f"会话不存在: session={session_id}")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="会话不存在")
 
     async def generate_stream():
@@ -309,7 +325,7 @@ async def send_message(
             db.commit()
             db.refresh(user_message)
 
-            logger.info(f"User message saved: session={session_id}, message_id={user_message.id}")
+            logger.info(f"用户消息已保存: message_id={user_message.id}")
 
             # 2. 调用 DeepAgents 工作流处理消息（流式）
 
@@ -527,6 +543,71 @@ async def send_message(
                 )
                 db.add(assistant_message)
 
+                # 3.1 收集训练数据用于 DSPy 优化（异步执行，不阻塞响应）
+                try:
+                    from app.services.unified_prompt_optimizer import collect_interaction_for_training
+
+                    # 确定示例类型
+                    intent_type = final_state.get("intent_type", "unknown") if final_state else "unknown"
+                    example_type_map = {
+                        "query": "query",
+                        "diagnose": "diagnose",
+                        "operate": "execute",
+                        "unknown": "query",
+                    }
+                    example_type = example_type_map.get(intent_type, "query")
+
+                    # 构建上下文
+                    context = {
+                        "session_id": session_id,
+                        "workflow_status": final_state.get("workflow_status") if final_state else "unknown",
+                        "intent_type": intent_type,
+                        "diagnosis_round": final_state.get("diagnosis_round", 0) if final_state else 0,
+                        "data_sufficient": final_state.get("data_sufficient", False) if final_state else False,
+                        "collected_data_keys": list(final_state.get("collected_data", {}).keys()) if final_state else [],
+                    }
+
+                    # 为每个 subagent 收集训练数据
+                    # 根据工作流状态确定参与的 subagents
+                    subagents_to_collect = []
+
+                    # 所有请求都涉及 data-agent
+                    subagents_to_collect.append("data-agent")
+
+                    # 诊断类请求涉及 analyze-agent
+                    if intent_type in ["diagnose", "operate"]:
+                        subagents_to_collect.append("analyze-agent")
+
+                    # 操作类请求涉及 execute-agent
+                    if intent_type == "operate":
+                        subagents_to_collect.append("execute-agent")
+
+                    # 异步收集训练数据（不阻塞主流程）
+                    import asyncio
+
+                    async def collect_training_data():
+                        for subagent_name in subagents_to_collect:
+                            try:
+                                await collect_interaction_for_training(
+                                    subagent_name=subagent_name,
+                                    user_input=message_data.content,
+                                    agent_output=full_response,
+                                    context=context,
+                                    example_type=example_type,
+                                    session_id=session_id,
+                                    user_id=current_user.id,
+                                )
+                                logger.info(f"✅ 收集训练数据: {subagent_name}")
+                            except Exception as e:
+                                logger.error(f"❌ 收集训练数据失败 {subagent_name}: {e}")
+
+                    # 在后台执行训练数据收集
+                    asyncio.create_task(collect_training_data())
+
+                except Exception as e:
+                    logger.error(f"收集训练数据时出错: {e}")
+                    # 不阻塞主流程，只记录错误
+
                 # 更新会话
                 session.updated_at = datetime.now(timezone.utc)
                 if not session.title:
@@ -541,6 +622,43 @@ async def send_message(
                     f"Assistant message saved: session={session_id}, message_id={assistant_message.id}"
                 )
 
+                # 4. 自动收集训练数据用于 DSPy 优化
+                try:
+                    from app.services.unified_prompt_optimizer import collect_interaction_for_training
+
+                    # 推断示例类型
+                    intent_type = final_state.get("intent_type", "query") if final_state else "query"
+                    example_type_map = {
+                        "query": "query",
+                        "diagnose": "diagnose",
+                        "operate": "execute",
+                        "inspect": "query",
+                        "unknown": "query",
+                    }
+                    example_type = example_type_map.get(intent_type, "query")
+
+                    # 收集数据（异步，不阻塞响应）
+                    asyncio.create_task(
+                        collect_interaction_for_training(
+                            subagent_name="analyze-agent",  # 简化：使用 analyze-agent
+                            user_input=message_data.content,
+                            agent_output=full_response,
+                            context={
+                                "intent_type": intent_type,
+                                "workflow_status": final_state.get("workflow_status") if final_state else "unknown",
+                                "collected_data_keys": list(final_state.get("collected_data", {}).keys()) if final_state else [],
+                            },
+                            example_type=example_type,
+                            session_id=session_id,
+                            user_id=current_user.id,
+                        )
+                    )
+                    logger.info(f"✅ 训练数据已收集: {example_type}")
+
+                except Exception as e:
+                    # 训练数据收集失败不影响正常响应
+                    logger.warning(f"收集训练数据失败（不影响响应）: {e}")
+
                 # 发送完成事件
                 done_data = json.dumps(
                     {"type": "done", "message_id": assistant_message.id}, ensure_ascii=False
@@ -548,10 +666,13 @@ async def send_message(
                 yield f"data: {done_data}\n\n"
 
         except Exception as e:
-            logger.error(f"Error in stream generation: {e}", exc_info=True)
+            logger.error(f"流式响应生成错误: {e}", exc_info=True)
             # 发送错误事件
             error_data = json.dumps({"type": "error", "message": str(e)}, ensure_ascii=False)
             yield f"data: {error_data}\n\n"
+        finally:
+            # 清除请求上下文
+            clear_request_context()
 
     return StreamingResponse(
         generate_stream(),
@@ -579,6 +700,14 @@ async def resume_workflow(
         "status": "approved"  // 或 "rejected"
     }
     """
+    # 设置请求上下文（用于日志追踪）
+    request_id = set_request_context(
+        session_id=session_id,
+        user_id=str(current_user.id),
+        channel="web"
+    )
+    logger.info(f"▶️ 收到工作流恢复请求: session={session_id}, user={current_user.username}")
+
     # 验证会话所有权
     # 注意：飞书会话对所有用户可见，Web 会话只对创建者可见
     session = (
@@ -592,6 +721,7 @@ async def resume_workflow(
     )
 
     if not session:
+        logger.warning(f"会话不存在: session={session_id}")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="会话不存在")
 
     async def generate_resume_stream():
@@ -817,9 +947,12 @@ async def resume_workflow(
                 yield f"data: {done_data}\n\n"
 
         except Exception as e:
-            logger.error(f"Error in resume stream: {e}", exc_info=True)
+            logger.error(f"恢复工作流流式响应错误: {e}", exc_info=True)
             error_data = json.dumps({"type": "error", "message": str(e)}, ensure_ascii=False)
             yield f"data: {error_data}\n\n"
+        finally:
+            # 清除请求上下文
+            clear_request_context()
 
     return StreamingResponse(
         generate_resume_stream(),

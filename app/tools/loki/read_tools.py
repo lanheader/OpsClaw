@@ -6,7 +6,6 @@ Loki 工具（新架构示例）
 """
 
 from typing import Dict, Any, Optional
-import logging
 
 from app.tools.base import (
     BaseOpTool,
@@ -14,10 +13,31 @@ from app.tools.base import (
     OperationType,
     RiskLevel,
     ToolCategory,
+    tool_error_response,
+    tool_success_response,
 )
 from app.tools.fallback import get_loki_fallback
+from app.utils.logger import get_logger, get_request_context
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
+
+
+def _log_tool_start(tool_name: str, **kwargs):
+    """记录工具开始执行的日志"""
+    ctx = get_request_context()
+    session_id = ctx.get('session_id', 'no-sess')
+    params = {k: v for k, v in kwargs.items() if v is not None}
+    logger.info(f"🔧 [{session_id}] 执行工具: {tool_name} | 参数: {params}")
+
+
+def _log_tool_success(tool_name: str, result_count: int = None):
+    """记录工具执行成功的日志"""
+    ctx = get_request_context()
+    session_id = ctx.get('session_id', 'no-sess')
+    if result_count is not None:
+        logger.info(f"✅ [{session_id}] 工具完成: {tool_name} | 返回 {result_count} 条日志")
+    else:
+        logger.info(f"✅ [{session_id}] 工具完成: {tool_name}")
 
 
 @register_tool(
@@ -49,34 +69,32 @@ class QueryLogsTool(BaseOpTool):
         end: Optional[str] = None,
         **kwargs
     ) -> Dict[str, Any]:
-        """
-        执行工具操作
-
-        Args:
-            query: LogQL 查询语句
-            limit: 返回结果数量限制
-            start: 开始时间（ISO 8601 格式或相对时间如 "-1h"）
-            end: 结束时间（ISO 8601 格式或相对时间）
-
-        Returns:
-            执行结果字典
-        """
+        """执行工具操作"""
+        _log_tool_start("query_logs", query=query, limit=limit, start=start, end=end)
         try:
             # 优先使用 SDK
-            logger.info(f"Using Loki SDK to query logs: {query}")
             result = await self._execute_with_sdk(query, limit, start, end)
+            _log_tool_success("query_logs", len(result.get("data", {}).get("logs", [])))
             return result
         except Exception as e:
-            logger.warning(f"Loki SDK failed: {e}, falling back to CLI")
-            # 降级到 CLI
-            result = await self.fallback.execute(
-                operation="query",
-                query=query,
-                limit=limit,
-                start=start or "-1h",
-                end=end or "now"
-            )
-            return result
+            logger.warning(f"Loki SDK 失败，降级到 CLI: {e}")
+            try:
+                # 降级到 CLI
+                result = await self.fallback.execute(
+                    operation="query",
+                    query=query,
+                    limit=limit,
+                    start=start or "-1h",
+                    end=end or "now"
+                )
+                _log_tool_success("query_logs")
+                return result
+            except Exception as fallback_error:
+                return tool_error_response(
+                    fallback_error, "query_logs",
+                    context={"query": query, "limit": limit, "start": start, "end": end},
+                    suggestion="请检查 LogQL 查询语法是否正确，以及 Loki 服务是否正常运行"
+                )
 
     async def _execute_with_sdk(
         self,
@@ -89,18 +107,17 @@ class QueryLogsTool(BaseOpTool):
         # TODO: 实现真实的 Loki SDK 调用
         # 这里提供简化的实现
 
-        return {
-            "success": True,
-            "data": {
+        return tool_success_response(
+            {
                 "query": query,
                 "logs": [],  # 实际应从 SDK 获取
                 "limit": limit,
                 "start": start,
                 "end": end,
             },
-            "execution_mode": "sdk",
-            "source": "loki-sdk",
-        }
+            "query_logs",
+            source="loki-sdk"
+        )
 
 
 @register_tool(
@@ -131,17 +148,9 @@ class QueryErrorLogsTool(BaseOpTool):
         limit: int = 1000,
         **kwargs
     ) -> Dict[str, Any]:
-        """
-        执行工具操作
+        """执行工具操作"""
+        _log_tool_start("query_error_logs", namespace=namespace, app=app, limit=limit)
 
-        Args:
-            namespace: Kubernetes 命名空间
-            app: 应用名称
-            limit: 返回结果数量限制
-
-        Returns:
-            执行结果字典
-        """
         # 构建 LogQL 查询
         query_parts = ['level="error"']
 
@@ -153,17 +162,25 @@ class QueryErrorLogsTool(BaseOpTool):
         query = "{" + ",".join(query_parts) + "}"
 
         try:
-            logger.info(f"Using Loki SDK to query error logs: {query}")
             result = await self._execute_with_sdk(query, limit)
+            _log_tool_success("query_error_logs", len(result.get("data", {}).get("logs", [])))
             return result
         except Exception as e:
-            logger.warning(f"Loki SDK failed: {e}, falling back to CLI")
-            result = await self.fallback.execute(
-                operation="query",
-                query=query,
-                limit=limit
-            )
-            return result
+            logger.warning(f"Loki SDK 失败，降级到 CLI: {e}")
+            try:
+                result = await self.fallback.execute(
+                    operation="query",
+                    query=query,
+                    limit=limit
+                )
+                _log_tool_success("query_error_logs")
+                return result
+            except Exception as fallback_error:
+                return tool_error_response(
+                    fallback_error, "query_error_logs",
+                    context={"namespace": namespace, "app": app, "query": query},
+                    suggestion="请检查 Loki 服务是否正常运行"
+                )
 
     async def _execute_with_sdk(
         self,
@@ -173,16 +190,15 @@ class QueryErrorLogsTool(BaseOpTool):
         """使用 SDK 执行"""
         # TODO: 实现真实的 Loki SDK 调用
 
-        return {
-            "success": True,
-            "data": {
+        return tool_success_response(
+            {
                 "query": query,
                 "logs": [],  # 实际应从 SDK 获取
                 "limit": limit,
             },
-            "execution_mode": "sdk",
-            "source": "loki-sdk",
-        }
+            "query_error_logs",
+            source="loki-sdk"
+        )
 
 
 @register_tool(
@@ -214,18 +230,9 @@ class SearchLogsTool(BaseOpTool):
         limit: int = 1000,
         **kwargs
     ) -> Dict[str, Any]:
-        """
-        执行工具操作
+        """执行工具操作"""
+        _log_tool_start("search_logs", pattern=pattern, namespace=namespace, app=app, limit=limit)
 
-        Args:
-            pattern: 搜索模式（字符串或正则表达式）
-            namespace: Kubernetes 命名空间
-            app: 应用名称
-            limit: 返回结果数量限制
-
-        Returns:
-            执行结果字典
-        """
         # 构建 LogQL 查询（使用 |= 或 |~ 进行内容搜索）
         query_parts = []
 
@@ -238,17 +245,25 @@ class SearchLogsTool(BaseOpTool):
         query = f'{selector} |= "{pattern}"'
 
         try:
-            logger.info(f"Using Loki SDK to search logs: {query}")
             result = await self._execute_with_sdk(query, limit, pattern)
+            _log_tool_success("search_logs", len(result.get("data", {}).get("logs", [])))
             return result
         except Exception as e:
-            logger.warning(f"Loki SDK failed: {e}, falling back to CLI")
-            result = await self.fallback.execute(
-                operation="query",
-                query=query,
-                limit=limit
-            )
-            return result
+            logger.warning(f"Loki SDK 失败，降级到 CLI: {e}")
+            try:
+                result = await self.fallback.execute(
+                    operation="query",
+                    query=query,
+                    limit=limit
+                )
+                _log_tool_success("search_logs")
+                return result
+            except Exception as fallback_error:
+                return tool_error_response(
+                    fallback_error, "search_logs",
+                    context={"pattern": pattern, "namespace": namespace, "app": app, "query": query},
+                    suggestion="请检查 Loki 服务是否正常运行"
+                )
 
     async def _execute_with_sdk(
         self,
@@ -259,17 +274,16 @@ class SearchLogsTool(BaseOpTool):
         """使用 SDK 执行"""
         # TODO: 实现真实的 Loki SDK 调用
 
-        return {
-            "success": True,
-            "data": {
+        return tool_success_response(
+            {
                 "query": query,
                 "pattern": pattern,
                 "logs": [],  # 实际应从 SDK 获取
                 "limit": limit,
             },
-            "execution_mode": "sdk",
-            "source": "loki-sdk",
-        }
+            "search_logs",
+            source="loki-sdk"
+        )
 
 
 __all__ = [

@@ -325,6 +325,61 @@ def format_pending_approval_warning(approval_data: Dict[str, Any]) -> str:
 请先告诉我是同意还是拒绝，然后我再处理你的新请求。"""
 
 
+import re
+
+
+def clean_xml_tags(content: str) -> str:
+    """
+    清理消息中的 XML 标签，保留内容
+
+    清理的标签包括：
+    - <result>...</result>
+    - <summary>...</summary>
+    - <details>...</details>
+    - <next_steps>...</next_steps>
+    - 以及其他类似的 XML 标签
+
+    Args:
+        content: 原始内容
+
+    Returns:
+        清理后的内容
+    """
+    if not content:
+        return content
+
+    # 定义需要清理的 XML 标签模式
+    # 这些标签通常用于结构化输出，但在飞书中显示时需要移除
+    xml_patterns = [
+        # 常见的结构化标签
+        (r'<result>(.*?)</result>', r'\1'),
+        (r'<summary>(.*?)</summary>', r'\1'),
+        (r'<details>(.*?)</details>', r'\1'),
+        (r'<next_steps>(.*?)</next_steps>', r'\1'),
+        (r'<root_cause>(.*?)</root_cause>', r'\1'),
+        (r'<recommendations>(.*?)</recommendations>', r'\1'),
+        (r'<execution_details>(.*?)</execution_details>', r'\1'),
+        (r'<error>(.*?)</error>', r'\1'),
+        # 自闭合标签
+        (r'<result\s*/>', ''),
+        (r'<summary\s*/>', ''),
+        (r'<details\s*/>', ''),
+        (r'<next_steps\s*/>', ''),
+        # 任何其他 XML 标签（保留内容）
+        (r'<(\w+)>([^<]+)</\1>', r'\2'),
+        (r'<(\w+)\s*/>', ''),
+    ]
+
+    cleaned_content = content
+    for pattern, replacement in xml_patterns:
+        cleaned_content = re.sub(pattern, replacement, cleaned_content, flags=re.DOTALL)
+
+    # 清理多余的空行（超过2个连续换行的情况）
+    cleaned_content = re.sub(r'\n{3,}', '\n\n', cleaned_content)
+
+    return cleaned_content.strip()
+
+
 def _format_command_friendly(cmd: Dict[str, Any]) -> str:
     """
     将命令格式化为用户友好的描述

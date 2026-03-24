@@ -296,16 +296,21 @@ class ToolRegistry:
 
         Args:
             tool_packages: 要扫描的包列表（默认扫描 k8s, prometheus, loki）
+                          支持短格式（如 "k8s"）或完整路径（如 "app.tools.k8s"）
         """
         if tool_packages is None:
             tool_packages = [
                 "app.tools.k8s",
                 "app.tools.prometheus",
                 "app.tools.loki",
+                "app.tools.chat",  # 对话历史工具
             ]
 
         for package in tool_packages:
             try:
+                # 支持短格式，自动转换为完整路径
+                if not package.startswith("app.tools."):
+                    package = f"app.tools.{package}"
                 self._scan_package(package)
             except Exception as e:
                 logger.error(f"Failed to scan package {package}: {e}")
@@ -370,6 +375,7 @@ class ToolRegistry:
     def get_langchain_tools(
         self,
         group_code: str = None,
+        package: str = None,
         permissions: Set[str] = None,
         user_id: Optional[int] = None,
         db = None
@@ -379,6 +385,7 @@ class ToolRegistry:
 
         Args:
             group_code: 工具分组代码（可选）
+            package: 包名（可选，如 "k8s", "prometheus", "loki"）
             permissions: 用户权限集合（可选，用于过滤）
             user_id: 用户ID（可选，用于动态获取权限）
             db: 数据库会话（可选，用于动态获取权限）
@@ -406,6 +413,12 @@ class ToolRegistry:
             # 检查是否暴露给 agent
             if not metadata.expose_to_agent:
                 continue
+
+            # 按包过滤
+            if package is not None:
+                tool_package = metadata.group.split('.')[0] if metadata.group else ''
+                if tool_package != package:
+                    continue
 
             # 检查权限
             if permissions is not None:

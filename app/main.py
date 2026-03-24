@@ -2,6 +2,7 @@
 """FastAPI application entry point for ops-agent-langgraph"""
 
 import logging
+import sys
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -21,16 +22,41 @@ from app.api.v2 import alert
 from app.api.v2 import chat
 from app.api.v2 import inspection
 from app.api.v2 import workflow
+from app.api.v2 import dspy
+from app.api.v2 import prompts
 from app.core.config import get_settings
 from app.core.llm_factory import LLMFactory
 from app.deepagents.main_agent import get_ops_agent as _init_ops_agent
+from app.utils.logger import RequestContextFilter, ContextFormatter
 
-# Configure logging
+# Configure logging with request context support
 settings = get_settings()
-logging.basicConfig(
-    level=getattr(logging, settings.LOG_LEVEL),
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+
+# 创建根日志记录器
+root_logger = logging.getLogger()
+root_logger.setLevel(getattr(logging, settings.LOG_LEVEL))
+
+# 清除默认的 handler
+root_logger.handlers.clear()
+
+# 创建控制台处理器
+console_handler = logging.StreamHandler(sys.stdout)
+console_handler.setLevel(getattr(logging, settings.LOG_LEVEL))
+
+# 添加请求上下文过滤器
+context_filter = RequestContextFilter()
+console_handler.addFilter(context_filter)
+
+# 使用自定义格式化器（包含 session_id 和 request_id）
+formatter = ContextFormatter(
+    "%(asctime)s - [%(session_id)s] - [%(request_id)s] - %(name)s - %(levelname)s - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
 )
+console_handler.setFormatter(formatter)
+
+# 添加处理器到根日志记录器
+root_logger.addHandler(console_handler)
+
 logger = logging.getLogger(__name__)
 
 # 压制第三方库的 DEBUG 噪音，只保留 WARNING 及以上
@@ -222,6 +248,8 @@ app.include_router(workflow.router, prefix="/api")
 app.include_router(chat.router, prefix="/api")
 app.include_router(inspection.router, prefix="/api/v2")
 app.include_router(alert.router, prefix="/api/v2")
+app.include_router(dspy.router, prefix="/api")
+app.include_router(prompts.router, prefix="/api")  # 新增：提示词管理
 app.include_router(feishu.router, prefix="/api/v1")
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(users.router, prefix="/api/v1")

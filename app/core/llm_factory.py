@@ -251,39 +251,42 @@ class LLMFactory:
         """
         创建 Ollama LLM 客户端（本地部署）。
 
+        使用 Ollama 的 OpenAI 兼容 API 来支持工具调用。
+        Ollama 提供 /v1 端点，兼容 OpenAI API 格式。
+
         参数：
             settings: 配置对象
             model_override: 可选的模型名称，用于覆盖配置中的模型
 
         返回：
-            ChatOllama 实例
+            ChatOpenAI 实例（配置为使用 Ollama 的 OpenAI 兼容端点）
 
         异常：
-            ImportError: 如果 langchain-ollama 未安装
+            ImportError: 如果 langchain-openai 未安装
         """
-        try:
-            from langchain_ollama import ChatOllama
-        except ImportError:
-            # 降级尝试使用 langchain-community
-            try:
-                from langchain_community.chat_models import ChatOllama
-            except ImportError:
-                raise ImportError(
-                    "Ollama support not found. "
-                    "Please install it with: pip install langchain-ollama"
-                )
+        from langchain_openai import ChatOpenAI
 
         model_name = model_override or settings.OLLAMA_MODEL
+
+        # Ollama 的 OpenAI 兼容端点
+        # 例如: http://localhost:11434/v1
+        base_url = settings.OLLAMA_BASE_URL.rstrip("/")
+        if not base_url.endswith("/v1"):
+            base_url = f"{base_url}/v1"
+
         logger.info(
-            f"Creating Ollama client: model={model_name}, " f"base_url={settings.OLLAMA_BASE_URL}"
+            f"Creating Ollama client (OpenAI compatible): model={model_name}, "
+            f"base_url={base_url}"
         )
 
         ollama_kwargs = {
             "model": model_name,
             "temperature": settings.OLLAMA_TEMPERATURE,
-            "base_url": settings.OLLAMA_BASE_URL,
+            "base_url": base_url,
+            "api_key": "ollama",  # Ollama 不需要真实 API key，但 ChatOpenAI 要求提供
+            "timeout": 600,  # 大模型推理可能需要更长时间
         }
-        return cast(Any, ChatOllama)(**ollama_kwargs)
+        return cast(Any, ChatOpenAI)(**ollama_kwargs)
 
     @staticmethod
     def _create_openrouter_llm(

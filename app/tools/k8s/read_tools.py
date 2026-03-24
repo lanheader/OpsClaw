@@ -2,11 +2,10 @@
 K8s 读操作工具（新架构）
 
 使用 BaseOpTool 基类和 @register_tool 装饰器。
-支持 SDK → CLI 降级机制。
+直接使用 Kubernetes SDK，不使用 CLI 降级。
 """
 
 from typing import Dict, Any, Optional
-import logging
 
 from app.tools.base import (
     BaseOpTool,
@@ -14,10 +13,37 @@ from app.tools.base import (
     OperationType,
     RiskLevel,
     ToolCategory,
+    tool_error_response,
+    tool_success_response,
 )
-from app.tools.fallback import get_k8s_fallback
+from app.utils.logger import get_logger, get_request_context
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
+
+
+# 通用初始化函数
+def _init_k8s_client(db=None):
+    """初始化 K8s 客户端"""
+    from app.integrations.kubernetes.client import create_client
+    return create_client(db)
+
+
+def _log_tool_start(tool_name: str, **kwargs):
+    """记录工具开始执行的日志"""
+    ctx = get_request_context()
+    session_id = ctx.get('session_id', 'no-sess')
+    params = {k: v for k, v in kwargs.items() if v is not None}
+    logger.info(f"🔧 [{session_id}] 执行工具: {tool_name} | 参数: {params}")
+
+
+def _log_tool_success(tool_name: str, result_count: int = None):
+    """记录工具执行成功的日志"""
+    ctx = get_request_context()
+    session_id = ctx.get('session_id', 'no-sess')
+    if result_count is not None:
+        logger.info(f"✅ [{session_id}] 工具完成: {tool_name} | 返回 {result_count} 条记录")
+    else:
+        logger.info(f"✅ [{session_id}] 工具完成: {tool_name}")
 
 
 # ==================== Pod 操作 ====================
@@ -40,10 +66,8 @@ class GetPodsTool(BaseOpTool):
     查询指定命名空间下的所有 Pod，支持标签过滤。
     """
 
-    def __init__(self):
-        from app.integrations.kubernetes.client import K8sClient
-        self.k8s_client = K8sClient()
-        self.fallback = get_k8s_fallback()
+    def __init__(self, db=None):
+        self.k8s_client = _init_k8s_client(db)
 
     async def execute(
         self,
@@ -52,54 +76,39 @@ class GetPodsTool(BaseOpTool):
         **kwargs
     ) -> Dict[str, Any]:
         """执行工具操作"""
+        _log_tool_start("get_pods", namespace=namespace, label_selector=label_selector)
         try:
-            logger.info(f"Using K8s SDK to list pods in {namespace}")
-            result = await self._execute_with_sdk(namespace, label_selector)
-            return result
-        except Exception as e:
-            logger.warning(f"K8s SDK failed: {e}, falling back to CLI")
-            result = await self.fallback.execute(
-                operation="get pods",
+            pods = self.k8s_client.core_v1.list_namespaced_pod(
                 namespace=namespace,
                 label_selector=label_selector
             )
-            return result
 
-    async def _execute_with_sdk(
-        self,
-        namespace: str,
-        label_selector: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """使用 SDK 执行"""
-        pods = await self.k8s_client.list_namespaced_pod(
-            namespace=namespace,
-            label_selector=label_selector
-        )
+            data = [
+                {
+                    "name": pod.metadata.name,
+                    "namespace": pod.metadata.namespace,
+                    "phase": pod.status.phase,
+                    "ready": self._is_pod_ready(pod),
+                    "restarts": sum(
+                        container.restart_count
+                        for container in (pod.status.container_statuses or [])
+                    ),
+                    "created": pod.metadata.creation_timestamp.isoformat()
+                    if pod.metadata.creation_timestamp
+                    else None,
+                    "node": pod.spec.node_name,
+                }
+                for pod in pods.items
+            ]
 
-        data = [
-            {
-                "name": pod.metadata.name,
-                "namespace": pod.metadata.namespace,
-                "phase": pod.status.phase,
-                "ready": self._is_pod_ready(pod),
-                "restarts": sum(
-                    container.restart_count
-                    for container in (pod.status.container_statuses or [])
-                ),
-                "created": pod.metadata.creation_timestamp.isoformat()
-                if pod.metadata.creation_timestamp
-                else None,
-                "node": pod.spec.node_name,
-            }
-            for pod in pods.items
-        ]
+            _log_tool_success("get_pods", len(data))
+            return tool_success_response(data, "get_pods", source="kubernetes-sdk")
 
-        return {
-            "success": True,
-            "data": data,
-            "execution_mode": "sdk",
-            "source": "kubernetes-sdk",
-        }
+        except Exception as e:
+            return tool_error_response(
+                e, "get_pods",
+                context={"namespace": namespace, "label_selector": label_selector}
+            )
 
     def _is_pod_ready(self, pod) -> bool:
         """检查 Pod 是否就绪"""
@@ -121,10 +130,8 @@ class GetPodsTool(BaseOpTool):
 class GetPodTool(BaseOpTool):
     """获取单个 Pod 详情工具"""
 
-    def __init__(self):
-        from app.integrations.kubernetes.client import K8sClient
-        self.k8s_client = K8sClient()
-        self.fallback = get_k8s_fallback()
+    def __init__(self, db=None):
+        self.k8s_client = _init_k8s_client(db)
 
     async def execute(
         self,
@@ -133,46 +140,36 @@ class GetPodTool(BaseOpTool):
         **kwargs
     ) -> Dict[str, Any]:
         """执行工具操作"""
+        _log_tool_start("get_pod", name=name, namespace=namespace)
         try:
-            logger.info(f"Using K8s SDK to get pod {name}")
-            result = await self._execute_with_sdk(name, namespace)
-            return result
+            pod = self.k8s_client.core_v1.read_namespaced_pod(name=name, namespace=namespace)
+
+            data = {
+                "name": pod.metadata.name,
+                "namespace": pod.metadata.namespace,
+                "phase": pod.status.phase,
+                "ready": self._is_pod_ready(pod),
+                "restarts": sum(
+                    container.restart_count
+                    for container in (pod.status.container_statuses or [])
+                ),
+                "created": pod.metadata.creation_timestamp.isoformat()
+                if pod.metadata.creation_timestamp
+                else None,
+                "node": pod.spec.node_name,
+                "labels": pod.metadata.labels or {},
+                "annotations": pod.metadata.annotations or {},
+            }
+
+            _log_tool_success("get_pod")
+            return tool_success_response(data, "get_pod", source="kubernetes-sdk")
+
         except Exception as e:
-            logger.warning(f"K8s SDK failed: {e}, falling back to CLI")
-            result = await self.fallback.execute(
-                operation="get pod",
-                name=name,
-                namespace=namespace
+            return tool_error_response(
+                e, "get_pod",
+                context={"name": name, "namespace": namespace},
+                suggestion=f"请先使用 get_pods 工具查看命名空间 '{namespace}' 中的 Pod 列表"
             )
-            return result
-
-    async def _execute_with_sdk(self, name: str, namespace: str) -> Dict[str, Any]:
-        """使用 SDK 执行"""
-        pod = await self.k8s_client.read_namespaced_pod(name, namespace)
-
-        data = {
-            "name": pod.metadata.name,
-            "namespace": pod.metadata.namespace,
-            "phase": pod.status.phase,
-            "ready": self._is_pod_ready(pod),
-            "restarts": sum(
-                container.restart_count
-                for container in (pod.status.container_statuses or [])
-            ),
-            "created": pod.metadata.creation_timestamp.isoformat()
-            if pod.metadata.creation_timestamp
-            else None,
-            "node": pod.spec.node_name,
-            "labels": pod.metadata.labels or {},
-            "annotations": pod.metadata.annotations or {},
-        }
-
-        return {
-            "success": True,
-            "data": data,
-            "execution_mode": "sdk",
-            "source": "kubernetes-sdk",
-        }
 
     def _is_pod_ready(self, pod) -> bool:
         """检查 Pod 是否就绪"""
@@ -195,10 +192,8 @@ class GetPodTool(BaseOpTool):
 class GetPodLogsTool(BaseOpTool):
     """获取 Pod 日志工具"""
 
-    def __init__(self):
-        from app.integrations.kubernetes.client import K8sClient
-        self.k8s_client = K8sClient()
-        self.fallback = get_k8s_fallback()
+    def __init__(self, db=None):
+        self.k8s_client = _init_k8s_client(db)
 
     async def execute(
         self,
@@ -209,48 +204,31 @@ class GetPodLogsTool(BaseOpTool):
         **kwargs
     ) -> Dict[str, Any]:
         """执行工具操作"""
+        _log_tool_start("get_pod_logs", name=name, namespace=namespace, tail_lines=tail_lines)
         try:
-            logger.info(f"Using K8s SDK to get logs for pod {name}")
-            result = await self._execute_with_sdk(name, namespace, tail_lines, container)
-            return result
-        except Exception as e:
-            logger.warning(f"K8s SDK failed: {e}, falling back to CLI")
-            container_arg = f"-c {container}" if container else ""
-            result = await self.fallback.execute(
-                operation=f"logs {container_arg}".strip(),
+            logs = self.k8s_client.core_v1.read_namespaced_pod_log(
                 name=name,
                 namespace=namespace,
-                tail_lines=tail_lines
+                tail_lines=tail_lines,
+                container=container
             )
-            return result
 
-    async def _execute_with_sdk(
-        self,
-        name: str,
-        namespace: str,
-        tail_lines: int,
-        container: Optional[str],
-    ) -> Dict[str, Any]:
-        """使用 SDK 执行"""
-        logs = await self.k8s_client.read_namespaced_pod_log(
-            name=name,
-            namespace=namespace,
-            tail_lines=tail_lines,
-            container=container
-        )
-
-        log_lines = logs.split('\n') if logs else []
-
-        return {
-            "success": True,
-            "data": {
+            log_lines = logs.split('\n') if logs else []
+            data = {
                 "logs": log_lines,
                 "total_lines": len(log_lines),
                 "tail_lines": tail_lines,
-            },
-            "execution_mode": "sdk",
-            "source": "kubernetes-sdk",
-        }
+            }
+
+            _log_tool_success("get_pod_logs", len(log_lines))
+            return tool_success_response(data, "get_pod_logs", source="kubernetes-sdk")
+
+        except Exception as e:
+            return tool_error_response(
+                e, "get_pod_logs",
+                context={"name": name, "namespace": namespace},
+                suggestion=f"请确认 Pod '{name}' 存在且正在运行"
+            )
 
 
 @register_tool(
@@ -266,10 +244,8 @@ class GetPodLogsTool(BaseOpTool):
 class GetPodEventsTool(BaseOpTool):
     """获取 Pod 事件工具"""
 
-    def __init__(self):
-        from app.integrations.kubernetes.client import K8sClient
-        self.k8s_client = K8sClient()
-        self.fallback = get_k8s_fallback()
+    def __init__(self, db=None):
+        self.k8s_client = _init_k8s_client(db)
 
     async def execute(
         self,
@@ -278,53 +254,38 @@ class GetPodEventsTool(BaseOpTool):
         **kwargs
     ) -> Dict[str, Any]:
         """执行工具操作"""
+        _log_tool_start("get_pod_events", name=name, namespace=namespace)
         try:
-            logger.info(f"Using K8s SDK to get events for pod {name}")
             field_selector = f"involvedObject.name={name}"
-            result = await self._execute_with_sdk(namespace, field_selector)
-            return result
-        except Exception as e:
-            logger.warning(f"K8s SDK failed: {e}, falling back to CLI")
-            result = await self.fallback.execute(
-                operation="get events",
+            events = self.k8s_client.core_v1.list_namespaced_event(
                 namespace=namespace,
-                field_selector=f"involvedObject.name={name}"
+                field_selector=field_selector
             )
-            return result
 
-    async def _execute_with_sdk(
-        self,
-        namespace: str,
-        field_selector: str,
-    ) -> Dict[str, Any]:
-        """使用 SDK 执行"""
-        events = await self.k8s_client.list_namespaced_event(
-            namespace=namespace,
-            field_selector=field_selector
-        )
+            data = [
+                {
+                    "type": event.type,
+                    "reason": event.reason,
+                    "message": event.message,
+                    "first_timestamp": event.first_timestamp.isoformat()
+                    if event.first_timestamp
+                    else None,
+                    "last_timestamp": event.last_timestamp.isoformat()
+                    if event.last_timestamp
+                    else None,
+                    "count": event.count,
+                }
+                for event in events.items
+            ]
 
-        data = [
-            {
-                "type": event.type,
-                "reason": event.reason,
-                "message": event.message,
-                "first_timestamp": event.first_timestamp.isoformat()
-                if event.first_timestamp
-                else None,
-                "last_timestamp": event.last_timestamp.isoformat()
-                if event.last_timestamp
-                else None,
-                "count": event.count,
-            }
-            for event in events.items
-        ]
+            _log_tool_success("get_pod_events", len(data))
+            return tool_success_response(data, "get_pod_events", source="kubernetes-sdk")
 
-        return {
-            "success": True,
-            "data": data,
-            "execution_mode": "sdk",
-            "source": "kubernetes-sdk",
-        }
+        except Exception as e:
+            return tool_error_response(
+                e, "get_pod_events",
+                context={"name": name, "namespace": namespace}
+            )
 
 
 # ==================== Deployment 操作 ====================
@@ -343,10 +304,8 @@ class GetPodEventsTool(BaseOpTool):
 class GetDeploymentsTool(BaseOpTool):
     """获取 Deployment 列表工具"""
 
-    def __init__(self):
-        from app.integrations.kubernetes.client import K8sClient
-        self.k8s_client = K8sClient()
-        self.fallback = get_k8s_fallback()
+    def __init__(self, db=None):
+        self.k8s_client = _init_k8s_client(db)
 
     async def execute(
         self,
@@ -354,9 +313,9 @@ class GetDeploymentsTool(BaseOpTool):
         **kwargs
     ) -> Dict[str, Any]:
         """执行工具操作"""
+        _log_tool_start("get_deployments", namespace=namespace)
         try:
-            logger.info(f"Using K8s SDK to list deployments in {namespace}")
-            deployments = await self.k8s_client.list_namespaced_deployment(namespace)
+            deployments = self.k8s_client.apps_v1.list_namespaced_deployment(namespace=namespace)
 
             data = [
                 {
@@ -377,19 +336,14 @@ class GetDeploymentsTool(BaseOpTool):
                 for deployment in deployments.items
             ]
 
-            return {
-                "success": True,
-                "data": data,
-                "execution_mode": "sdk",
-                "source": "kubernetes-sdk",
-            }
+            _log_tool_success("get_deployments", len(data))
+            return tool_success_response(data, "get_deployments", source="kubernetes-sdk")
+
         except Exception as e:
-            logger.warning(f"K8s SDK failed: {e}, falling back to CLI")
-            result = await self.fallback.execute(
-                operation="get deployments",
-                namespace=namespace
+            return tool_error_response(
+                e, "get_deployments",
+                context={"namespace": namespace}
             )
-            return result
 
 
 # ==================== Service 操作 ====================
@@ -408,10 +362,8 @@ class GetDeploymentsTool(BaseOpTool):
 class GetServicesTool(BaseOpTool):
     """获取 Service 列表工具"""
 
-    def __init__(self):
-        from app.integrations.kubernetes.client import K8sClient
-        self.k8s_client = K8sClient()
-        self.fallback = get_k8s_fallback()
+    def __init__(self, db=None):
+        self.k8s_client = _init_k8s_client(db)
 
     async def execute(
         self,
@@ -419,9 +371,9 @@ class GetServicesTool(BaseOpTool):
         **kwargs
     ) -> Dict[str, Any]:
         """执行工具操作"""
+        _log_tool_start("get_services", namespace=namespace)
         try:
-            logger.info(f"Using K8s SDK to list services in {namespace}")
-            services = await self.k8s_client.list_namespaced_service(namespace)
+            services = self.k8s_client.core_v1.list_namespaced_service(namespace=namespace)
 
             data = [
                 {
@@ -441,19 +393,14 @@ class GetServicesTool(BaseOpTool):
                 for service in services.items
             ]
 
-            return {
-                "success": True,
-                "data": data,
-                "execution_mode": "sdk",
-                "source": "kubernetes-sdk",
-            }
+            _log_tool_success("get_services", len(data))
+            return tool_success_response(data, "get_services", source="kubernetes-sdk")
+
         except Exception as e:
-            logger.warning(f"K8s SDK failed: {e}, falling back to CLI")
-            result = await self.fallback.execute(
-                operation="get services",
-                namespace=namespace
+            return tool_error_response(
+                e, "get_services",
+                context={"namespace": namespace}
             )
-            return result
 
 
 # ==================== Node 操作 ====================
@@ -471,16 +418,14 @@ class GetServicesTool(BaseOpTool):
 class GetNodesTool(BaseOpTool):
     """获取 Node 列表工具"""
 
-    def __init__(self):
-        from app.integrations.kubernetes.client import K8sClient
-        self.k8s_client = K8sClient()
-        self.fallback = get_k8s_fallback()
+    def __init__(self, db=None):
+        self.k8s_client = _init_k8s_client(db)
 
     async def execute(self, **kwargs) -> Dict[str, Any]:
         """执行工具操作"""
+        _log_tool_start("get_nodes")
         try:
-            logger.info("Using K8s SDK to list nodes")
-            nodes = await self.k8s_client.list_node()
+            nodes = self.k8s_client.core_v1.list_node()
 
             data = [
                 {
@@ -503,16 +448,11 @@ class GetNodesTool(BaseOpTool):
                 for node in nodes.items
             ]
 
-            return {
-                "success": True,
-                "data": data,
-                "execution_mode": "sdk",
-                "source": "kubernetes-sdk",
-            }
+            _log_tool_success("get_nodes", len(data))
+            return tool_success_response(data, "get_nodes", source="kubernetes-sdk")
+
         except Exception as e:
-            logger.warning(f"K8s SDK failed: {e}, falling back to CLI")
-            result = await self.fallback.execute(operation="get nodes")
-            return result
+            return tool_error_response(e, "get_nodes")
 
 
 # ==================== Namespace 操作 ====================
@@ -530,16 +470,14 @@ class GetNodesTool(BaseOpTool):
 class GetNamespacesTool(BaseOpTool):
     """获取 Namespace 列表工具"""
 
-    def __init__(self):
-        from app.integrations.kubernetes.client import K8sClient
-        self.k8s_client = K8sClient()
-        self.fallback = get_k8s_fallback()
+    def __init__(self, db=None):
+        self.k8s_client = _init_k8s_client(db)
 
     async def execute(self, **kwargs) -> Dict[str, Any]:
         """执行工具操作"""
+        _log_tool_start("get_namespaces")
         try:
-            logger.info("Using K8s SDK to list namespaces")
-            namespaces = await self.k8s_client.list_namespace()
+            namespaces = self.k8s_client.core_v1.list_namespace()
 
             data = [
                 {
@@ -553,16 +491,11 @@ class GetNamespacesTool(BaseOpTool):
                 for ns in namespaces.items
             ]
 
-            return {
-                "success": True,
-                "data": data,
-                "execution_mode": "sdk",
-                "source": "kubernetes-sdk",
-            }
+            _log_tool_success("get_namespaces", len(data))
+            return tool_success_response(data, "get_namespaces", source="kubernetes-sdk")
+
         except Exception as e:
-            logger.warning(f"K8s SDK failed: {e}, falling back to CLI")
-            result = await self.fallback.execute(operation="get namespaces")
-            return result
+            return tool_error_response(e, "get_namespaces")
 
 
 # ==================== Event 操作 ====================
@@ -581,10 +514,8 @@ class GetNamespacesTool(BaseOpTool):
 class GetEventsTool(BaseOpTool):
     """获取 Event 列表工具"""
 
-    def __init__(self):
-        from app.integrations.kubernetes.client import K8sClient
-        self.k8s_client = K8sClient()
-        self.fallback = get_k8s_fallback()
+    def __init__(self, db=None):
+        self.k8s_client = _init_k8s_client(db)
 
     async def execute(
         self,
@@ -593,9 +524,9 @@ class GetEventsTool(BaseOpTool):
         **kwargs
     ) -> Dict[str, Any]:
         """执行工具操作"""
+        _log_tool_start("get_events", namespace=namespace, field_selector=field_selector)
         try:
-            logger.info(f"Using K8s SDK to list events in {namespace}")
-            events = await self.k8s_client.list_namespaced_event(
+            events = self.k8s_client.core_v1.list_namespaced_event(
                 namespace=namespace,
                 field_selector=field_selector
             )
@@ -620,20 +551,14 @@ class GetEventsTool(BaseOpTool):
                 for event in events.items
             ]
 
-            return {
-                "success": True,
-                "data": data,
-                "execution_mode": "sdk",
-                "source": "kubernetes-sdk",
-            }
+            _log_tool_success("get_events", len(data))
+            return tool_success_response(data, "get_events", source="kubernetes-sdk")
+
         except Exception as e:
-            logger.warning(f"K8s SDK failed: {e}, falling back to CLI")
-            result = await self.fallback.execute(
-                operation="get events",
-                namespace=namespace,
-                field_selector=field_selector
+            return tool_error_response(
+                e, "get_events",
+                context={"namespace": namespace, "field_selector": field_selector}
             )
-            return result
 
 
 __all__ = [

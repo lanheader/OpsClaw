@@ -1,7 +1,7 @@
 [project]
 name = "ops-agent-langgraph"
-version = "3.0.0"
-description = "Intelligent ops automation platform with DeepAgents multi-agent system"
+version = "3.1.0"
+description = "Intelligent ops automation platform with DeepAgents + DSPy"
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [
@@ -49,6 +49,8 @@ dependencies = [
     "apscheduler>=3.11.2",
     "langgraph-checkpoint-sqlite>=3.0.3",
     "email-validator>=2.3.0",
+    # DSPy for prompt optimization (optional)
+    "dspy-ai>=2.5",
 ]
 
 [project.optional-dependencies]
@@ -87,6 +89,10 @@ packages = [
     "app.prompts.subagents",
     "app.services",
     "app.schemas",
+    "app.dspy",
+    "app.dspy.modules",
+    "app.dspy.data",
+    "app.dspy.optimizers",
 ]
 
 [tool.pytest.ini_options]

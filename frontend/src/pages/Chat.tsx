@@ -368,7 +368,17 @@ const Chat: React.FC = () => {
                             <code className={props.className}>{props.children}</code>
                           </pre>
                         ),
-                      p: ({ children }: any) => <p>{children}</p>,
+                      p: ({ children }: any) => {
+                        // 检查是否包含代码块元素
+                        const hasCodeBlock = typeof children === 'string' &&
+                          (children.includes('<pre') || children.includes('<code>'));
+
+                        // 如果包含代码块，使用 div 避免嵌套警告
+                        if (hasCodeBlock) {
+                          return <div>{children}</div>;
+                        }
+                        return <p>{children}</p>;
+                      },
                       ul: ({ children }: any) => <ul>{children}</ul>,
                       ol: ({ children }: any) => <ol>{children}</ol>,
                       li: ({ children }: any) => <li>{children}</li>,

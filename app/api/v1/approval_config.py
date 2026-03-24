@@ -109,6 +109,22 @@ async def get_approval_tools(
         raise HTTPException(status_code=500, detail=f"获取失败: {str(e)}")
 
 
+@router.get("/packages", response_model=List[str])
+async def get_available_packages(
+    current_user: User = Depends(get_current_admin),
+):
+    """获取可用的工具包列表（如 k8s, prometheus, loki）"""
+    try:
+        from app.tools import get_available_packages
+        packages = get_available_packages()
+        logger.info(f"用户 {current_user.username} 获取工具包列表: {len(packages)} 个")
+        return packages
+
+    except Exception as e:
+        logger.error(f"获取工具包列表失败: {e}")
+        raise HTTPException(status_code=500, detail=f"获取失败: {str(e)}")
+
+
 @router.get("/tools/groups", response_model=List[str])
 async def get_approval_groups(
     db: Session = Depends(get_db),
