@@ -273,6 +273,146 @@ def should_skip_message(content: str) -> bool:
     return False
 
 
+def _log_diagnostic_info(
+    diag_collector: Dict[str, Any],
+    session_id: str,
+    chat_id: str,
+    event_count: int,
+) -> None:
+    """
+    输出诊断信息，帮助分析为什么没有生成回复。
+
+    使用流处理期间收集的信息，而不是从 checkpointer 重新获取。
+    """
+    logger.error(f"")
+    logger.error(f"{'='*60}")
+    logger.error(f"❌ [诊断] 工作流执行完成但没有生成任何回复！")
+    logger.error(f"{'='*60}")
+    logger.error(f"")
+    logger.error(f"📊 基本信息:")
+    logger.error(f"   - session_id: {session_id}")
+    logger.error(f"   - chat_id: {chat_id}")
+    logger.error(f"   - 事件数量: {event_count}")
+    logger.error(f"")
+
+    # 分析事件类型
+    event_types = {}
+    for event in diag_collector.get("events", []):
+        etype = str(event.get("type", "unknown"))
+        event_types[etype] = event_types.get(etype, 0) + 1
+
+    logger.error(f"📍 事件类型分布:")
+    if event_types:
+        for etype, count in sorted(event_types.items()):
+            logger.error(f"   - {etype}: {count} 次")
+    else:
+        logger.error(f"   (无事件记录)")
+    logger.error(f"")
+
+    # 分析消息
+    messages_seen = diag_collector.get("messages_seen", [])
+    logger.error(f"📨 消息处理情况:")
+    logger.error(f"   - 处理消息数: {len(messages_seen)}")
+
+    msg_types = {}
+    for msg in messages_seen:
+        mtype = msg.get("type", "unknown")
+        msg_types[mtype] = msg_types.get(mtype, 0) + 1
+
+    if msg_types:
+        logger.error(f"   - 消息类型分布:")
+        for mtype, count in sorted(msg_types.items()):
+            logger.error(f"     * {mtype}: {count} 条")
+    else:
+        logger.error(f"   (无消息处理记录)")
+
+    # 分析 AI 回复
+    ai_replies = diag_collector.get("ai_replies", [])
+    logger.error(f"")
+    logger.error(f"🤖 AI 回复情况:")
+    logger.error(f"   - AI 回复数: {len(ai_replies)}")
+
+    if ai_replies:
+        for i, reply in enumerate(ai_replies, 1):
+            logger.error(f"   回复 #{i} [索引{reply['index']}]:")
+            logger.error(f"     - 内容长度: {reply['content_length']} 字符")
+            logger.error(f"     - 内容预览: {reply['content_preview'][:100]}...")
+    else:
+        logger.error(f"   (无 AI 回复记录)")
+        logger.error(f"")
+        logger.error(f"   ⚠️ 可能原因:")
+        logger.error(f"   1. LLM 返回了空内容")
+        logger.error(f"   2. AI 回复被 should_skip_message 过滤")
+        logger.error(f"   3. 只有工具调用，没有最终回复")
+
+    # 分析工具调用
+    tool_calls = diag_collector.get("tool_calls", [])
+    logger.error(f"")
+    logger.error(f"🔧 工具调用情况:")
+    logger.error(f"   - 工具调用数: {len(tool_calls)}")
+
+    if tool_calls:
+        # 统计每个工具的调用次数
+        tool_counts = {}
+        for tool in tool_calls:
+            tool_counts[tool] = tool_counts.get(tool, 0) + 1
+
+        logger.error(f"   - 调用工具列表:")
+        for tool, count in sorted(tool_counts.items()):
+            logger.error(f"     * {tool}: {count} 次")
+    else:
+        logger.error(f"   (无工具调用记录)")
+
+    # 分析后备回复
+    fallback_replies = diag_collector.get("fallback_replies", [])
+    logger.error(f"")
+    logger.error(f"💾 后备回复情况:")
+    logger.error(f"   - 后备回复数: {len(fallback_replies)}")
+
+    if fallback_replies:
+        for i, fallback in enumerate(fallback_replies, 1):
+            logger.error(f"   后备回复 #{i}: {len(fallback)} 字符")
+            logger.error(f"     预览: {fallback[:150]}...")
+    else:
+        logger.error(f"   (无后备回复)")
+
+    # 分析最终状态
+    final_state = diag_collector.get("final_state")
+    logger.error(f"")
+    logger.error(f"🏁 最终状态:")
+
+    if final_state:
+        logger.error(f"   - 状态类型: {type(final_state)}")
+
+        # 打印关键状态字段
+        important_keys = [
+            "workflow_status", "intent_type", "data_sufficient",
+            "root_cause", "severity", "execution_success", "final_report"
+        ]
+
+        for key in important_keys:
+            value = final_state.get(key, "(未设置)")
+            if value and value != "(未设置)":
+                # 截断过长的值
+                value_str = str(value)
+                if len(value_str) > 100:
+                    value_str = value_str[:100] + "..."
+                logger.error(f"   - {key}: {value_str}")
+
+        # 检查 formatted_response
+        formatted_response = final_state.get("formatted_response")
+        if formatted_response:
+            logger.error(f"   - formatted_response: {len(str(formatted_response))} 字符")
+        else:
+            logger.error(f"   ⚠️ formatted_response 为空")
+    else:
+        logger.error(f"   (无最终状态记录)")
+
+    logger.error(f"")
+    logger.error(f"{'='*60}")
+    logger.error(f"")
+
+
 async def _diagnose_message_state(
     session_id: str,
     chat_id: str,
@@ -891,6 +1031,16 @@ async def _process_normal_workflow(
 
         all_replies: list[str] = []
 
+        # 诊断信息收集器
+        diag_collector = {
+            "events": [],
+            "messages_seen": [],
+            "ai_replies": [],
+            "tool_calls": [],
+            "fallback_replies": [],  # 被过滤消息的友好版本
+            "final_state": None,
+        }
+
         logger.info(f"🚀 开始流式执行工作流，session_id={session_id}")
         logger.info(f"📝 用户输入: {text[:100]}")
         logger.info(f"⚙️ 配置: {config}")
@@ -899,12 +1049,21 @@ async def _process_normal_workflow(
         event_count = 0
         async for event in agent.astream(input_state, config=config):
             event_count += 1
-            logger.info(f"📍 事件 #{event_count}: {list(event.keys())}")
+            event_type = list(event.keys()) if isinstance(event, dict) else "unknown"
+
+            # 收集诊断信息
+            diag_collector["events"].append({
+                "index": event_count,
+                "type": event_type,
+            })
+
+            logger.info(f"📍 事件 #{event_count}: {event_type}")
             event_result = await _handle_workflow_stream_event(
                 event=event,
                 chat_id=chat_id,
                 session_id=session_id,
                 all_replies=all_replies,
+                diag_collector=diag_collector,  # 传递诊断收集器
             )
             if event_result == "interrupted":
                 await _persist_assistant_reply(session_id, all_replies)
@@ -913,51 +1072,19 @@ async def _process_normal_workflow(
         logger.info(f"🏁 工作流执行完成，共 {event_count} 个事件，{len(all_replies)} 条回复")
         logger.info(f"🏁 [feishu_callback] 工作流执行完成，共 {event_count} 个事件")
 
+        # 如果没有回复，尝试使用后备回复
+        if not all_replies:
+            fallback_replies = diag_collector.get("fallback_replies", [])
+            if fallback_replies:
+                logger.info(f"💾 [后备回复] 使用 {len(fallback_replies)} 条后备回复")
+                for fallback in fallback_replies:
+                    await _send_text_reply(chat_id, fallback)
+                    all_replies.append(fallback)
+                logger.info(f"✅ [后备回复] 已发送 {len(all_replies)} 条回复")
+
         # 诊断日志：检查为什么没有回复
         if not all_replies:
-            logger.error(f"❌ [诊断] 工作流执行完成但没有生成任何回复！")
-            logger.error(f"   - 事件数量: {event_count}")
-            logger.error(f"   - session_id: {session_id}")
-            logger.error(f"   - chat_id: {chat_id}")
-            logger.error(f"   这可能意味着:")
-            logger.error(f"   1. LLM 返回了空内容")
-            logger.error(f"   2. Subagent 执行但没有生成最终回复")
-            logger.error(f"   3. 回复被 should_skip_message 过滤了")
-
-            # 执行详细诊断
-            logger.error(f"🔍 [诊断] 执行详细消息分析...")
-            # 尝试从 checkpointer 获取最新状态
-            checkpointer = await get_checkpointer()
-            config = {"configurable": {"thread_id": session_id}}
-            saved_config = await checkpointer.aget_tuple(config)
-            current_state = None
-            if saved_config and saved_config.checkpoint:
-                current_state = saved_config.checkpoint
-                logger.error(f"🔍 [诊断] 从 checkpointer 获取到最新状态")
-
-            diag_stats = await _diagnose_message_state(session_id, chat_id, current_state)
-            logger.error(f"📊 [诊断] 消息统计:")
-            logger.error(f"   - 总消息数: {diag_stats.get('total_messages', 0)}")
-            logger.error(f"   - 最后处理索引: {diag_stats.get('last_processed_index', -1)}")
-            logger.error(f"   - AI消息数: {diag_stats.get('ai_messages', 0)}")
-            logger.error(f"   - AI消息(空内容): {diag_stats.get('ai_messages_empty', 0)}")
-            logger.error(f"   - AI消息(工具调用): {diag_stats.get('ai_messages_with_tool_calls', 0)}")
-            logger.error(f"   - 用户消息数: {diag_stats.get('human_messages', 0)}")
-            logger.error(f"   - 工具消息数: {diag_stats.get('tool_messages', 0)}")
-            logger.error(f"   - 消息类型分布: {diag_stats.get('message_types', {})}")
-
-            # 打印样本消息
-            sample_msgs = diag_stats.get('sample_messages', [])
-            if sample_msgs:
-                logger.error(f"📝 [诊断] AI消息样本（最近5条）:")
-                for i, msg in enumerate(sample_msgs, 1):
-                    would_skip_mark = " ⚠️会被跳过" if msg.get('would_skip') else ""
-                    logger.error(
-                        f"   消息#{i} [索引{msg['index']}]{would_skip_mark} | "
-                        f"content={msg['content_length']}字符 | "
-                        f"工具调用={msg['tool_calls_count']} | "
-                        f"预览: {msg.get('content_preview', '(无内容)')[:80]}"
-                    )
+            _log_diagnostic_info(diag_collector, session_id, chat_id, event_count)
         else:
             logger.info(f"✅ [诊断] 成功生成 {len(all_replies)} 条回复:")
             for i, reply in enumerate(all_replies, 1):
@@ -1007,6 +1134,7 @@ async def _handle_workflow_stream_event(
     chat_id: str,
     session_id: str,
     all_replies: list[str],
+    diag_collector: Optional[Dict[str, Any]] = None,
 ) -> Optional[Literal["completed", "interrupted"]]:
     """处理普通工作流中的单个流事件。"""
     event_type = event.get("type")
@@ -1034,6 +1162,8 @@ async def _handle_workflow_stream_event(
     if event_type == "complete":
         logger.info("✅ 工作流执行完成")
         final_state = ensure_final_report_in_state(event.get("state", {}))
+        if diag_collector:
+            diag_collector["final_state"] = final_state
         await _send_final_state_reply(chat_id, final_state, all_replies)
         return "completed"
 
@@ -1057,7 +1187,12 @@ async def _handle_workflow_stream_event(
         if not isinstance(actual_update, dict) or "messages" not in actual_update:
             continue
 
-        await _process_message_update(actual_update["messages"], chat_id, all_replies)
+        # 收集后备回复
+        fallback_reply = await _process_message_update(actual_update["messages"], chat_id, all_replies, diag_collector)
+        if fallback_reply and diag_collector is not None:
+            if "fallback_replies" not in diag_collector:
+                diag_collector["fallback_replies"] = []
+            diag_collector["fallback_replies"].append(fallback_reply)
 
     return None
 
@@ -1066,11 +1201,15 @@ async def _process_message_update(
     raw_messages: Any,
     chat_id: str,
     all_replies: list[str],
-) -> None:
+    diag_collector: Optional[Dict[str, Any]] = None,
+) -> Optional[str]:
     """
     处理 state update 中的 messages 字段。
 
     使用数据库持久化已处理的消息索引，避免服务重启后重复发送历史消息。
+
+    Returns:
+        后备回复（如果所有消息都被过滤），否则返回 None
     """
     messages = unwrap_overwrite(raw_messages)
     msg_count = len(messages) if isinstance(messages, list) else 0
@@ -1104,10 +1243,20 @@ async def _process_message_update(
     # 跟踪最后处理的索引和是否有 AI 回复
     max_processed_idx = last_processed
     has_ai_reply = False
+    fallback_reply = None  # 保存被过滤消息的友好版本
 
     for idx, message in new_messages:
         msg_type = type(message).__name__
         content = getattr(message, "content", None)
+
+        # 收集诊断信息
+        if diag_collector:
+            diag_collector["messages_seen"].append({
+                "index": idx,
+                "type": msg_type,
+                "has_content": bool(content),
+                "content_length": len(str(content)) if content else 0,
+            })
 
         logger.debug(f"📍 [消息#{idx+1}] 类型={msg_type}, content长度={len(str(content)) if content else 0}")
 
@@ -1121,7 +1270,13 @@ async def _process_message_update(
             # 检查是否有 tool_calls（工具调用）
             tool_calls = getattr(message, "tool_calls", None)
             if tool_calls and len(tool_calls) > 0:
-                logger.info(f"🔧 [工具调用] 数量={len(tool_calls)}, 工具={[tc.get('name', '?') for tc in tool_calls]}")
+                tool_names = [tc.get('name', '?') for tc in tool_calls]
+                logger.info(f"🔧 [工具调用] 数量={len(tool_calls)}, 工具={tool_names}")
+
+                # 收集工具调用信息
+                if diag_collector:
+                    diag_collector["tool_calls"].extend(tool_names)
+
                 max_processed_idx = idx
                 # 注意：工具调用消息没有 content，需要等待后续消息
                 continue
@@ -1132,7 +1287,23 @@ async def _process_message_update(
                 continue
 
             if should_skip_message(content):
-                logger.info(f"⏭️ [AI消息#{idx}] 被should_skip_message跳过（详见上方日志）")
+                logger.info(f"⏭️ [AI消息#{idx}] 被should_skip_message跳过，尝试转换为友好格式")
+
+                # 尝试将被过滤的消息转换为友好格式作为后备回复
+                try:
+                    formatted_result = await format_tool_output(content)
+                    if isinstance(formatted_result, dict) and formatted_result.get("msg_type") in {"card", "interactive"}:
+                        # 卡片消息：转换为可读文本
+                        fallback_reply = _convert_card_to_readable_text(formatted_result["card"])
+                    elif isinstance(formatted_result, dict) and "text" in formatted_result:
+                        fallback_reply = formatted_result["text"]
+                    else:
+                        fallback_reply = str(formatted_result)
+
+                    logger.info(f"💾 [后备回复] 保存了 {len(fallback_reply)} 字符的友好版本")
+                except Exception as e:
+                    logger.warning(f"⚠️ [后备回复] 转换失败: {e}")
+
                 max_processed_idx = idx
                 continue
 
@@ -1140,6 +1311,15 @@ async def _process_message_update(
             max_processed_idx = idx
             has_ai_reply = True
             logger.info(f"📝 [AI回复] 内容长度={len(str(content))}")
+
+            # 收集 AI 回复信息
+            if diag_collector:
+                diag_collector["ai_replies"].append({
+                    "index": idx,
+                    "content_length": len(str(content)),
+                    "content_preview": str(content)[:200],
+                })
+
             await _send_formatted_result(chat_id, content, all_replies)
 
         # 处理 ToolMessage（工具返回结果）
@@ -1184,6 +1364,12 @@ async def _process_message_update(
                 )
 
         logger.warning(f"   - 消息类型分布: {msg_type_count}")
+
+    # 返回后备回复（如果没有其他回复）
+    if not has_ai_reply and not all_replies and fallback_reply:
+        logger.info(f"💾 [后备回复] 返回后备回复，长度: {len(fallback_reply)} 字符")
+        return fallback_reply
+    return None
 
 
 async def _send_formatted_result(

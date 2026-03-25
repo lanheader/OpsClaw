@@ -18,7 +18,7 @@ English | [简体中文](README_ZH.md)
 
 ## 📖 Project Overview
 
-**Current Version**: v3.2.0 | **Subagents**: 3 | **Middleware**: 3
+**Current Version**: v3.2.1 | **Subagents**: 3 | **Middleware**: 4
 
 Ops Agent is an intelligent operations automation platform built on the **DeepAgents Framework**. It achieves full-process automation from monitoring, diagnosis to self-healing through the collaboration of a main agent and specialized sub-agents.
 
@@ -29,9 +29,12 @@ Ops Agent is an intelligent operations automation platform built on the **DeepAg
 - 🔄 **Sub-agent Delegation**: Delegate professional tasks via `task()` tool
 - 🛡️ **Tool Fallback Mechanism**: SDK first, automatically fallback to CLI tools
 - 📉 **Context Compression**: Automatically compress early history messages, preserve key information
+- 🔒 **Error Message Filtering**: Filter tool call errors to prevent LLM from responding to errors
+- 💾 **Fallback Reply Mechanism**: Ensure at least one friendly reply is sent to the user
 - 📊 **Multi-channel Access**: Support for Web UI and Feishu integration
 - 🧠 **Session Memory**: Support for multi-turn conversations and context memory
 - 🔒 **Message Index Persistence**: Solves the issue of duplicate historical messages after service restart
+- 📡 **Enhanced Diagnostics**: Real-time diagnostic information collection during workflow execution
 
 ### 🎯 Three Core Scenarios
 
@@ -180,11 +183,14 @@ exit
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
-│                Middleware Layer                                  │
+│                Middleware Layer (4 Middlewares)                  │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐         │
-│  │  Context     │  │  Message     │  │  Logging     │         │
-│  │  Compression │  │  Trimming    │  │  Middleware  │         │
+│  │  Error       │  │  Context     │  │  Message     │         │
+│  │  Filtering   │  │  Compression │  │  Trimming    │         │
 │  └──────────────┘  └──────────────┘  └──────────────┘         │
+│  ┌──────────────┐                                              │
+│  │  Logging     │                                              │
+│  └──────────────┘                                              │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
@@ -220,6 +226,29 @@ exit
 **File**: `app/deepagents/subagents/execute_agent.py`
 **Responsibility**: Execute remediation commands, monitor execution results
 **Tools**: command_executor_tools, k8s_tools
+
+---
+
+## 🔧 Middleware Layer
+
+### 1. ErrorFilteringMiddleware (Error Message Filtering)
+**File**: `app/middleware/error_filtering_middleware.py`
+**Responsibility**: Filter tool call errors to prevent LLM from responding to errors
+**Error Markers**: "Error:", "is not a valid tool", "Tool execution failed"
+
+### 2. ContextCompressionMiddleware (Context Compression)
+**File**: `app/middleware/context_compression_middleware.py`
+**Responsibility**: Compress early history messages into summaries, preserve recent full messages
+**Trigger**: Activated when message count >= 30
+
+### 3. MessageTrimmingMiddleware (Message Trimming)
+**File**: `app/middleware/message_trimming_middleware.py`
+**Responsibility**: Intelligently trim messages to avoid token explosion
+**Config**: Keep last 40 messages, minimum 10 messages
+
+### 4. LoggingMiddleware (Logging)
+**File**: `app/middleware/logging_middleware.py`
+**Responsibility**: Record model calls, tool execution, and latency
 
 ---
 
@@ -310,10 +339,13 @@ ops-agent-langgraph/
 │   │       ├── analyze_agent.py # Analysis
 │   │       └── execute_agent.py # Execution
 │   ├── middleware/              # Middleware layer
-│   │   ├── context_compression_middleware.py
-│   │   ├── message_trimming_middleware.py
-│   │   └── logging_middleware.py
+│   │   ├── error_filtering_middleware.py  # Error filtering
+│   │   ├── context_compression_middleware.py # Context compression
+│   │   ├── message_trimming_middleware.py    # Message trimming
+│   │   └── logging_middleware.py             # Logging
 │   ├── tools/                   # Agent tools
+│   │   └── k8s/
+│   │       └── read_tools.py    # K8s read tools (including get_config_maps)
 │   ├── integrations/            # External service integrations
 │   ├── api/                     # API route layer
 │   ├── core/                    # Core modules
@@ -358,17 +390,27 @@ pytest --cov=app --cov-report=html
 sqlite3 data/ops_agent_v2.db "PRAGMA table_info(chat_sessions);" | grep last_processed
 ```
 
-#### 2. Model Answers Unrelated to Current Question
+#### 2. Model Responds with Error Messages Instead of Answering
 
-**Cause**: Too many historical messages, context lost
-**Solution**: Check if middleware is working properly
+**Cause**: Tool call errors polluting conversation context
+**Solution**: ErrorFilteringMiddleware automatically filters error messages
 
 ```bash
-# View compression logs
-grep "上下文压缩" logs/app.log
+# Check if middleware is loaded
+grep "ErrorFilteringMiddleware" logs/app.log
 ```
 
-#### 3. Database Initialization Failed
+#### 3. No Reply Sent to User
+
+**Cause**: All AI messages filtered by should_skip_message
+**Solution**: Fallback reply mechanism ensures at least one friendly reply is sent
+
+```bash
+# Check for fallback replies in logs
+grep "后备回复" logs/app.log
+```
+
+#### 4. Database Initialization Failed
 
 ```bash
 # Remove old database
@@ -423,7 +465,7 @@ Thanks to the following open source projects:
 
 <div align="center">
 
-**Last Updated**: 2026-03-25 | **Version**: v3.2.0
+**Last Updated**: 2026-03-25 | **Version**: v3.2.1
 
 Made with ❤️ by Ops Team
 

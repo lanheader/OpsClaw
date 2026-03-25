@@ -20,7 +20,7 @@
 
 Ops Agent 是一个基于 **DeepAgents 框架**的智能运维自动化平台，通过主智能体和多个专业化子智能体协同工作，实现从监控、诊断到自愈的全流程自动化。
 
-**当前版本**: v3.2.0 | **子智能体**: 3 个 | **中间件**: 3 个
+**当前版本**: v3.2.1 | **子智能体**: 3 个 | **中间件**: 4 个
 
 ### ✨ 核心特性
 
@@ -29,9 +29,12 @@ Ops Agent 是一个基于 **DeepAgents 框架**的智能运维自动化平台，
 - 🔄 **子智能体委派**: 通过 `task()` 工具委派专业任务
 - 🛡️ **工具降级机制**: SDK 优先，自动降级到命令行工具
 - 📉 **上下文压缩**: 自动压缩早期历史消息，保留关键信息
+- 🔒 **错误消息过滤**: 过滤工具调用错误，防止 LLM 响应错误消息
+- 💾 **后备回复机制**: 确保至少有一条友好回复发送给用户
 - 📊 **多渠道接入**: 支持 Web UI 和飞书集成
 - 🧠 **会话记忆**: 支持多轮对话和上下文记忆
 - 🔒 **消息索引持久化**: 解决服务重启后重复发送历史消息问题
+- 📡 **增强诊断**: 工作流执行期间实时收集诊断信息
 
 ### 🎯 三大核心场景
 
@@ -182,12 +185,16 @@ exit
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
-│                中间件层 (Middleware Layer)                        │
+│                中间件层 (Middleware Layer) - 4 个中间件           │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐         │
-│  │  Context     │  │  Message     │  │  Logging     │         │
-│  │  Compression │  │  Trimming    │  │  Middleware  │         │
-│  │  (上下文压缩)│  │  (消息截断)  │  │  (日志记录)  │         │
+│  │  Error       │  │  Context     │  │  Message     │         │
+│  │  Filtering   │  │  Compression │  │  Trimming    │         │
+│  │  (错误过滤)  │  │  (上下文压缩)│  │  (消息截断)  │         │
 │  └──────────────┘  └──────────────┘  └──────────────┘         │
+│  ┌──────────────┐                                              │
+│  │  Logging     │                                              │
+│  │  (日志记录)  │                                              │
+│  └──────────────┘                                              │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
@@ -220,6 +227,31 @@ exit
 ### 3. execute-agent（执行操作子智能体）
 **职责**：执行修复命令，监控执行结果
 **工具**：command_executor_tools, k8s_tools
+
+---
+
+## 🔧 中间件层
+
+### 1. ErrorFilteringMiddleware（错误消息过滤中间件）
+**文件**：`app/middleware/error_filtering_middleware.py`
+**职责**：过滤工具调用错误消息，防止 LLM 响应错误消息
+**错误标记**：`"Error:"`, `"is not a valid tool"`, `"Tool execution failed"`
+
+### 2. ContextCompressionMiddleware（上下文压缩中间件）
+**文件**：`app/middleware/context_compression_middleware.py`
+**职责**：压缩早期历史消息为摘要，保留最近完整消息
+**触发条件**：消息数 >= 30 条时触发
+
+### 3. MessageTrimmingMiddleware（消息截断中间件）
+**文件**：`app/middleware/message_trimming_middleware.py`
+**职责**：智能截断消息，避免 token 数量暴增
+**配置**：
+- `MAX_MESSAGES_TO_KEEP = 40` - 保留最近 40 条消息
+- `MIN_MESSAGES_TO_KEEP = 10` - 最少保留 10 条消息
+
+### 4. LoggingMiddleware（日志中间件）
+**文件**：`app/middleware/logging_middleware.py`
+**职责**：记录模型调用、工具执行和耗时
 
 ---
 
@@ -310,10 +342,13 @@ ops-agent-langgraph/
 │   │       ├── analyze_agent.py # 分析决策
 │   │       └── execute_agent.py # 执行操作
 │   ├── middleware/              # 中间件层
+│   │   ├── error_filtering_middleware.py  # 错误消息过滤
 │   │   ├── context_compression_middleware.py  # 上下文压缩
 │   │   ├── message_trimming_middleware.py     # 消息截断
 │   │   └── logging_middleware.py              # 日志记录
 │   ├── tools/                   # Agent 工具集
+│   │   └── k8s/
+│   │       └── read_tools.py    # K8s 读工具（包含 get_config_maps）
 │   ├── integrations/            # 外部服务集成
 │   ├── api/                     # API 路由层
 │   ├── core/                    # 核心模块
@@ -368,7 +403,27 @@ sqlite3 data/ops_agent_v2.db "PRAGMA table_info(chat_sessions);" | grep last_pro
 grep "上下文压缩" logs/app.log
 ```
 
-#### 3. 数据库初始化失败
+#### 3. AI 响应工具错误消息
+
+**原因**：工具调用错误消息污染对话上下文
+**解决**：ErrorFilteringMiddleware 自动过滤错误消息
+
+```bash
+# 检查中间件是否加载
+grep "ErrorFilteringMiddleware" logs/app.log
+```
+
+#### 4. 用户收不到任何回复
+
+**原因**：所有 AI 消息被 should_skip_message 过滤
+**解决**：后备回复机制确保至少有一条友好回复
+
+```bash
+# 检查后备回复日志
+grep "后备回复" logs/app.log
+```
+
+#### 5. 数据库初始化失败
 
 ```bash
 # 删除旧数据库
@@ -423,7 +478,7 @@ uv run python scripts/init_auth_db.py
 
 <div align="center">
 
-**最后更新**: 2026-03-25 | **版本**: v3.2.0
+**最后更新**: 2026-03-25 | **版本**: v3.2.1
 
 Made with ❤️ by Ops Team
 
