@@ -106,12 +106,9 @@ class QueryCPUUsageTool(BaseOpTool):
         labels: Optional[Dict[str, str]],
         time_range: str,
     ) -> Dict[str, Any]:
-        """使用 SDK 执行"""
-        result = await PrometheusToolFactory.query_metric(
-            metric_type=MetricType.CPU,
-            labels=labels,
-            time_range=time_range,
-        )
+        """直接使用 CLI 降级（SDK 工厂未实现）"""
+        # Prometheus SDK 工厂未实现，直接降级到 CLI
+        raise NotImplementedError("Prometheus SDK not implemented, using CLI fallback")
 
         if result.get("success"):
             data = result.get("data", {})
@@ -195,12 +192,9 @@ class QueryMemoryUsageTool(BaseOpTool):
         labels: Optional[Dict[str, str]],
         time_range: str,
     ) -> Dict[str, Any]:
-        """使用 SDK 执行"""
-        result = await PrometheusToolFactory.query_metric(
-            metric_type=MetricType.MEMORY,
-            labels=labels,
-            time_range=time_range,
-        )
+        """直接使用 CLI 降级（SDK 工厂未实现）"""
+        # Prometheus SDK 工厂未实现，直接降级到 CLI
+        raise NotImplementedError("Prometheus SDK not implemented, using CLI fallback")
 
         if result.get("success"):
             data = result.get("data", {})
@@ -233,10 +227,22 @@ class QueryMemoryUsageTool(BaseOpTool):
     operation_type=OperationType.READ,
     risk_level=RiskLevel.LOW,
     permissions=["prometheus.view"],
-    description="执行 PromQL 范围查询",
+    description=(
+        "执行 PromQL 范围查询\n"
+        "时间参数支持多种格式:\n"
+        "- 相对时间: '5m' (5分钟前), '1h' (1小时前), '1d' (1天前)\n"
+        "- 负相对时间: '-1h' (从现在往后1小时，仅用于 end)\n"
+        "- 特殊值: 'now' (当前时间)\n"
+        "- 绝对时间: '2024-01-01T00:00:00Z' (ISO 8601格式)\n\n"
+        "示例:\n"
+        "- query_range(query='up') - 查询当前状态\n"
+        "- query_range(query='rate(http_requests_total[5m])', start='1h') - 最近1小时\n"
+        "- query_range(query='up', start='2024-01-01T00:00:00Z', end='2024-01-01T01:00:00Z') - 指定时间范围"
+    ),
     examples=[
-        "query_range(query='rate(http_requests_total[5m])', start='-1h', step='1m')",
-        "query_range(query='up', start='2024-01-01T00:00:00Z', end='2024-01-01T01:00:00Z')",
+        "query_range(query='up')",
+        "query_range(query='rate(http_requests_total[5m])', start='1h')",
+        "query_range(query='up', start='2024-01-01T00:00:00Z', end='2024-01-01T01:00:00Z', step='1m')",
     ],
 )
 class QueryRangeTool(BaseOpTool):
@@ -247,7 +253,6 @@ class QueryRangeTool(BaseOpTool):
     """
 
     def __init__(self):
-        self.factory = PrometheusToolFactory
         self.fallback = get_prometheus_fallback()
 
     async def execute(
@@ -260,28 +265,29 @@ class QueryRangeTool(BaseOpTool):
     ) -> Dict[str, Any]:
         """执行工具操作"""
         _log_tool_start("query_range", query=query, start=start, end=end, step=step)
+        # Prometheus SDK 工厂未实现，直接使用 CLI 降级
         try:
-            result = await self._execute_with_sdk(query, start, end, step)
+            # 构建 CLI 命令
+            cli = get_prometheus_fallback()
+            cmd = cli.build_command(
+                operation="query_range",
+                query=query,
+                start=start or "1h",
+                end=end or "now",
+                step=step,
+            )
+
+            # 执行命令
+            result = await cli.execute(cmd)
             _log_tool_success("query_range")
             return result
         except Exception as e:
-            logger.warning(f"Prometheus SDK 失败，降级到 CLI: {e}")
-            try:
-                result = await self.fallback.execute(
-                    operation="query_range",
-                    query=query,
-                    start=start or "-1h",
-                    end=end or "now",
-                    step=step
-                )
-                _log_tool_success("query_range")
-                return result
-            except Exception as fallback_error:
-                return tool_error_response(
-                    fallback_error, "query_range",
-                    context={"query": query, "start": start, "end": end, "step": step},
-                    suggestion="请检查 PromQL 查询语法是否正确，以及 Prometheus 服务是否正常运行"
-                )
+            logger.warning(f"Prometheus CLI 执行失败: {e}")
+            return tool_error_response(
+                str(e), "query_range",
+                context={"query": query, "start": start, "end": end, "step": step},
+                suggestion="请检查 PromQL 查询语法是否正确，以及 Prometheus 服务是否正常运行"
+            )
 
     async def _execute_with_sdk(
         self,
@@ -296,7 +302,14 @@ class QueryRangeTool(BaseOpTool):
         end_dt = None
 
         if start:
-            if start.startswith("-"):
+            start_lower = start.lower()
+            if start_lower == "now":
+                # 当前时间
+                start_dt = datetime.now()
+            elif start_lower.endswith("m") or start_lower.endswith("h") or start_lower.endswith("d"):
+                # 相对时间，如 "5m", "1h", "1d"（视为负数，即从现在往前）
+                start_dt = self._parse_relative_time(start)
+            elif start.startswith("-"):
                 # 相对时间，如 "-1h"
                 start_dt = datetime.now() + timedelta(hours=int(start[1:-1]))
             else:
@@ -304,7 +317,14 @@ class QueryRangeTool(BaseOpTool):
                 start_dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
 
         if end:
-            if end.startswith("-"):
+            end_lower = end.lower()
+            if end_lower == "now":
+                # 当前时间
+                end_dt = datetime.now()
+            elif end_lower.endswith("m") or end_lower.endswith("h") or end_lower.endswith("d"):
+                # 相对时间，如 "5m", "1h", "1d"（视为负数，即从现在往前）
+                end_dt = self._parse_relative_time(end)
+            elif end.startswith("-"):
                 end_dt = datetime.now() + timedelta(hours=int(end[1:-1]))
             else:
                 end_dt = datetime.fromisoformat(end.replace("Z", "+00:00"))
@@ -331,6 +351,33 @@ class QueryRangeTool(BaseOpTool):
             )
         else:
             raise Exception(result.get("error", "Unknown error"))
+
+    @staticmethod
+    def _parse_relative_time(time_str: str) -> datetime:
+        """
+        解析相对时间字符串（如 "5m", "1h", "1d"）为 datetime
+
+        Args:
+            time_str: 时间字符串，如 "5m"（5分钟前）, "1h"（1小时前）, "1d"（1天前）
+
+        Returns:
+            解析后的 datetime 对象
+        """
+        time_lower = time_str.lower()
+        value = int(time_lower[:-1])
+
+        if time_lower.endswith("m"):
+            return datetime.now() - timedelta(minutes=value)
+        elif time_lower.endswith("h"):
+            return datetime.now() - timedelta(hours=value)
+        elif time_lower.endswith("d"):
+            return datetime.now() - timedelta(days=value)
+        else:
+            # 如果不匹配已知格式，尝试解析为 ISO 格式
+            try:
+                return datetime.fromisoformat(time_str.replace("Z", "+00:00"))
+            except ValueError:
+                raise ValueError(f"不支持的时间格式: {time_str}。支持的格式: 5m, 1h, 1d, -1h, ISO 8601")
 
 
 __all__ = [

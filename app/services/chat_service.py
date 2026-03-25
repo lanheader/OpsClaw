@@ -116,7 +116,7 @@ async def get_or_create_feishu_session(
 
 
 def save_feishu_message(
-    db: Session, session_id: str, role: MessageRole, content: str
+    db: Session, session_id: str, role: MessageRole, content: str, meta_data: Optional[str] = None
 ) -> ChatMessage:
     """
     保存飞书消息
@@ -126,11 +126,12 @@ def save_feishu_message(
         session_id: 会话ID
         role: 消息角色
         content: 消息内容
+        meta_data: 元数据（可选，如飞书消息ID）
 
     Returns:
         ChatMessage 对象
     """
-    message = ChatMessage(session_id=session_id, role=role, content=content, meta_data=None)
+    message = ChatMessage(session_id=session_id, role=role, content=content, meta_data=meta_data)
 
     db.add(message)
     db.commit()

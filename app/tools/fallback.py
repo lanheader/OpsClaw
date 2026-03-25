@@ -207,8 +207,88 @@ class PrometheusFallback(FallbackExecutor):
 
         return f"promql {operation}"
 
+    async def execute(self, operation: str, timeout: int = 30, **kwargs) -> Dict[str, Any]:
+        """
+        执行 CLI 命令（带详细日志）
+        """
+        # 构建命令
+        command = self.build_command(operation, **kwargs)
+
+        logger.info(f"🔧 [Prometheus CLI] 执行命令: {command}")
+        logger.debug(f"🔧 [Prometheus CLI] 参数: operation={operation}, kwargs={kwargs}")
+
+        try:
+            # 获取环境变量
+            env = os.environ.copy()
+
+            # 执行命令
+            process = await asyncio.create_subprocess_shell(
+                command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                shell=True,
+                env=env
+            )
+
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(),
+                    timeout=timeout
+                )
+
+                # 记录原始输出
+                logger.debug(f"📤 [Prometheus CLI] stdout: {stdout[:500] if stdout else '(empty)'}")
+                logger.debug(f"📤 [Prometheus CLI] stderr: {stderr[:500] if stderr else '(empty)'}")
+
+                # 检查返回码
+                returncode = process.returncode
+                if returncode != 0:
+                    logger.error(f"❌ [Prometheus CLI] 命令失败 (退出码: {returncode}):")
+                    logger.error(f"   stderr: {stderr}")
+                    return {
+                        "success": False,
+                        "error": f"CLI command failed with exit code {returncode}: {stderr}",
+                        "execution_mode": "cli",
+                        "command": command,
+                        "returncode": returncode
+                    }
+
+                # 解析输出
+                result = self.parse_output(stdout, stderr)
+                logger.info(f"✅ [Prometheus CLI] 命令执行成功")
+                logger.debug(f"📊 [Prometheus CLI] 解析结果: {str(result)[:200]}...")
+
+                return {
+                    "success": True,
+                    "data": result,
+                    "execution_mode": "cli",
+                    "command": command
+                }
+
+            except asyncio.TimeoutError:
+                process.kill()
+                await process.wait()
+                logger.error(f"⏱️  [Prometheus CLI] 命令超时 (>{timeout}秒)")
+                return {
+                    "success": False,
+                    "error": f"Command timed out after {timeout} seconds",
+                    "execution_mode": "cli",
+                    "command": command
+                }
+
+        except Exception as e:
+            logger.exception(f"❌ [Prometheus CLI] 执行异常: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "execution_mode": "cli",
+                "command": command
+            }
+
     def parse_output(self, stdout: str, stderr: str) -> Any:
-        """解析 promql 输出"""
+        """解析 promql 输出（由自定义 execute 方法处理，此方法为抽象类接口要求）"""
+        # 注意：PrometheusFallback 使用自定义 execute 方法，不使用此方法
+        # 但必须实现以满足抽象基类要求
         try:
             return json.loads(stdout)
         except json.JSONDecodeError:

@@ -217,59 +217,9 @@ def should_skip_message(content: str) -> bool:
     """
     判断是否应该跳过这条消息（不发送给用户）。
 
-    跳过规则：
-    1. 调试模式短语（如"让我..."）且内容较短
-    2. 纯 JSON 数据（不包含 output 字段）
-
-    返回 True 表示跳过该消息。
+    注意：此功能已禁用，所有消息都会发送给用户。
     """
-    if not content or not isinstance(content, str):
-        logger.warning(f"🚫 [跳过检测] 内容为空或非字符串: type={type(content)}, value={repr(content)[:100]}")
-        return False
-
-    content_len = len(content)
-    content_preview = content[:150] if content_len > 150 else content
-
-    # 规则 1: 检查调试模式短语
-    skip_patterns = [
-        "Updated todo list to",
-        "我来帮你",
-        "让我",
-        "首先",
-        "接下来",
-        "正在",
-    ]
-
-    for pattern in skip_patterns:
-        if pattern in content:
-            should_skip = content_len <= 200
-            logger.warning(
-                f"🚫 [跳过检测-规则1] 匹配模式 '{pattern}' | "
-                f"内容长度={content_len} | 跳过={should_skip} | "
-                f"内容: {content_preview}..."
-            )
-            return should_skip
-
-    # 规则 2: 尝试解析 JSON（可能是工具返回的原始数据）
-    try:
-        data = json.loads(content)
-        if isinstance(data, dict):
-            if "output" in data:
-                logger.info(f"✅ [跳过检测-规则2] JSON包含output字段，不跳过")
-                return False
-            # JSON 数据但没有 output 字段，跳过
-            logger.warning(
-                f"🚫 [跳过检测-规则2] JSON数据无output字段，跳过 | "
-                f"keys={list(data.keys())[:10]} | "
-                f"内容: {str(data)[:200]}"
-            )
-            return True
-    except (json.JSONDecodeError, TypeError) as e:
-        # 不是 JSON，继续检查
-        pass
-
-    # 不跳过
-    logger.debug(f"✅ [跳过检测] 通过所有规则，不跳过 | 长度={content_len}")
+    # 始终返回 False，不跳过任何消息
     return False
 
 
@@ -1280,6 +1230,7 @@ async def _process_message_update(
     max_processed_idx = last_processed
     has_ai_reply = False
     fallback_reply = None  # 保存被过滤消息的友好版本
+    fallback_replies = []  # 保存所有被过滤消息的友好版本
 
     for idx, message in new_messages:
         msg_type = type(message).__name__
@@ -1330,13 +1281,15 @@ async def _process_message_update(
                     formatted_result = await format_tool_output(content)
                     if isinstance(formatted_result, dict) and formatted_result.get("msg_type") in {"card", "interactive"}:
                         # 卡片消息：转换为可读文本
-                        fallback_reply = _convert_card_to_readable_text(formatted_result["card"])
+                        converted = _convert_card_to_readable_text(formatted_result["card"])
                     elif isinstance(formatted_result, dict) and "text" in formatted_result:
-                        fallback_reply = formatted_result["text"]
+                        converted = formatted_result["text"]
                     else:
-                        fallback_reply = str(formatted_result)
+                        converted = str(formatted_result)
 
-                    logger.info(f"💾 [后备回复] 保存了 {len(fallback_reply)} 字符的友好版本")
+                    logger.info(f"💾 [后备回复] 保存了 {len(converted)} 字符的友好版本")
+                    fallback_replies.append(converted)
+                    fallback_reply = converted  # 保留最后一个用于兼容
                 except Exception as e:
                     logger.warning(f"⚠️ [后备回复] 转换失败: {e}")
 
@@ -1404,9 +1357,11 @@ async def _process_message_update(
         logger.warning(f"   - 消息类型分布: {msg_type_count}")
 
     # 返回后备回复（如果没有其他回复）
-    if not has_ai_reply and not all_replies and fallback_reply:
-        logger.info(f"💾 [后备回复] 返回后备回复，长度: {len(fallback_reply)} 字符")
-        return fallback_reply
+    if not has_ai_reply and not all_replies and fallback_replies:
+        # 合并所有后备回复
+        combined = "\n\n".join(fallback_replies)
+        logger.info(f"💾 [后备回复] 返回 {len(fallback_replies)} 条后备回复，总长度: {len(combined)} 字符")
+        return combined
     return None
 
 
