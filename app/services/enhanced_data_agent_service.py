@@ -645,6 +645,38 @@ async def enhanced_collect_data(
     user_query: str,
     context: Dict[str, Any] = None,
     collected_data: Dict[str, Any] = None
+
+    
+    def _should_use_memory(self, query: str) -> bool:
+        """
+        判断是否需要使用记忆（参考 OpenClaw）
+        
+        规则：
+        - 具体资源查询（版本、配置、状态、日志）→ 不使用记忆
+        - 故障诊断（错误、异常、失败、告警）→ 使用记忆
+        - 其他查询 → 使用记忆
+        
+        Args:
+            query: 用户查询
+        
+        Returns:
+            是否需要使用记忆
+        """
+        query_lower = query.lower()
+        
+        # 具体资源查询 → 不使用记忆
+        specific_keywords = ["版本", "version", "配置", "config", "状态", "status", "日志", "log", "yaml"]
+        if any(kw in query_lower for kw in specific_keywords):
+            return False
+        
+        # 故障诊断 → 使用记忆
+        diagnosis_keywords = ["错误", "error", "异常", "exception", "失败", "fail", "告警", "alert", "故障", "诊断", "排查"]
+        if any(kw in query_lower for kw in diagnosis_keywords):
+            return True
+        
+        # 默认使用记忆
+        return False
+
 ) -> Dict[str, Any]:
     """
     增强数据采集入口函数（兼容旧接口）

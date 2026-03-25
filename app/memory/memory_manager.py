@@ -339,6 +339,107 @@ class MemoryManager:
 
     # ==================== 智能上下文构建 ====================
 
+    def _classify_intent(self, query: str) -> str:
+        """
+        分类查询意图（参考 OpenClaw）
+        
+        Returns:
+            - "specific_resource": 具体资源查询（版本、配置、状态等）
+            - "incident_diagnosis": 故障诊断（错误、异常、失败等）
+            - "cluster_overview": 集群概况（列表、总览、统计等）
+            - "general": 通用查询
+        """
+        query_lower = query.lower()
+        
+        # 1. 具体资源查询
+        if any(kw in query_lower for kw in ["版本", "配置", "状态", "日志", "yaml", "版本号"]):
+            return "specific_resource"
+        
+        # 2. 故障诊断
+        if any(kw in query_lower for kw in ["错误", "异常", "失败", "告警", "故障", "诊断", "排查"]):
+            return "incident_diagnosis"
+        
+        # 3. 集群概况
+        if any(kw in query_lower for kw in ["概况", "总览", "多少", "列表", "概览", "统计", "总共有"]):
+            return "cluster_overview"
+        
+        # 4. 通用查询
+        return "general"
+
+    async def smart_search(
+        self,
+        query: str,
+        context: Dict[str, Any] = None,
+        session_id: str = None
+    ) -> List[Dict[str, Any]]:
+        """
+        智能检索（参考 OpenClaw）
+        
+        ⚠️ 核心改进：
+        1. 自动分类查询意图
+        2. 根据意图选择检索策略
+        3. 自动过滤记忆
+        
+        Args:
+            query: 查询文本
+            context: 上下文信息（包含 namespace, resource_type 等）
+            session_id: 会话 ID
+        
+        Returns:
+            记忆列表（已根据意图过滤）
+        """
+        context = context or {}
+        
+        # 1. 分类查询意图
+        intent = self._classify_intent(query)
+        logger.info(f"🎯 [Intent] 查询意图: {intent}")
+        
+        # 2. 根据意图选择检索策略
+        if intent == "specific_resource":
+            # 具体资源查询 → 不检索历史记忆（避免干扰）
+            logger.info(f"🚫 [Memory] 具体资源查询，跳过历史记忆检索")
+            return []
+        
+        elif intent == "incident_diagnosis":
+            # 故障诊断 → 检索故障记忆和知识库
+            logger.info(f"🔍 [Memory] 故障诊断，检索故障记忆和知识库")
+            return await self.memory_search(
+                query=query,
+                max_results=5,
+                min_score=0.7,
+                include_mem0=True,
+                include_incidents=True,
+                include_knowledge=True,
+                include_session=True,
+                session_id=session_id
+            )
+        
+        elif intent == "cluster_overview":
+            # 集群概况 → 检索知识库（低相关性阈值）
+            logger.info(f"📊 [Memory] 集群概况，检索知识库")
+            return await self.memory_search(
+                query=query,
+                max_results=10,
+                min_score=0.6,  # 较低阈值
+                include_mem0=False,
+                include_incidents=False,
+                include_knowledge=True,
+                include_session=False
+            )
+        
+        else:
+            # 通用查询 → 默认策略
+            logger.info(f"🔍 [Memory] 通用查询，使用默认策略")
+            return await self.memory_search(
+                query=query,
+                max_results=5,
+                min_score=0.7,
+                include_mem0=True,
+                include_incidents=True,
+                include_knowledge=True,
+                include_session=False
+            )
+
     # ==================== 检索式访问（参考 OpenClaw）====================
 
     async def memory_search(
@@ -520,14 +621,20 @@ class MemoryManager:
         include_knowledge: bool = True,
         include_session: bool = False,
         include_mem0: bool = True,
-        max_tokens: int = 3000
+        max_tokens: int = 3000,
+        enable_truncation: bool = True
     ) -> str:
         """
-        构建智能上下文（混合两层记忆）
+        构建智能上下文（混合两层记忆，参考 OpenClaw）
 
         记忆层级：
         1. Mem0 通用对话记忆（用户偏好、会话上下文）
         2. 运维领域记忆（故障、知识库）
+        
+        ⚠️ Token 管理（参考 OpenClaw）：
+        - 实时监控 token 使用量
+        - 超过限制时自动截断
+        - 优先保留高相关性记忆
 
         Args:
             user_query: 用户查询
@@ -537,6 +644,7 @@ class MemoryManager:
             include_session: 是否包含会话记忆（向量存储）
             include_mem0: 是否包含 Mem0 记忆
             max_tokens: 最大 token 数
+            enable_truncation: 是否启用自动截断
 
         Returns:
             格式化的上下文字符串
@@ -544,6 +652,8 @@ class MemoryManager:
         context_parts = []
         current_tokens = 0
         original_max = max_tokens
+        
+        logger.info(f"📊 [Token] 开始构建上下文 | 预算: {max_tokens} tokens")
 
         # ===== 第一层：Mem0 通用对话记忆 =====
         if include_mem0 and self._mem0_enabled:
@@ -556,9 +666,24 @@ class MemoryManager:
                     max_tokens=max_tokens // 3  # 分配 1/3 token
                 )
                 if mem0_context:
-                    context_parts.append(f"## 🗣️ 对话记忆\n{mem0_context}")
-                    current_tokens += len(mem0_context)
-                    max_tokens -= len(mem0_context)
+                    # Token 检查（参考 OpenClaw）
+                    mem0_tokens = self._estimate_tokens(mem0_context)
+                    
+                    if current_tokens + mem0_tokens > original_max:
+                        logger.warning(f"⚠️ [Token] Mem0 上下文超出限制 | 当前: {current_tokens} + {mem0_tokens} > {original_max}")
+                        # 截断
+                        if enable_truncation:
+                            mem0_context = self._truncate_to_token_limit(mem0_context, original_max - current_tokens)
+                            mem0_tokens = self._estimate_tokens(mem0_context)
+                        else:
+                            mem0_context = ""
+                            mem0_tokens = 0
+                    
+                    if mem0_context:
+                        context_parts.append(f"## 🗣️ 对话记忆\n{mem0_context}")
+                        current_tokens += mem0_tokens
+                        max_tokens = original_max - current_tokens
+                        logger.info(f"✅ [Token] Mem0 上下文已添加 | 使用: {mem0_tokens} tokens | 剩余: {max_tokens} tokens")
             except Exception as e:
                 logger.warning(f"⚠️ Mem0 上下文获取失败: {e}")
 
@@ -798,6 +923,70 @@ def get_memory_manager(user_id: str = None) -> MemoryManager:
 
     return _memory_manager_instances[user_id]
 
+
+
+    
+    def _estimate_tokens(self, text: str) -> int:
+        """
+        估算 Token 数量（参考 OpenClaw）
+        
+        规则：
+        - 中文：约 1.5 字符/token
+        - 英文：约 4 字符/token
+        
+        Args:
+            text: 文本内容
+        
+        Returns:
+            估算的 token 数量
+        """
+        if not text:
+            return 0
+        
+        # 统计中文字符
+        chinese_chars = sum(1 for c in text if '\u4e00' <= c <= '\u9fff')
+        
+        # 统计英文和其他字符
+        other_chars = len(text) - chinese_chars
+        
+        # 估算 token
+        tokens = int(chinese_chars / 1.5 + other_chars / 4)
+        
+        return tokens
+    
+    def _truncate_to_token_limit(
+        self,
+        text: str,
+        max_tokens: int,
+        suffix: str = "\n...（已截断）"
+    ) -> str:
+        """
+        截断文本到指定 Token 限制（参考 OpenClaw）
+        
+        Args:
+            text: 原始文本
+            max_tokens: 最大 token 数
+            suffix: 截断后缀
+        
+        Returns:
+            截断后的文本
+        """
+        if not text:
+            return text
+        
+        current_tokens = self._estimate_tokens(text)
+        
+        if current_tokens <= max_tokens:
+            return text
+        
+        # 估算字符数（保守估计）
+        max_chars = int(max_tokens * 2)  # 保守估计 2 字符/token
+        
+        if len(text) <= max_chars:
+            return text
+        
+        # 截断
+        return text[:max_chars] + suffix
 
 __all__ = [
     "MemoryManager",

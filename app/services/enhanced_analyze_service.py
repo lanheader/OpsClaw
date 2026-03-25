@@ -244,22 +244,18 @@ class EnhancedAnalyzeService:
         context = context or {}
         logger.info(f"🔬 [EnhancedAnalyze] 开始诊断: {user_query[:50]}")
 
-        # ===== 记忆增强（参考 OpenClaw 的检索式访问）=====
+        # ===== 记忆增强（参考 OpenClaw 的延迟加载）=====
         memory_context = ""
-        try:
-            # 1. 检索相关记忆（不自动注入）
-            memories = await self.memory.memory_search(
-                query=user_query,
-                max_results=5,
-                min_score=0.7,
-                include_mem0=True,
-                include_incidents=True,
-                include_knowledge=True,
-                include_session=False
-            )
-            
-            # 2. 如果有记忆，构建上下文
-            if memories:
+        if self._should_use_memory(user_query):
+            try:
+                # 1. 使用智能检索（业务层过滤）
+                memories = await self.memory.smart_search(
+                    query=user_query,
+                    context=context
+                )
+                
+                # 2. 如果有记忆，构建上下文
+                if memories:
                 memory_context = await self.memory.build_context(
                     user_query=user_query,
                     include_mem0=True,
@@ -864,6 +860,25 @@ def get_enhanced_analyze_service() -> EnhancedAnalyzeService:
         _analyze_service_instance = EnhancedAnalyzeService()
     return _analyze_service_instance
 
+
+
+    
+    def _should_use_memory(self, query: str) -> bool:
+        """
+        判断是否需要使用记忆（参考 OpenClaw）
+        
+        规则：
+        - 故障诊断 → 使用记忆
+        - 其他查询 → 使用记忆
+        
+        Args:
+            query: 用户查询
+        
+        Returns:
+            是否需要使用记忆
+        """
+        # 分析诊断默认使用记忆
+        return True
 
 __all__ = [
     "EnhancedAnalyzeService",
