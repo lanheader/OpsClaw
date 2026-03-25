@@ -339,6 +339,179 @@ class MemoryManager:
 
     # ==================== 智能上下文构建 ====================
 
+    # ==================== 检索式访问（参考 OpenClaw）====================
+
+    async def memory_search(
+        self,
+        query: str,
+        max_results: int = 5,
+        min_score: float = 0.7,
+        include_mem0: bool = True,
+        include_incidents: bool = True,
+        include_knowledge: bool = True,
+        include_session: bool = False,
+        session_id: str = None
+    ) -> List[Dict[str, Any]]:
+        """
+        语义搜索记忆（参考 OpenClaw 的检索式访问）
+        
+        ⚠️ 关键区别：
+        - 不自动注入到上下文
+        - 返回记忆列表，由调用者决定如何使用
+        - 参考 OpenClaw 的 memory_search 工具设计
+        
+        Args:
+            query: 查询文本
+            max_results: 最大返回数量
+            min_score: 最小相似度阈值（0-1）
+            include_mem0: 是否包含 Mem0 通用对话记忆
+            include_incidents: 是否包含故障记忆
+            include_knowledge: 是否包含知识库
+            include_session: 是否包含会话记忆
+            session_id: 会话 ID（用于会话记忆检索）
+        
+        Returns:
+            记忆列表，每个记忆包含：
+            - content: 记忆内容
+            - source: 来源（mem0/incident/knowledge/session）
+            - similarity: 相似度（0-1）
+            - metadata: 元数据
+        """
+        results = []
+        
+        # 1. 从 Mem0 检索通用对话记忆
+        if include_mem0 and self._mem0_enabled:
+            try:
+                mem0_results = await self._mem0_adapter.search_user_memory(
+                    query=query,
+                    limit=max_results
+                )
+                
+                for r in mem0_results:
+                    results.append({
+                        "content": r.get("memory", ""),
+                        "source": "mem0_user",
+                        "similarity": 0.8,  # Mem0 不返回相似度，给默认值
+                        "metadata": r.get("metadata", {})
+                    })
+                
+                # 如果有 session_id，也检索会话记忆
+                if session_id:
+                    session_results = await self._mem0_adapter.search_session_memory(
+                        session_id=session_id,
+                        query=query,
+                        limit=max_results
+                    )
+                    
+                    for r in session_results:
+                        results.append({
+                            "content": r.get("memory", ""),
+                            "source": "mem0_session",
+                            "similarity": 0.8,
+                            "metadata": r.get("metadata", {})
+                        })
+                
+                logger.info(f"🔍 Mem0: 检索到 {len(mem0_results)} 条用户记忆")
+                
+            except Exception as e:
+                logger.warning(f"⚠️ Mem0 检索失败: {e}")
+        
+        # 2. 从 ChromaDB 检索故障记忆
+        if include_incidents:
+            try:
+                incidents = await self.recall_similar_incidents(
+                    query=query,
+                    top_k=max_results
+                )
+                
+                for inc in incidents:
+                    similarity = inc.get("similarity", 0)
+                    
+                    # 过滤低相关性的
+                    if similarity >= min_score:
+                        results.append({
+                            "content": inc.get("content", ""),
+                            "source": "incident",
+                            "similarity": similarity,
+                            "metadata": {
+                                "title": inc.get("title"),
+                                "incident_type": inc.get("incident_type"),
+                                "resolution": inc.get("resolution"),
+                                "root_cause": inc.get("root_cause")
+                            }
+                        })
+                
+                logger.info(f"🔍 故障记忆: 检索到 {len(incidents)} 条")
+                
+            except Exception as e:
+                logger.warning(f"⚠️ 故障记忆检索失败: {e}")
+        
+        # 3. 从 ChromaDB 检索知识库
+        if include_knowledge:
+            try:
+                knowledge = await self.query_knowledge(
+                    query=query,
+                    top_k=max_results
+                )
+                
+                for k in knowledge:
+                    similarity = k.get("similarity", 0)
+                    
+                    if similarity >= min_score:
+                        results.append({
+                            "content": k.get("content", ""),
+                            "source": "knowledge",
+                            "similarity": similarity,
+                            "metadata": {
+                                "title": k.get("title"),
+                                "category": k.get("category"),
+                                "tags": k.get("tags"),
+                                "source": k.get("source")
+                            }
+                        })
+                
+                logger.info(f"🔍 知识库: 检索到 {len(knowledge)} 条")
+                
+            except Exception as e:
+                logger.warning(f"⚠️ 知识库检索失败: {e}")
+        
+        # 4. 从 ChromaDB 检索会话记忆
+        if include_session and session_id:
+            try:
+                session_contexts = await self.recall_session_context(
+                    session_id=session_id,
+                    query=query,
+                    top_k=max_results
+                )
+                
+                for ctx in session_contexts:
+                    similarity = ctx.get("similarity", 0)
+                    
+                    if similarity >= min_score:
+                        results.append({
+                            "content": ctx.get("content", ""),
+                            "source": "session",
+                            "similarity": similarity,
+                            "metadata": {
+                                "role": ctx.get("role"),
+                                "timestamp": ctx.get("timestamp")
+                            }
+                        })
+                
+                logger.info(f"🔍 会话记忆: 检索到 {len(session_contexts)} 条")
+                
+            except Exception as e:
+                logger.warning(f"⚠️ 会话记忆检索失败: {e}")
+        
+        # 5. 按相似度排序并返回 Top-K
+        sorted_results = sorted(
+            results,
+            key=lambda x: x.get("similarity", 0),
+            reverse=True
+        )
+        
+        return sorted_results[:max_results]
+
     async def build_context(
         self,
         user_query: str,

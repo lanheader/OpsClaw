@@ -30,7 +30,12 @@ class MemoryMiddleware:
         config: Dict[str, Any] = None
     ) -> List[Dict[str, Any]]:
         """
-        处理输入消息 - 自动检索并注入相关记忆
+        处理输入消息（已禁用自动注入）
+        
+        ⚠️ 参考 OpenClaw 设计：
+        - 不自动注入记忆到输入
+        - 记忆检索改为按需调用 memory_search
+        - 由 Subagent 自主决定是否使用记忆
 
         Args:
             messages: 原始消息列表
@@ -38,51 +43,12 @@ class MemoryMiddleware:
             config: 额外配置
 
         Returns:
-            增强后的消息列表
+            原始消息列表（不增强）
         """
-        if not messages:
-            return messages
-
-        # 懒加载记忆管理器
-        if self.memory_manager is None:
-            self.memory_manager = get_memory_manager()
-
-        # 获取最后一条用户消息
-        last_user_msg = None
-        last_user_idx = -1
-        for i in range(len(messages) - 1, -1, -1):
-            msg = messages[i]
-            if isinstance(msg, dict) and msg.get("role") == "user":
-                last_user_msg = msg.get("content", "")
-                last_user_idx = i
-                break
-
-        if not last_user_msg:
-            return messages
-
-        # 检索相关记忆
-        context = await self.memory_manager.build_context(
-            user_query=last_user_msg,
-            session_id=session_id,
-            include_incidents=True,
-            include_knowledge=True,
-            include_session=bool(session_id)
-        )
-
-        # 如果有相关记忆，注入系统消息
-        if context:
-            logger.info(f"🧠 [MemoryMiddleware] 检索到相关上下文，增强输入")
-            enhanced_messages = list(messages)
-
-            # 在用户消息前插入系统消息
-            system_msg = {
-                "role": "system",
-                "content": f"参考资料（来自历史记录和知识库）：\n\n{context}"
-            }
-            enhanced_messages.insert(last_user_idx, system_msg)
-
-            return enhanced_messages
-
+        # ❌ 不再自动注入记忆！
+        # 原因：参考 OpenClaw 的检索式访问设计
+        # 改进：Subagent 应该按需调用 memory_search
+        
         return messages
 
     async def process_output(
@@ -210,25 +176,21 @@ class MemoryEnhancedAgent:
         return result
 
     async def astream(self, input_data, config=None, **kwargs):
-        """增强的 stream 方法"""
+        """
+        增强的 stream 方法（已禁用自动注入）
+        
+        ⚠️ 参考 OpenClaw 设计：
+        - 不自动注入记忆到输入
+        - 记忆检索改为按需调用 memory_search
+        - 由 Subagent 自主决定是否使用记忆
+        """
         session_id = config.get("configurable", {}).get("thread_id") if config else None
         user_query = self._extract_user_query(input_data)
 
-        # 构建增强输入
-        if self.enable_memory and user_query:
-            context = await self.memory_manager.build_context(
-                user_query=user_query,
-                session_id=session_id,
-                include_incidents=True,
-                include_knowledge=True
-            )
+        # ❌ 不再自动注入记忆！
+        # 原因：参考 OpenClaw 的检索式访问设计
 
-            if context:
-                enhanced_input = f"{user_query}\n\n参考资料（来自历史记录和知识库）：\n{context}"
-                input_data = self._update_input_query(input_data, enhanced_input)
-                logger.info(f"🧠 [MemoryEnhancedAgent] 输入已增强")
-
-        # 流式输出
+        # 流式输出（不增强输入）
         async for chunk in self.agent.astream(input_data, config=config, **kwargs):
             yield chunk
 
@@ -271,4 +233,6 @@ class MemoryEnhancedAgent:
 __all__ = [
     "MemoryMiddleware",
     "MemoryEnhancedAgent",
+]
+gent",
 ]

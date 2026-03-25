@@ -20,6 +20,7 @@ from langchain_core.language_models import BaseChatModel
 from app.core.llm_factory import LLMFactory
 from app.models.database import get_db
 from app.utils.logger import get_logger
+from app.memory.memory_manager import get_memory_manager
 
 logger = get_logger(__name__)
 
@@ -210,6 +211,10 @@ class EnhancedAnalyzeService:
         self.llm = llm or LLMFactory.create_llm_for_subagent("analyze-agent")
         self.knowledge_base = OpsKnowledgeBase()
         self._reflection_history: List[Dict[str, Any]] = []
+        # 记忆管理器（参考 OpenClaw 的检索式访问）
+        self.memory = get_memory_manager()
+        # 记忆管理器（参考 OpenClaw 的检索式访问）
+        self.memory = get_memory_manager()
 
     async def diagnose(
         self,
@@ -238,6 +243,44 @@ class EnhancedAnalyzeService:
         """
         context = context or {}
         logger.info(f"🔬 [EnhancedAnalyze] 开始诊断: {user_query[:50]}")
+
+        # ===== 记忆增强（参考 OpenClaw 的检索式访问）=====
+        memory_context = ""
+        try:
+            # 1. 检索相关记忆（不自动注入）
+            memories = await self.memory.memory_search(
+                query=user_query,
+                max_results=5,
+                min_score=0.7,
+                include_mem0=True,
+                include_incidents=True,
+                include_knowledge=True,
+                include_session=False
+            )
+            
+            # 2. 如果有记忆，构建上下文
+            if memories:
+                memory_context = await self.memory.build_context(
+                    user_query=user_query,
+                    include_mem0=True,
+                    include_incidents=True,
+                    include_knowledge=True,
+                    max_tokens=2000
+                )
+                
+                memory_context = f"""
+## 历史参考资料（仅供参考）
+
+{memory_context}
+
+⚠️ 重要规则：
+1. 如果参考资料与当前问题**不匹配**，请**忽略**它
+2. 优先分析实时采集的数据，历史案例仅作参考
+3. 如果历史解决方案不适用，请提出新的方案
+"""
+                logger.info(f"🧠 [Memory] 检索到 {len(memories)} 条相关记忆")
+        except Exception as e:
+            logger.warning(f"⚠️ [Memory] 记忆检索失败: {e}")
 
         # Phase 1: RAG - 检索相关案例
         referenced_cases = []

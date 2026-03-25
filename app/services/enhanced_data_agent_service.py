@@ -145,10 +145,11 @@ class EnhancedDataAgentService:
         self,
         user_query: str,
         context: Dict[str, Any],
-        existing_data: Dict[str, Any] = None
+        existing_data: Dict[str, Any] = None,
+        memory_context: str = ""
     ) -> CollectionPlan:
         """
-        Phase 1 (Planner): 规划采集步骤
+        Phase 1 (Planner): 规划采集步骤（带记忆增强）
 
         使用 CoT 推理分析用户需求，生成采集计划
         """
@@ -162,7 +163,7 @@ class EnhancedDataAgentService:
 
         prompt = f"""作为运维数据采集专家，请分析以下用户需求，规划需要采集的数据：
 
-用户需求：{user_query}{context_info}{existing_info}
+用户需求：{user_query}{context_info}{existing_info}{memory_context}
 
 可用数据源：
 - K8s: Pod、Node、Deployment、Service、ConfigMap、Secret 等
@@ -568,6 +569,66 @@ class EnhancedDataAgentService:
 
 
 # ==================== 便捷函数 ====================
+
+_data_agent_service_instance: Optional[EnhancedDataAgentService] = None
+
+
+def get_enhanced_data_agent_service() -> EnhancedDataAgentService:
+    """获取增强数据采集服务单例"""
+    global _data_agent_service_instance
+    if _data_agent_service_instance is None:
+        _data_agent_service_instance = EnhancedDataAgentService()
+    return _data_agent_service_instance
+
+
+async def enhanced_collect_data(
+    user_query: str,
+    context: Dict[str, Any] = None,
+    collected_data: Dict[str, Any] = None
+) -> Dict[str, Any]:
+    """
+    增强数据采集入口函数（兼容旧接口）
+
+    使用 ReWOO 模式并行采集数据
+
+    Args:
+        user_query: 用户查询
+        context: 上下文信息
+        collected_data: 已采集的数据
+
+    Returns:
+        采集和整合后的数据
+    """
+    service = get_enhanced_data_agent_service()
+    result = await service.collect_data_rewoo(
+        user_query=user_query,
+        context=context or {},
+        collected_data=collected_data
+    )
+
+    return {
+        "raw_results": {k: {
+            "success": v.success,
+            "data": v.data,
+            "error": v.error,
+            "duration": v.duration
+        } for k, v in result.raw_results.items()},
+        "processed_data": result.processed_data,
+        "summary": result.summary,
+        "metadata": result.metadata
+    }
+
+
+__all__ = [
+    "EnhancedDataAgentService",
+    "CollectionStep",
+    "CollectionResult",
+    "CollectionPlan",
+    "IntegratedData",
+    "get_enhanced_data_agent_service",
+    "enhanced_collect_data",
+]
+数 ====================
 
 _data_agent_service_instance: Optional[EnhancedDataAgentService] = None
 
