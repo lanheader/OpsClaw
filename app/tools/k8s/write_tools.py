@@ -6,6 +6,10 @@ K8s 写操作工具（新架构）
 """
 
 from typing import Dict, Any, Optional
+import time
+
+from kubernetes import client
+from app.integrations.kubernetes.client import create_client
 
 from app.tools.base import (
     BaseOpTool,
@@ -24,7 +28,6 @@ logger = get_logger(__name__)
 # 通用初始化函数
 def _init_k8s_client(db=None):
     """初始化 K8s 客户端"""
-    from app.integrations.kubernetes.client import create_client
     return create_client(db)
 
 
@@ -75,8 +78,6 @@ class RestartDeploymentTool(BaseOpTool):
         """执行工具操作"""
         _log_tool_start("restart_deployment", name=name, namespace=namespace)
         try:
-            import time
-
             # 先检查 deployment 是否存在
             deployment = self.k8s_client.apps_v1.read_namespaced_deployment(name=name, namespace=namespace)
 
@@ -141,8 +142,6 @@ class ScaleDeploymentTool(BaseOpTool):
         """执行工具操作"""
         _log_tool_start("scale_deployment", name=name, replicas=replicas, namespace=namespace)
         try:
-            from kubernetes import client
-
             # 创建 scale 对象
             scale = client.V1Scale(
                 spec=client.V1ScaleSpec(replicas=replicas)

@@ -4,18 +4,20 @@ import asyncio
 import base64
 import hashlib
 import json
+import re
 import traceback
 from typing import Any, Dict, Literal, Optional
 
 from Crypto.Cipher import AES
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.types import Overwrite
 
+from app.core.checkpointer import get_checkpointer
 from app.core.llm_factory import LLMFactory
 from app.core.permission_checker import get_user_permission_codes
 from app.core.state import OpsState
 from app.deepagents.factory import create_agent_for_session
-from app.deepagents.main_agent import get_ops_agent, get_thread_config
+from app.deepagents.main_agent import get_thread_config
 from app.integrations.feishu.callback_extensions import (
     handle_end_session_command,
     handle_new_session_command,
@@ -35,6 +37,7 @@ from app.models.user import User
 from app.services.approval_intent_service import classify_approval_intent
 from app.services.chat_service import get_or_create_feishu_session, save_feishu_message
 from app.services.session_state_manager import SessionStateManager
+from app.utils.llm_helper import ensure_final_report_in_state
 from app.utils.logger import get_logger, set_request_context, clear_request_context
 
 logger = get_logger(__name__)
@@ -123,7 +126,6 @@ def _convert_card_to_readable_text(card: Dict[str, Any]) -> str:
     # 组合内容，清理多余的空行
     result = "\n".join(lines)
     # 替换连续的多个换行为最多两个
-    import re
     result = re.sub(r"\n{3,}", "\n\n", result)
 
     return result.strip()
@@ -212,10 +214,23 @@ async def format_tool_output(content: str) -> dict:
 
 
 def should_skip_message(content: str) -> bool:
-    """判断是否应该跳过这条消息（不发送给用户）。"""
+    """
+    判断是否应该跳过这条消息（不发送给用户）。
+
+    跳过规则：
+    1. 调试模式短语（如"让我..."）且内容较短
+    2. 纯 JSON 数据（不包含 output 字段）
+
+    返回 True 表示跳过该消息。
+    """
     if not content or not isinstance(content, str):
+        logger.warning(f"🚫 [跳过检测] 内容为空或非字符串: type={type(content)}, value={repr(content)[:100]}")
         return False
 
+    content_len = len(content)
+    content_preview = content[:150] if content_len > 150 else content
+
+    # 规则 1: 检查调试模式短语
     skip_patterns = [
         "Updated todo list to",
         "我来帮你",
@@ -227,15 +242,161 @@ def should_skip_message(content: str) -> bool:
 
     for pattern in skip_patterns:
         if pattern in content:
-            return len(content) <= 200
+            should_skip = content_len <= 200
+            logger.warning(
+                f"🚫 [跳过检测-规则1] 匹配模式 '{pattern}' | "
+                f"内容长度={content_len} | 跳过={should_skip} | "
+                f"内容: {content_preview}..."
+            )
+            return should_skip
 
+    # 规则 2: 尝试解析 JSON（可能是工具返回的原始数据）
     try:
         data = json.loads(content)
-        if isinstance(data, dict) and "output" in data:
-            return False
-        return True
-    except (json.JSONDecodeError, TypeError):
-        return False
+        if isinstance(data, dict):
+            if "output" in data:
+                logger.info(f"✅ [跳过检测-规则2] JSON包含output字段，不跳过")
+                return False
+            # JSON 数据但没有 output 字段，跳过
+            logger.warning(
+                f"🚫 [跳过检测-规则2] JSON数据无output字段，跳过 | "
+                f"keys={list(data.keys())[:10]} | "
+                f"内容: {str(data)[:200]}"
+            )
+            return True
+    except (json.JSONDecodeError, TypeError) as e:
+        # 不是 JSON，继续检查
+        pass
+
+    # 不跳过
+    logger.debug(f"✅ [跳过检测] 通过所有规则，不跳过 | 长度={content_len}")
+    return False
+
+
+async def _diagnose_message_state(
+    session_id: str,
+    chat_id: str,
+    initial_state: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    诊断消息状态，用于分析为什么没有生成回复。
+
+    参数:
+        session_id: 会话 ID
+        chat_id: 飞书聊天 ID
+        initial_state: 初始状态（如果提供，使用运行时状态而非 checkpointer）
+
+    返回消息统计信息，包括：
+    - 总消息数
+    - 各类型消息数量
+    - 被跳过的消息统计
+    - 最后处理的索引
+    """
+    from app.services.session_state_manager import SessionStateManager
+    from app.core.checkpointer import get_checkpointer
+
+    stats = {
+        "session_id": session_id,
+        "chat_id": chat_id,
+        "total_messages": 0,
+        "last_processed_index": -1,
+        "message_types": {},
+        "ai_messages": 0,
+        "ai_messages_empty": 0,
+        "ai_messages_with_tool_calls": 0,
+        "human_messages": 0,
+        "tool_messages": 0,
+        "sample_messages": [],
+        "state_source": "checkpointer",
+    }
+
+    messages = None
+
+    # 优先使用运行时状态
+    if initial_state and "messages" in initial_state:
+        messages = unwrap_overwrite(initial_state["messages"])
+        stats["state_source"] = "runtime"
+        logger.info(f"🔍 [诊断] 使用运行时状态分析消息")
+    else:
+        # 从 checkpointer 获取状态
+        try:
+            checkpointer = await get_checkpointer()
+            config = {"configurable": {"thread_id": session_id}}
+            saved_state = await checkpointer.aget_tuple(config)
+
+            if saved_state:
+                # 先尝试从 checkpoint 获取
+                if saved_state.checkpoint:
+                    state = saved_state.checkpoint
+                    messages = state.get("messages", None)
+                    if messages:
+                        stats["state_source"] = "checkpoint"
+
+                # 如果 checkpoint 中没有，尝试从 channel_values 获取
+                if not messages and hasattr(saved_state, 'channel_values'):
+                    cv = saved_state.channel_values
+                    if cv and "messages" in cv:
+                        messages = cv.get("messages", None)
+                        if messages:
+                            stats["state_source"] = "channel_values"
+                            logger.info(f"🔍 [诊断] 从 channel_values 获取消息")
+
+                if not messages:
+                    stats["warning"] = "checkpointer 存在但没有 messages 字段"
+                    logger.error(f"🔍 [诊断] checkpointer 结构: checkpoint={type(saved_state.checkpoint)}, channel_values={type(getattr(saved_state, 'channel_values', None))}")
+                    if saved_state.checkpoint:
+                        logger.error(f"🔍 [诊断] checkpoint keys: {list(saved_state.checkpoint.keys()) if isinstance(saved_state.checkpoint, dict) else 'not a dict'}")
+        except Exception as e:
+            logger.warning(f"⚠️ [诊断] 获取 checkpointer 状态失败: {e}")
+            stats["error"] = f"获取状态失败: {e}"
+
+    if not messages:
+        stats["warning"] = f"消息为空: source={stats.get('state_source', 'unknown')}, type={type(messages)}"
+        return stats
+
+    if not isinstance(messages, list):
+        stats["warning"] = f"消息不是列表: type={type(messages)}"
+        return stats
+
+    stats["total_messages"] = len(messages)
+    last_processed = SessionStateManager.get_last_processed_message_index(session_id)
+    stats["last_processed_index"] = last_processed or -1
+
+    # 分析消息类型
+    for idx, msg in enumerate(messages):
+        msg_type = type(msg).__name__
+        stats["message_types"][msg_type] = stats["message_types"].get(msg_type, 0) + 1
+
+        if isinstance(msg, AIMessage):
+            stats["ai_messages"] += 1
+            content = getattr(msg, "content", None)
+            tool_calls = getattr(msg, "tool_calls", None)
+
+            if tool_calls and len(tool_calls) > 0:
+                stats["ai_messages_with_tool_calls"] += 1
+            if not content:
+                stats["ai_messages_empty"] += 1
+
+            # 记录最近 5 条 AI 消息的样本
+            if stats["ai_messages"] <= 5:
+                content_str = str(content) if content else ""
+                stats["sample_messages"].append({
+                    "index": idx,
+                    "type": msg_type,
+                    "has_content": bool(content),
+                    "content_length": len(content_str),
+                    "content_preview": content_str[:100],
+                    "has_tool_calls": bool(tool_calls),
+                    "tool_calls_count": len(tool_calls) if tool_calls else 0,
+                    "would_skip": should_skip_message(content_str) if content_str else False,
+                })
+
+        elif isinstance(msg, HumanMessage):
+            stats["human_messages"] += 1
+        elif isinstance(msg, ToolMessage):
+            stats["tool_messages"] += 1
+
+    return stats
 
 
 def verify_webhook_signature(
@@ -691,42 +852,124 @@ async def _process_normal_workflow(
             db.close()
 
         logger.info("📦 正在获取 Agent...")
-        print("📦 [feishu_callback] 正在获取 Agent...")
-        agent = await get_ops_agent(enable_approval=True, user_permissions=user_permissions)
+        agent = await create_agent_for_session(
+            session_id=session_id,
+            enable_approval=True,
+            enable_security=True,
+            user_permissions=user_permissions,
+        )
         logger.info(f"✅ Agent 获取成功: {type(agent)}")
-        print(f"✅ [feishu_callback] Agent 获取成功: {type(agent)}")
 
-        initial_state = {"messages": [HumanMessage(content=text)]}
+        # 【诊断】检查 checkpointer 中的历史状态
         config = get_thread_config(session_id)
+        checkpointer = await get_checkpointer()
+        try:
+            # 尝试加载历史状态
+            saved_config = await checkpointer.aget_tuple(config)
+            if saved_config:
+                # 只显示摘要信息
+                cp = saved_config.checkpoint
+                if cp and "channel_values" in cp:
+                    cv = cp["channel_values"]
+                    msg_count = len(cv.get("messages", []))
+                    logger.info(f"📚 [Checkpointer] 历史状态: {msg_count} 条消息")
+                else:
+                    logger.info(f"📚 [Checkpointer] 历史状态: checkpoint={cp.get('ts', '?') if cp else 'None'}")
+            else:
+                logger.info(f"📚 [Checkpointer] 新会话（无历史状态）")
+        except Exception as e:
+            logger.warning(f"⚠️ [Checkpointer] 读取历史状态失败: {e}")
+
+        # ========== 构建输入状态 ==========
+        # DeepAgents 使用 LangGraph 的 messages channel 来管理对话历史
+        # 我们传入当前用户消息，LangGraph 会自动从 checkpoint 加载历史消息
+        from langchain_core.messages import HumanMessage
+
+        input_state = {
+            "messages": [HumanMessage(content=text)],
+        }
+
         all_replies: list[str] = []
 
         logger.info(f"🚀 开始流式执行工作流，session_id={session_id}")
-        logger.info(f"📝 初始状态: {initial_state}")
+        logger.info(f"📝 用户输入: {text[:100]}")
         logger.info(f"⚙️ 配置: {config}")
-        print(f"🚀 [feishu_callback] 开始流式执行工作流，session_id={session_id}")
+        logger.info(f"🚀 [feishu_callback] 开始流式执行工作流，session_id={session_id}")
 
         event_count = 0
-        async for event in agent.astream(initial_state, config=config):
+        async for event in agent.astream(input_state, config=config):
             event_count += 1
             logger.info(f"📍 事件 #{event_count}: {list(event.keys())}")
-            await _handle_workflow_stream_event(
+            event_result = await _handle_workflow_stream_event(
                 event=event,
                 chat_id=chat_id,
+                session_id=session_id,
                 all_replies=all_replies,
             )
+            if event_result == "interrupted":
+                await _persist_assistant_reply(session_id, all_replies)
+                return
 
         logger.info(f"🏁 工作流执行完成，共 {event_count} 个事件，{len(all_replies)} 条回复")
-        print(f"🏁 [feishu_callback] 工作流执行完成，共 {event_count} 个事件")
+        logger.info(f"🏁 [feishu_callback] 工作流执行完成，共 {event_count} 个事件")
+
+        # 诊断日志：检查为什么没有回复
+        if not all_replies:
+            logger.error(f"❌ [诊断] 工作流执行完成但没有生成任何回复！")
+            logger.error(f"   - 事件数量: {event_count}")
+            logger.error(f"   - session_id: {session_id}")
+            logger.error(f"   - chat_id: {chat_id}")
+            logger.error(f"   这可能意味着:")
+            logger.error(f"   1. LLM 返回了空内容")
+            logger.error(f"   2. Subagent 执行但没有生成最终回复")
+            logger.error(f"   3. 回复被 should_skip_message 过滤了")
+
+            # 执行详细诊断
+            logger.error(f"🔍 [诊断] 执行详细消息分析...")
+            # 尝试从 checkpointer 获取最新状态
+            checkpointer = await get_checkpointer()
+            config = {"configurable": {"thread_id": session_id}}
+            saved_config = await checkpointer.aget_tuple(config)
+            current_state = None
+            if saved_config and saved_config.checkpoint:
+                current_state = saved_config.checkpoint
+                logger.error(f"🔍 [诊断] 从 checkpointer 获取到最新状态")
+
+            diag_stats = await _diagnose_message_state(session_id, chat_id, current_state)
+            logger.error(f"📊 [诊断] 消息统计:")
+            logger.error(f"   - 总消息数: {diag_stats.get('total_messages', 0)}")
+            logger.error(f"   - 最后处理索引: {diag_stats.get('last_processed_index', -1)}")
+            logger.error(f"   - AI消息数: {diag_stats.get('ai_messages', 0)}")
+            logger.error(f"   - AI消息(空内容): {diag_stats.get('ai_messages_empty', 0)}")
+            logger.error(f"   - AI消息(工具调用): {diag_stats.get('ai_messages_with_tool_calls', 0)}")
+            logger.error(f"   - 用户消息数: {diag_stats.get('human_messages', 0)}")
+            logger.error(f"   - 工具消息数: {diag_stats.get('tool_messages', 0)}")
+            logger.error(f"   - 消息类型分布: {diag_stats.get('message_types', {})}")
+
+            # 打印样本消息
+            sample_msgs = diag_stats.get('sample_messages', [])
+            if sample_msgs:
+                logger.error(f"📝 [诊断] AI消息样本（最近5条）:")
+                for i, msg in enumerate(sample_msgs, 1):
+                    would_skip_mark = " ⚠️会被跳过" if msg.get('would_skip') else ""
+                    logger.error(
+                        f"   消息#{i} [索引{msg['index']}]{would_skip_mark} | "
+                        f"content={msg['content_length']}字符 | "
+                        f"工具调用={msg['tool_calls_count']} | "
+                        f"预览: {msg.get('content_preview', '(无内容)')[:80]}"
+                    )
+        else:
+            logger.info(f"✅ [诊断] 成功生成 {len(all_replies)} 条回复:")
+            for i, reply in enumerate(all_replies, 1):
+                logger.info(f"   回复 #{i}: {reply[:100]}...")
 
         await _persist_assistant_reply(session_id, all_replies)
     except NotImplementedError as exc:
         logger.error(f"❌ astream NotImplementedError: {exc}")
-        print(f"❌ [feishu_callback] astream NotImplementedError: {exc}")
         traceback.print_exc()
         raise
     except Exception as exc:
         logger.exception(f"❌ 工作流执行失败: {exc}")
-        print(f"❌ [feishu_callback] 工作流执行失败: {exc}")
         traceback.print_exc()
 
         error_msg = format_error_message(exc)
@@ -735,12 +978,72 @@ async def _process_normal_workflow(
         await _persist_error_reply(session_id, error_msg)
 
 
+async def _send_final_state_reply(
+    chat_id: str,
+    final_state: Dict[str, Any],
+    all_replies: list[str],
+) -> None:
+    """根据 complete 事件中的最终状态发送最终回复。"""
+    response_to_send = final_state.get("formatted_response", "") or final_state.get(
+        "final_report", ""
+    )
+    if response_to_send:
+        await _send_text_reply(chat_id, response_to_send)
+        all_replies.append(response_to_send)
+        return
+
+    status_msg = (
+        "✅ **工作流执行完成**\n\n"
+        f"意图类型: {final_state.get('intent_type', 'unknown')}\n"
+        f"诊断轮次: {final_state.get('diagnosis_round', 0)}\n"
+        f"数据充足: {'是' if final_state.get('data_sufficient') else '否'}\n"
+    )
+    await _send_text_reply(chat_id, status_msg)
+    all_replies.append(status_msg)
+
+
 async def _handle_workflow_stream_event(
     event: Dict[str, Any],
     chat_id: str,
+    session_id: str,
     all_replies: list[str],
-) -> None:
+) -> Optional[Literal["completed", "interrupted"]]:
     """处理普通工作流中的单个流事件。"""
+    event_type = event.get("type")
+    if event_type == "interrupt":
+        interrupt_data = event.get("data", {})
+        approval_message = interrupt_data.get("message", "")
+        logger.info("⏸️ 工作流暂停，需要用户批准")
+
+        await _send_text_reply(chat_id, approval_message)
+        all_replies.append(approval_message)
+        SessionStateManager.set_awaiting_approval(
+            session_id=session_id,
+            approval_data={
+                "commands_summary": approval_message,
+                "risk_level": interrupt_data.get("risk_level", "未知"),
+                "commands": interrupt_data.get("commands", []),
+            },
+        )
+        return "interrupted"
+
+    if event_type == "node":
+        logger.info(f"📍 节点执行: {event.get('node')}")
+        return None
+
+    if event_type == "complete":
+        logger.info("✅ 工作流执行完成")
+        final_state = ensure_final_report_in_state(event.get("state", {}))
+        await _send_final_state_reply(chat_id, final_state, all_replies)
+        return "completed"
+
+    if event_type == "error":
+        error_msg = event.get("error", "未知错误")
+        logger.error(f"❌ 工作流事件错误: {error_msg}")
+        await _send_text_reply(chat_id, f"工作流执行失败: {error_msg}")
+        all_replies.append(f"工作流执行失败: {error_msg}")
+        return None
+
     for node_name, state_update in event.items():
         logger.info(f"📍 节点 {node_name} 更新: {type(state_update)}")
 
@@ -756,39 +1059,131 @@ async def _handle_workflow_stream_event(
 
         await _process_message_update(actual_update["messages"], chat_id, all_replies)
 
+    return None
+
 
 async def _process_message_update(
     raw_messages: Any,
     chat_id: str,
     all_replies: list[str],
 ) -> None:
-    """处理 state update 中的 messages 字段。"""
+    """
+    处理 state update 中的 messages 字段。
+
+    使用数据库持久化已处理的消息索引，避免服务重启后重复发送历史消息。
+    """
     messages = unwrap_overwrite(raw_messages)
-    logger.info(f"📍 消息列表长度: {len(messages) if isinstance(messages, list) else 'N/A'}")
+    msg_count = len(messages) if isinstance(messages, list) else 0
+    logger.info(f"📍 [消息处理] 消息列表长度: {msg_count}")
 
     if not messages or not isinstance(messages, list):
+        logger.warning(f"⚠️ [消息处理] 消息为空或不是列表")
         return
 
-    last_message = messages[-1]
-    logger.info(f"📍 最后一条消息类型: {type(last_message)}")
-
-    if isinstance(last_message, HumanMessage):
-        logger.info("⏭️ 跳过用户消息（不重复发送）")
+    # 通过 external_chat_id 找到对应的 session_id
+    session = SessionStateManager.get_session_by_external_chat_id(chat_id)
+    if not session:
+        logger.warning(f"⚠️ [消息处理] 未找到会话: {chat_id}")
         return
 
-    if not isinstance(last_message, AIMessage):
+    session_id = session.session_id
+    last_processed = SessionStateManager.get_last_processed_message_index(session_id)
+
+    # 只处理新增的消息（索引 > last_processed）
+    new_messages = []
+    for idx, message in enumerate(messages):
+        if idx > last_processed:
+            new_messages.append((idx, message))
+
+    if not new_messages:
+        logger.debug(f"⏭️ [消息处理] 没有新消息需要处理（已处理到索引 {last_processed}）")
         return
 
-    content = getattr(last_message, "content", None)
-    if not content:
-        return
+    logger.info(f"📍 [消息处理] 发现 {len(new_messages)} 条新消息（索引 {last_processed+1} 到 {msg_count-1}）")
 
-    logger.info(f"📍 消息内容预览: {str(content)[:100]}")
-    if should_skip_message(content):
-        logger.info("⏭️ 跳过调试消息（不发送给用户）")
-        return
+    # 跟踪最后处理的索引和是否有 AI 回复
+    max_processed_idx = last_processed
+    has_ai_reply = False
 
-    await _send_formatted_result(chat_id, content, all_replies)
+    for idx, message in new_messages:
+        msg_type = type(message).__name__
+        content = getattr(message, "content", None)
+
+        logger.debug(f"📍 [消息#{idx+1}] 类型={msg_type}, content长度={len(str(content)) if content else 0}")
+
+        if isinstance(message, HumanMessage):
+            logger.info(f"👤 [用户消息] {str(content)[:100]}")
+            max_processed_idx = idx
+            continue
+
+        # 处理 AIMessage
+        if isinstance(message, AIMessage):
+            # 检查是否有 tool_calls（工具调用）
+            tool_calls = getattr(message, "tool_calls", None)
+            if tool_calls and len(tool_calls) > 0:
+                logger.info(f"🔧 [工具调用] 数量={len(tool_calls)}, 工具={[tc.get('name', '?') for tc in tool_calls]}")
+                max_processed_idx = idx
+                # 注意：工具调用消息没有 content，需要等待后续消息
+                continue
+
+            if not content:
+                logger.debug(f"⚠️ [AI消息#{idx}] content为空（只有tool_calls），继续处理后续消息")
+                max_processed_idx = idx
+                continue
+
+            if should_skip_message(content):
+                logger.info(f"⏭️ [AI消息#{idx}] 被should_skip_message跳过（详见上方日志）")
+                max_processed_idx = idx
+                continue
+
+            # 有实际内容的 AI 回复
+            max_processed_idx = idx
+            has_ai_reply = True
+            logger.info(f"📝 [AI回复] 内容长度={len(str(content))}")
+            await _send_formatted_result(chat_id, content, all_replies)
+
+        # 处理 ToolMessage（工具返回结果）
+        elif isinstance(message, ToolMessage):
+            max_processed_idx = idx
+            continue
+
+        # 其他类型的消息
+        else:
+            max_processed_idx = idx
+
+    # 批量更新最后处理的索引（只更新一次，减少数据库写入）
+    if max_processed_idx > last_processed:
+        SessionStateManager.set_last_processed_message_index(session_id, max_processed_idx)
+        logger.info(f"📍 [消息处理] 已更新处理索引: {last_processed} -> {max_processed_idx}")
+
+    # 记录处理结果
+    if has_ai_reply:
+        logger.info(f"✅ [消息处理] 本次处理完成，已发送 AI 回复")
+    elif all_replies:
+        logger.info(f"✅ [消息处理] 本次发送 {len(all_replies)} 条新回复（来自历史消息）")
+    else:
+        # 如果没有回复，打印诊断信息
+        logger.warning(f"⚠️ [消息处理] 本次没有生成任何回复")
+        logger.warning(f"   - 新消息数: {len(new_messages)}")
+        logger.warning(f"   - 已处理索引: {last_processed} -> {max_processed_idx}")
+
+        # 统计新消息的类型
+        msg_type_count = {}
+        for idx, msg in new_messages:
+            msg_type = type(msg).__name__
+            msg_type_count[msg_type] = msg_type_count.get(msg_type, 0) + 1
+
+            # 记录前 5 条新消息的详细信息
+            if sum(msg_type_count.values()) <= 5:
+                content = getattr(msg, "content", None)
+                tool_calls = getattr(msg, "tool_calls", None) if isinstance(msg, AIMessage) else None
+                logger.warning(
+                    f"   - 消息#{idx} [{msg_type}] "
+                    f"content={bool(content)}({len(str(content)) if content else 0}字符) "
+                    f"tool_calls={bool(tool_calls)}({len(tool_calls) if tool_calls else 0})"
+                )
+
+        logger.warning(f"   - 消息类型分布: {msg_type_count}")
 
 
 async def _send_formatted_result(
@@ -974,52 +1369,15 @@ async def _handle_approval_response(
 
         all_replies: list[str] = []
         async for event in agent.astream(resume_state):
-            event_type = event.get("type")
-
-            if event_type == "interrupt":
-                interrupt_data = event.get("data", {})
-                approval_message = interrupt_data.get("message", "")
-                logger.info("⏸️ 工作流再次暂停，需要再次批准")
-
-                await _send_text_reply(chat_id, approval_message)
-                all_replies.append(approval_message)
-                SessionStateManager.set_awaiting_approval(
-                    session_id=session_id,
-                    approval_data={
-                        "commands_summary": approval_message,
-                        "risk_level": interrupt_data.get("risk_level", "未知"),
-                        "commands": interrupt_data.get("commands", []),
-                    },
-                )
+            event_result = await _handle_workflow_stream_event(
+                event=event,
+                chat_id=chat_id,
+                session_id=session_id,
+                all_replies=all_replies,
+            )
+            if event_result == "interrupted":
                 await _persist_assistant_reply(session_id, all_replies)
                 return "interrupted"
-
-            if event_type == "node":
-                logger.info(f"📍 节点执行: {event.get('node')}")
-                continue
-
-            if event_type != "complete":
-                continue
-
-            final_state = event.get("state", {})
-            logger.info("✅ 工作流恢复执行完成")
-
-            response_to_send = final_state.get("formatted_response", "") or final_state.get(
-                "final_report", ""
-            )
-            if response_to_send:
-                await _send_text_reply(chat_id, response_to_send)
-                all_replies.append(response_to_send)
-                continue
-
-            status_msg = (
-                "✅ **工作流执行完成**\n\n"
-                f"意图类型: {final_state.get('intent_type', 'unknown')}\n"
-                f"诊断轮次: {final_state.get('diagnosis_round', 0)}\n"
-                f"数据充足: {'是' if final_state.get('data_sufficient') else '否'}\n"
-            )
-            await _send_text_reply(chat_id, status_msg)
-            all_replies.append(status_msg)
 
         await _persist_assistant_reply(session_id, all_replies)
         return "completed"

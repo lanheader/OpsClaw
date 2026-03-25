@@ -1,7 +1,7 @@
 [project]
 name = "ops-agent-langgraph"
 version = "3.1.0"
-description = "Intelligent ops automation platform with DeepAgents + DSPy"
+description = "Intelligent ops automation platform with DeepAgents"
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [
@@ -45,12 +45,14 @@ dependencies = [
     "pytest-cov>=4.1.0",
     # Logging
     "python-json-logger>=2.0.0",
+    "loguru>=0.7.0",  # 简洁强大的日志库
+    # Vector storage (ChromaDB - 替代手动实现的向量存储)
+    "chromadb>=0.4.0",  # 轻量级向量数据库
+    # 其他依赖
     "langchain-community>=0.4.1",
     "apscheduler>=3.11.2",
     "langgraph-checkpoint-sqlite>=3.0.3",
     "email-validator>=2.3.0",
-    # DSPy for prompt optimization (optional)
-    "dspy-ai>=2.5",
 ]
 
 [project.optional-dependencies]
@@ -89,10 +91,7 @@ packages = [
     "app.prompts.subagents",
     "app.services",
     "app.schemas",
-    "app.dspy",
-    "app.dspy.modules",
-    "app.dspy.data",
-    "app.dspy.optimizers",
+    "app.memory",
 ]
 
 [tool.pytest.ini_options]

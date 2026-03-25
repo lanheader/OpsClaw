@@ -13,6 +13,7 @@ from typing import Dict, List, Optional, Set, Type, Any
 from dataclasses import dataclass, field
 
 from app.tools.base import BaseOpTool, ToolMetadata, ToolCategory, OperationType, RiskLevel
+from app.core.permission_checker import get_user_permission_codes
 
 logger = logging.getLogger(__name__)
 
@@ -255,7 +256,6 @@ class ToolRegistry:
         # 添加到分组
         if metadata.group not in registry._groups:
             # 自动创建分组
-            from app.tools.base import ToolCategory
             category_str = metadata.group.split('.')[0] if '.' in metadata.group else 'command'
             try:
                 category = ToolCategory(category_str)
@@ -395,7 +395,6 @@ class ToolRegistry:
         """
         # 如果提供了 user_id 和 db，动态获取权限
         if permissions is None and user_id is not None and db is not None:
-            from app.core.permission_checker import get_user_permission_codes
             permissions = set(get_user_permission_codes(db, user_id))
 
         tools = []

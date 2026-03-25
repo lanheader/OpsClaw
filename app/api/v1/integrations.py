@@ -2,6 +2,7 @@
 """外部系统集成测试 API 端点"""
 
 import logging
+import os
 import time
 from typing import Optional, Dict, Any
 from fastapi import APIRouter, HTTPException, status, Depends
@@ -14,6 +15,11 @@ from app.models.system_setting import SystemSetting
 from app.core.deps import get_current_admin
 from app.core.config import get_settings
 from app.core.integration_config import IntegrationConfig
+
+from kubernetes import client as k8s_client
+from kubernetes import config as k8s_config
+import httpx
+from app.integrations.feishu.client import FeishuClient
 
 router = APIRouter(prefix="/integrations", tags=["integrations"])
 logger = logging.getLogger(__name__)
@@ -43,22 +49,19 @@ async def test_kubernetes_connection(
         )
 
     try:
-        from kubernetes import client, config
-        import os
-
         start_time = time.time()
 
         # 加载 kubeconfig
         if settings.KUBECONFIG and os.path.exists(settings.KUBECONFIG):
-            config.load_kube_config(config_file=settings.KUBECONFIG)
+            k8s_config.load_kube_config(config_file=settings.KUBECONFIG)
         else:
-            config.load_kube_config()
+            k8s_config.load_kube_config()
 
         # 创建 API 客户端
-        v1 = client.CoreV1Api()
+        v1 = k8s_client.CoreV1Api()
 
         # 测试连接 - 获取版本信息
-        version_api = client.VersionApi()
+        version_api = k8s_client.VersionApi()
         version_info = version_api.get_code()
 
         # 获取节点数量
@@ -108,8 +111,6 @@ async def test_prometheus_connection(
         )
 
     try:
-        import httpx
-
         start_time = time.time()
 
         # 测试连接 - 获取版本信息
@@ -163,8 +164,6 @@ async def test_loki_connection(
         return IntegrationTestResponse(success=False, service="loki", error="Loki URL 未配置")
 
     try:
-        import httpx
-
         start_time = time.time()
 
         # 测试连接 - 获取标签
@@ -218,8 +217,6 @@ async def test_feishu_connection(
         )
 
     try:
-        from app.integrations.feishu.client import FeishuClient
-
         start_time = time.time()
 
         # 创建飞书客户端

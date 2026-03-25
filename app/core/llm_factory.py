@@ -1,11 +1,28 @@
-# app/core/llm_factory.py
-"""LLM 工厂类 - 支持多个 LLM 提供商"""
+"""
+记忆增强的 LLM 工厂类
+
+支持：
+- 创建 LLM 客户端（多个提供商）
+- 创建 Embedding 客户端（向量检索）
+"""
 
 from langchain_core.language_models import BaseChatModel
-from typing import Any, Dict, Optional, cast
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from typing import Any, Dict, Optional, List, cast
 import logging
 
 from app.core.config import Settings, get_settings
+
+# 尝试导入可选依赖
+try:
+    from langchain_anthropic import ChatAnthropic
+except ImportError:
+    ChatAnthropic = None  # type: ignore
+
+try:
+    from langchain_community.chat_models import ChatZhipuAI
+except ImportError:
+    ChatZhipuAI = None  # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +35,13 @@ class LLMFactory:
     """
 
     _client_cache: Dict[str, Any] = {}
+
+    @staticmethod
+    def _annotate_llm_client(client: BaseChatModel, provider: str, model_name: str) -> BaseChatModel:
+        """为 LLM 客户端挂载诊断元数据，便于中间件记录真实 provider/model。"""
+        setattr(client, "_ops_provider", provider)
+        setattr(client, "_ops_model", model_name)
+        return client
 
     @staticmethod
     def create_llm(
@@ -123,8 +147,6 @@ class LLMFactory:
         异常：
             ValueError: 如果 API key 未配置
         """
-        from langchain_openai import ChatOpenAI
-
         if not settings.OPENAI_API_KEY:
             raise ValueError(
                 "OPENAI_API_KEY is not configured. "
@@ -146,7 +168,8 @@ class LLMFactory:
             "base_url": settings.OPENAI_BASE_URL,
             "timeout": settings.OPENAI_REQUEST_TIMEOUT,
         }
-        return cast(Any, ChatOpenAI)(**openai_kwargs)
+        client = cast(Any, ChatOpenAI)(**openai_kwargs)
+        return LLMFactory._annotate_llm_client(client, "openai", model_name)
 
     @staticmethod
     def _create_claude_llm(
@@ -166,18 +189,16 @@ class LLMFactory:
             ValueError: 如果 API key 未配置
             ImportError: 如果 langchain-anthropic 未安装
         """
+        if ChatAnthropic is None:
+            raise ImportError(
+                "langchain-anthropic is not installed. "
+                "Please install it with: pip install langchain-anthropic"
+            )
+
         if not settings.CLAUDE_API_KEY:
             raise ValueError(
                 "CLAUDE_API_KEY is not configured. "
                 "Please set it in .env file or environment variables."
-            )
-
-        try:
-            from langchain_anthropic import ChatAnthropic
-        except ImportError:
-            raise ImportError(
-                "langchain-anthropic is not installed. "
-                "Please install it with: pip install langchain-anthropic"
             )
 
         model_name = model_override or settings.CLAUDE_MODEL
@@ -195,7 +216,8 @@ class LLMFactory:
             "api_key": settings.CLAUDE_API_KEY,
             "timeout": settings.CLAUDE_REQUEST_TIMEOUT,
         }
-        return cast(Any, ChatAnthropic)(**claude_kwargs)
+        client = cast(Any, ChatAnthropic)(**claude_kwargs)
+        return LLMFactory._annotate_llm_client(client, "claude", model_name)
 
     @staticmethod
     def _create_zhipu_llm(
@@ -215,18 +237,16 @@ class LLMFactory:
             ValueError: 如果 API key 未配置
             ImportError: 如果 langchain-community 未安装
         """
+        if ChatZhipuAI is None:
+            raise ImportError(
+                "langchain-community with ZhipuAI support is not installed. "
+                "Please install it with: pip install langchain-community"
+            )
+
         if not settings.ZHIPU_API_KEY:
             raise ValueError(
                 "ZHIPU_API_KEY is not configured. "
                 "Please set it in .env file or environment variables."
-            )
-
-        try:
-            from langchain_community.chat_models import ChatZhipuAI
-        except ImportError:
-            raise ImportError(
-                "langchain-community with ZhipuAI support is not installed. "
-                "Please install it with: pip install langchain-community"
             )
 
         model_name = model_override or settings.ZHIPU_MODEL
@@ -242,7 +262,8 @@ class LLMFactory:
             "api_key": settings.ZHIPU_API_KEY,
             "request_timeout": settings.ZHIPU_REQUEST_TIMEOUT,
         }
-        return cast(Any, ChatZhipuAI)(**zhipu_kwargs)
+        client = cast(Any, ChatZhipuAI)(**zhipu_kwargs)
+        return LLMFactory._annotate_llm_client(client, "zhipu", model_name)
 
     @staticmethod
     def _create_ollama_llm(
@@ -264,8 +285,6 @@ class LLMFactory:
         异常：
             ImportError: 如果 langchain-openai 未安装
         """
-        from langchain_openai import ChatOpenAI
-
         model_name = model_override or settings.OLLAMA_MODEL
 
         # Ollama 的 OpenAI 兼容端点
@@ -286,7 +305,8 @@ class LLMFactory:
             "api_key": "ollama",  # Ollama 不需要真实 API key，但 ChatOpenAI 要求提供
             "timeout": 600,  # 大模型推理可能需要更长时间
         }
-        return cast(Any, ChatOpenAI)(**ollama_kwargs)
+        client = cast(Any, ChatOpenAI)(**ollama_kwargs)
+        return LLMFactory._annotate_llm_client(client, "ollama", model_name)
 
     @staticmethod
     def _create_openrouter_llm(
@@ -317,8 +337,6 @@ class LLMFactory:
             - meta-llama/llama-3.1-405b-instruct
             - mistralai/mistral-large
         """
-        from langchain_openai import ChatOpenAI
-
         if not settings.OPENROUTER_API_KEY:
             raise ValueError(
                 "OPENROUTER_API_KEY is not configured. "
@@ -340,7 +358,41 @@ class LLMFactory:
             "base_url": settings.OPENROUTER_BASE_URL,
             "timeout": settings.OPENROUTER_REQUEST_TIMEOUT,
         }
-        return cast(Any, ChatOpenAI)(**openrouter_kwargs)
+        client = cast(Any, ChatOpenAI)(**openrouter_kwargs)
+        return LLMFactory._annotate_llm_client(client, "openrouter", model_name)
+
+    @staticmethod
+    def create_embeddings():
+        """
+        创建 Embedding 模型客户端用于向量检索
+
+        返回：
+            支持异步嵌入的客户端
+
+        注意：
+            当前使用 OpenAI 的 text-embedding-3-small 模型
+            如果 OpenAI 不可用，将返回模拟的零向量生成器
+        """
+        settings = get_settings()
+
+        # 尝试使用 OpenAI Embeddings
+        try:
+            if settings.OPENAI_API_KEY:
+                logger.info("Creating OpenAI embeddings client")
+                return OpenAIEmbeddings(
+                    model="text-embedding-3-small",
+                    api_key=settings.OPENAI_API_KEY,
+                    openai_api_base=settings.OPENAI_BASE_URL
+                )
+        except Exception as e:
+            logger.warning(f"无法创建 OpenAI embeddings: {e}")
+
+        # 尝试使用其他 embedding 模型...
+        # TODO: 支持其他 embedding 提供商
+
+        # 返回模拟的 embedding 生成器（用于测试）
+        logger.warning("使用模拟 embedding 生成器（向量检索功能受限）")
+        return MockEmbeddings()
 
 
 # LLM 客户端单例
@@ -382,3 +434,32 @@ def reset_llm():
     global _llm_instance
     _llm_instance = None
     LLMFactory._client_cache.clear()
+
+
+class MockEmbeddings:
+    """模拟 Embeddings - 用于测试和降级"""
+
+    def __init__(self, dimension: int = 1536):
+        self.dimension = dimension
+
+    async def aembed_query(self, text: str) -> List[float]:
+        """异步生成（模拟）向量"""
+        return [0.0] * self.dimension
+
+    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        """批量生成（模拟）向量"""
+        return [[0.0] * self.dimension for _ in texts]
+
+    def embed_query(self, text: str) -> List[float]:
+        """生成（模拟）向量"""
+        return [0.0] * self.dimension
+
+
+# 导出新的功能
+__all__ = [
+    "LLMFactory",
+    "reset_llm",
+    "get_llm",
+    "MockEmbeddings",
+    "create_embeddings",
+]

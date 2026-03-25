@@ -55,6 +55,11 @@ class ChatSession(Base):
     pending_approval_data = Column(JSON, nullable=True, comment="待批准数据（命令、风险等级等）")
     approval_expires_at = Column(DateTime, nullable=True, comment="批准请求过期时间")
 
+    # 消息处理索引（用于避免重复发送历史消息）
+    last_processed_message_index = Column(
+        Integer, default=-1, nullable=False, comment="已处理的消息索引（避免服务重启后重复发送历史消息）"
+    )
+
     # 时间戳
     created_at = Column(DateTime, default=datetime.utcnow, comment="创建时间")
     updated_at = Column(

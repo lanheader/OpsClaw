@@ -1,9 +1,13 @@
 # app/core/permissions.py
 """权限点定义"""
 
+import logging
 from enum import Enum
 from typing import List, TYPE_CHECKING
 from dataclasses import dataclass
+
+from app.models.permission import Permission
+from app.models.role_permission import RolePermission
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -108,7 +112,6 @@ def get_tool_permissions() -> List[PermissionDef]:
             for perm in tool_permissions
         ]
     except Exception as e:
-        import logging
         logging.getLogger(__name__).warning(f"Failed to get tool permissions from registry: {e}")
         return []
 
@@ -186,8 +189,6 @@ def sync_tool_permissions_to_db(db: "Session") -> dict:
     Returns:
         同步结果统计
     """
-    from app.models.permission import Permission
-
     # 获取当前工具权限
     tool_perm_defs = get_tool_permissions()
     tool_codes = {p.code for p in tool_perm_defs}
@@ -223,13 +224,11 @@ def sync_tool_permissions_to_db(db: "Session") -> dict:
         db_perm = db.query(Permission).filter(Permission.code == code).first()
         if db_perm:
             # 检查是否有角色在使用此权限
-            from app.models.role_permission import RolePermission
             usage_count = db.query(RolePermission).filter(RolePermission.permission_id == db_perm.id).count()
             if usage_count == 0:
                 db.delete(db_perm)
                 removed_count += 1
             else:
-                import logging
                 logging.getLogger(__name__).warning(
                     f"权限 {code} 仍被 {usage_count} 个角色使用，跳过删除"
                 )

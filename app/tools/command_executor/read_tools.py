@@ -10,6 +10,7 @@ from langchain_core.tools import tool
 from sqlalchemy.orm import Session
 
 from app.core.permission_checker import check_tool_permission
+from app.tools.command_executor_tools import execute_redis_command, execute_mysql_query, execute_safe_shell_command
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +40,6 @@ async def execute_redis_command_tool(
     # 权限检查
     check_tool_permission(db, user_id, "command.execute", raise_exception=True)
 
-    from app.tools.command_executor_tools import execute_redis_command
     return await execute_redis_command.ainvoke({"command": command, "host": host, "port": port, "timeout": timeout})
 
 
@@ -66,7 +66,6 @@ async def execute_mysql_query_tool(
     # 权限检查
     check_tool_permission(db, user_id, "command.execute", raise_exception=True)
 
-    from app.tools.command_executor_tools import execute_mysql_query
     return await execute_mysql_query.ainvoke({"query": query, "database": database, "timeout": timeout})
 
 
@@ -91,7 +90,6 @@ async def execute_safe_shell_command_tool(
     # 权限检查
     check_tool_permission(db, user_id, "command.execute", raise_exception=True)
 
-    from app.tools.command_executor_tools import execute_safe_shell_command
     return await execute_safe_shell_command.ainvoke({"command": command, "timeout": timeout})
 
 

@@ -29,7 +29,6 @@ import { ApprovalConfigManagement } from './pages/ApprovalConfigManagement';
 import SystemSettings from './pages/SystemSettings';
 import Chat from './pages/Chat';
 import Profile from './pages/Profile';
-import { PromptManagement } from './pages/PromptManagement';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { PermissionProvider, usePermission } from './contexts/PermissionContext';
 import { PrivateRoute } from './components/PrivateRoute';
@@ -117,11 +116,6 @@ const AppLayout: React.FC = () => {
       icon: <SafetyOutlined />,
       label: <Link to="/approval-config">审批配置</Link>,
     },
-    {
-      key: '/prompts',
-      icon: <FileTextOutlined />,
-      label: <Link to="/prompts">提示词管理</Link>,
-    },
     hasPermission('view_settings') && {
       key: '/settings',
       icon: <SettingOutlined />,
@@ -188,7 +182,6 @@ const AppLayout: React.FC = () => {
               <Route path="/users" element={<UserManagement />} />
               <Route path="/roles" element={<RoleManagement />} />
               <Route path="/approval-config" element={<ApprovalConfigManagement />} />
-              <Route path="/prompts" element={<PromptManagement />} />
               <Route path="/profile" element={<Profile />} />
               <Route path="/settings" element={<SystemSettings />} />
             </Routes>

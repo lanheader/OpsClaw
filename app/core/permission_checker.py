@@ -1,9 +1,9 @@
 # app/core/permission_checker.py
 """权限检查模块"""
 
+import logging
 from typing import List, Callable, Any
 from functools import wraps
-import logging
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
@@ -11,7 +11,7 @@ from app.models.permission import Permission
 from app.models.role_permission import RolePermission
 from app.models.user_role import UserRole
 from app.core.deps import get_current_user
-from app.models.database import get_db
+from app.models.database import get_db, SessionLocal
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +75,22 @@ def get_user_permission_codes(db: Session, user_id: int) -> List[str]:
     """
     permissions = get_user_permissions(db, user_id)
     return [p.code for p in permissions]
+
+
+def is_admin(db: Session, user_id: int) -> bool:
+    """
+    检查用户是否是管理员
+
+    Args:
+        db: 数据库会话
+        user_id: 用户ID
+
+    Returns:
+        bool: 是否是管理员
+    """
+    from app.models.user import User
+    user = db.query(User).filter(User.id == user_id).first()
+    return user is not None and user.is_superuser
 
 
 def require_permission(permission_code: str):
@@ -198,7 +214,6 @@ def require_tool_permission(permission_code: str):
 
             if not db:
                 try:
-                    from app.models.database import SessionLocal
                     db = SessionLocal()
                     should_close_db = True
                 except Exception:
@@ -272,6 +287,7 @@ __all__ = [
     "check_user_permission",
     "get_user_permissions",
     "get_user_permission_codes",
+    "is_admin",
     "require_permission",
     "require_any_permission",
     "require_tool_permission",

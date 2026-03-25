@@ -6,6 +6,7 @@ Prometheus 工具（新架构示例）
 """
 
 from typing import Dict, Any, Optional
+from datetime import datetime, timedelta
 
 from app.tools.base import (
     BaseOpTool,
@@ -20,6 +21,13 @@ from app.tools.fallback import get_prometheus_fallback
 from app.utils.logger import get_logger, get_request_context
 
 logger = get_logger(__name__)
+
+# Try to import PrometheusToolFactory, but don't fail if it doesn't exist
+try:
+    from app.tools.prometheus.factory import PrometheusToolFactory, MetricType
+except ImportError:
+    PrometheusToolFactory = None
+    MetricType = None
 
 
 def _log_tool_start(tool_name: str, **kwargs):
@@ -99,8 +107,6 @@ class QueryCPUUsageTool(BaseOpTool):
         time_range: str,
     ) -> Dict[str, Any]:
         """使用 SDK 执行"""
-        from app.tools.prometheus.factory import PrometheusToolFactory, MetricType
-
         result = await PrometheusToolFactory.query_metric(
             metric_type=MetricType.CPU,
             labels=labels,
@@ -190,8 +196,6 @@ class QueryMemoryUsageTool(BaseOpTool):
         time_range: str,
     ) -> Dict[str, Any]:
         """使用 SDK 执行"""
-        from app.tools.prometheus.factory import PrometheusToolFactory, MetricType
-
         result = await PrometheusToolFactory.query_metric(
             metric_type=MetricType.MEMORY,
             labels=labels,
@@ -243,7 +247,6 @@ class QueryRangeTool(BaseOpTool):
     """
 
     def __init__(self):
-        from app.tools.prometheus.factory import PrometheusToolFactory
         self.factory = PrometheusToolFactory
         self.fallback = get_prometheus_fallback()
 
@@ -288,8 +291,6 @@ class QueryRangeTool(BaseOpTool):
         step: str,
     ) -> Dict[str, Any]:
         """使用 SDK 执行"""
-        from datetime import datetime, timedelta
-
         # 解析时间参数
         start_dt = None
         end_dt = None

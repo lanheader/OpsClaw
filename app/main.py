@@ -3,8 +3,47 @@
 
 import logging
 import sys
+import os
 from contextlib import asynccontextmanager
 
+# ============ 第一优先级：尽早抑制噪音日志（在任何导入之前）============
+# 很多第三方库在导入时就输出 DEBUG 日志，需要尽早抑制
+
+# 设置 LiteLLM 日志级别（通过环境变量）
+os.environ.setdefault("LITELLM_LOG", "WARNING")
+
+# 设置根日志级别为 WARNING，避免导入时的噪音
+logging.getLogger().setLevel(logging.WARNING)
+
+# 抑制特定库的日志
+for _noisy in ("litellm", "litellm_logging", "app.tools.base", "app.tools"):
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
+
+# ============ 第二优先级：日志系统初始化============
+# 检查是否使用 loguru（默认启用）
+USE_LOGURU = os.getenv("USE_LOGURU", "true").lower() == "true"
+
+logger = None  # 初始化 logger 变量
+
+if USE_LOGURU:
+    try:
+        from app.utils.loguru_config import setup_logging as setup_loguru, logger as loguru_logger
+        setup_loguru()
+        logger = loguru_logger
+    except ImportError:
+        USE_LOGURU = False
+
+# 如果不使用 loguru，使用标准 logging 配置
+if not USE_LOGURU or logger is None:
+    # 先临时设置一个简单的日志配置，避免导入时的噪音
+    logging.basicConfig(level=logging.WARNING, format='%(levelname)s - %(message)s')
+    logger = logging.getLogger(__name__)
+
+# ============ 第二优先级：导入配置 ============
+from app.core.config import get_settings
+settings = get_settings()
+
+# ============ 第三优先级：导入其他模块 ============
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -22,42 +61,48 @@ from app.api.v2 import alert
 from app.api.v2 import chat
 from app.api.v2 import inspection
 from app.api.v2 import workflow
-from app.api.v2 import dspy
-from app.api.v2 import prompts
-from app.core.config import get_settings
+from app.api.v2 import knowledge_base
 from app.core.llm_factory import LLMFactory
 from app.deepagents.main_agent import get_ops_agent as _init_ops_agent
 from app.utils.logger import RequestContextFilter, ContextFormatter
 
-# Configure logging with request context support
-settings = get_settings()
+# ============ 完善日志系统配置 ============
+# 在所有模块导入后，完善日志配置
 
-# 创建根日志记录器
-root_logger = logging.getLogger()
-root_logger.setLevel(getattr(logging, settings.LOG_LEVEL))
+if USE_LOGURU:
+    # Loguru 已经在前面设置好了
+    logger.info("🚀 应用启动 - 使用 Loguru 日志系统")
+else:
+    # 完善标准 logging 配置（带请求上下文支持）
+    from app.utils.logger import _suppress_third_party_logs
+    _suppress_third_party_logs()
 
-# 清除默认的 handler
-root_logger.handlers.clear()
+    # 创建根日志记录器
+    root_logger = logging.getLogger()
+    root_logger.setLevel(getattr(logging, settings.LOG_LEVEL))
 
-# 创建控制台处理器
-console_handler = logging.StreamHandler(sys.stdout)
-console_handler.setLevel(getattr(logging, settings.LOG_LEVEL))
+    # 清除之前的临时 handler
+    root_logger.handlers.clear()
 
-# 添加请求上下文过滤器
-context_filter = RequestContextFilter()
-console_handler.addFilter(context_filter)
+    # 创建控制台处理器
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(getattr(logging, settings.LOG_LEVEL))
 
-# 使用自定义格式化器（包含 session_id 和 request_id）
-formatter = ContextFormatter(
-    "%(asctime)s - [%(session_id)s] - [%(request_id)s] - %(name)s - %(levelname)s - %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S"
-)
-console_handler.setFormatter(formatter)
+    # 添加请求上下文过滤器
+    context_filter = RequestContextFilter()
+    console_handler.addFilter(context_filter)
 
-# 添加处理器到根日志记录器
-root_logger.addHandler(console_handler)
+    # 使用自定义格式化器（包含 session_id 和 request_id）
+    formatter = ContextFormatter(
+        "%(asctime)s - [%(session_id)s] - [%(request_id)s] - %(name)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    )
+    console_handler.setFormatter(formatter)
 
-logger = logging.getLogger(__name__)
+    # 添加处理器到根日志记录器
+    root_logger.addHandler(console_handler)
+
+    logger = logging.getLogger(__name__)
 
 # 压制第三方库的 DEBUG 噪音，只保留 WARNING 及以上
 for _noisy_logger in (
@@ -71,6 +116,19 @@ for _noisy_logger in (
     "hpack",
     "h2",
     "langchain_core.messages.ai",  # 压制 "Failed to parse tool calls" DEBUG 日志
+    "openai",  # 压制 OpenAI 客户端的 DEBUG 日志
+    "openai._base_client",
+    "openai._client",
+    "langchain",
+    "langchain_core",
+    "langsmith",
+    "langgraph",
+    "kubernetes",
+    "kubernetes.client",
+    "litellm",  # 压制 LiteLLM 的 DEBUG 日志
+    "litellm_logging",
+    "app.tools.base",  # 抑制工具注册的 DEBUG 日志
+    "app.tools",
 ):
     logging.getLogger(_noisy_logger).setLevel(logging.WARNING)
 
@@ -248,8 +306,7 @@ app.include_router(workflow.router, prefix="/api")
 app.include_router(chat.router, prefix="/api")
 app.include_router(inspection.router, prefix="/api/v2")
 app.include_router(alert.router, prefix="/api/v2")
-app.include_router(dspy.router, prefix="/api")
-app.include_router(prompts.router, prefix="/api")  # 新增：提示词管理
+app.include_router(knowledge_base.router, prefix="/api")  # 新增：知识库管理
 app.include_router(feishu.router, prefix="/api/v1")
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(users.router, prefix="/api/v1")

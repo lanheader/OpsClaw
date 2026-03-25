@@ -1,7 +1,7 @@
 # app/schemas/chat.py
 """聊天相关的 Pydantic schemas"""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, List
 from datetime import datetime
 
@@ -15,14 +15,13 @@ class ChatMessageCreate(BaseModel):
 class ChatMessageResponse(BaseModel):
     """聊天消息响应"""
 
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     role: str
     content: str
     created_at: datetime
     metadata: Optional[dict] = None
-
-    class Config:
-        from_attributes = True
 
 
 class ChatSessionCreate(BaseModel):
@@ -34,6 +33,8 @@ class ChatSessionCreate(BaseModel):
 class ChatSessionResponse(BaseModel):
     """聊天会话响应"""
 
+    model_config = ConfigDict(from_attributes=True)
+
     session_id: str
     title: Optional[str]
     source: str = "web"  # 会话来源：web, feishu
@@ -43,9 +44,6 @@ class ChatSessionResponse(BaseModel):
     updated_at: datetime
     message_count: int = 0
     last_message: Optional[str] = None
-
-    class Config:
-        from_attributes = True
 
 
 class ChatSessionListResponse(BaseModel):

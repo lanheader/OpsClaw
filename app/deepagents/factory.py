@@ -5,9 +5,41 @@ DeepAgents 工厂函数（兼容层）
 此文件保留是为了向后兼容，实际上只是调用 main_agent.get_ops_agent()。
 """
 
-from typing import Optional, Set
+from typing import Any, Optional, Set
 from langchain_core.language_models import BaseChatModel
 from app.deepagents.main_agent import get_ops_agent
+from app.utils.llm_helper import ensure_final_report_in_state
+
+
+class FinalReportEnrichedAgent:
+    """为 DeepAgent 结果补齐 final_report，避免上层拿到空最终回复。"""
+
+    def __init__(self, agent: Any):
+        self._agent = agent
+
+    async def ainvoke(self, input_data: Any, config: Optional[dict] = None, **kwargs: Any) -> Any:
+        result = await self._agent.ainvoke(input_data, config=config, **kwargs)
+        if isinstance(result, dict):
+            return ensure_final_report_in_state(result)
+        return result
+
+    async def astream(self, input_data: Any, config: Optional[dict] = None, **kwargs: Any):
+        async for event in self._agent.astream(input_data, config=config, **kwargs):
+            if (
+                isinstance(event, dict)
+                and event.get("event") == "complete"
+                and isinstance(event.get("state"), dict)
+            ):
+                yield {
+                    **event,
+                    "state": ensure_final_report_in_state(event["state"]),
+                }
+                continue
+
+            yield event
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._agent, name)
 
 
 async def create_agent_for_session(
@@ -35,8 +67,9 @@ async def create_agent_for_session(
     """
     # 直接返回单例 agent
     # session_id 不再用于创建不同的 agent，而是在调用时通过 config 传递
-    return await get_ops_agent(
+    agent = await get_ops_agent(
         llm=llm,
         enable_approval=enable_approval,
         user_permissions=user_permissions,
     )
+    return FinalReportEnrichedAgent(agent)

@@ -2,25 +2,26 @@
 
 from typing import List, Optional, Set
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
 from app.core.deps import get_current_admin
 from app.models.database import get_db
+from app.models.approval_config import ApprovalConfig
 from app.models.user import User
 from app.services.approval_config_service import ApprovalConfigService
+from app.tools import get_available_packages
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/approval-config", tags=["审批配置"])
 
-
-# ========== Pydantic 模型 ==========
-
-
 class ToolApprovalConfig(BaseModel):
     """工具审批配置"""
+
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     tool_name: str
     tool_group: Optional[str]
@@ -31,9 +32,6 @@ class ToolApprovalConfig(BaseModel):
     description: Optional[str]
     created_at: Optional[str]
     updated_at: Optional[str]
-
-    class Config:
-        from_attributes = True
 
 
 class SyncToolsResponse(BaseModel):
@@ -52,10 +50,6 @@ class BatchUpdateResponse(BaseModel):
     """批量更新响应"""
     updated_count: int
 
-
-# ========== API 端点 ==========
-
-
 @router.post("/sync", response_model=SyncToolsResponse)
 async def sync_tools(
     db: Session = Depends(get_db),
@@ -71,7 +65,6 @@ async def sync_tools(
         synced_count = ApprovalConfigService.sync_tools_to_db(db)
 
         # 获取总工具数
-        from app.models.approval_config import ApprovalConfig
         total_count = db.query(ApprovalConfig).count()
 
         logger.info(
@@ -115,7 +108,6 @@ async def get_available_packages(
 ):
     """获取可用的工具包列表（如 k8s, prometheus, loki）"""
     try:
-        from app.tools import get_available_packages
         packages = get_available_packages()
         logger.info(f"用户 {current_user.username} 获取工具包列表: {len(packages)} 个")
         return packages

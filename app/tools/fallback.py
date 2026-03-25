@@ -6,6 +6,7 @@ CLI 降级机制
 """
 
 import asyncio
+import json
 import logging
 import os
 import re
@@ -173,7 +174,6 @@ class K8sFallback(FallbackExecutor):
 
     def parse_output(self, stdout: str, stderr: str) -> Any:
         """解析 kubectl 输出"""
-        import json
         try:
             return json.loads(stdout)
         except json.JSONDecodeError:
@@ -209,7 +209,6 @@ class PrometheusFallback(FallbackExecutor):
 
     def parse_output(self, stdout: str, stderr: str) -> Any:
         """解析 promql 输出"""
-        import json
         try:
             return json.loads(stdout)
         except json.JSONDecodeError:
@@ -240,7 +239,6 @@ class LokiFallback(FallbackExecutor):
 
     def parse_output(self, stdout: str, stderr: str) -> Any:
         """解析 logcli 输出"""
-        import json
         try:
             return json.loads(stdout)
         except json.JSONDecodeError:

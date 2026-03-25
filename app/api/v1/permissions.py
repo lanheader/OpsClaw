@@ -3,7 +3,7 @@
 
 import logging
 from typing import List, Dict
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.models.database import get_db
@@ -12,8 +12,9 @@ from app.models.role import Role
 from app.models.user_role import UserRole
 from app.models.permission import Permission
 from app.core.deps import get_current_user
-from app.core.permission_checker import get_user_permission_codes
+from app.core.permission_checker import get_user_permission_codes, is_admin
 from app.core.permissions import get_all_permissions, PermissionCategory, sync_tool_permissions_to_db
+from app.tools import list_permissions, list_groups
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/permissions", tags=["permissions"])
@@ -103,10 +104,7 @@ async def sync_tool_permissions(
     - 删除不再使用的权限（未被角色使用的）
     """
     # 只有管理员可以执行同步操作
-    from app.core.permission_checker import is_admin
-
     if not is_admin(db, current_user.id):
-        from fastapi import HTTPException
         raise HTTPException(status_code=403, detail="只有管理员可以执行此操作")
 
     result = sync_tool_permissions_to_db(db)
@@ -131,8 +129,6 @@ async def get_tool_permissions_registry(
     直接从 ToolRegistry 获取最新的工具权限，不经过数据库。
     用于前端展示当前系统支持的所有工具权限。
     """
-    from app.tools import list_permissions
-
     # 从 ToolRegistry 获取工具权限
     tool_permissions = list_permissions()
 
@@ -157,8 +153,6 @@ async def get_tool_groups(
 
     返回所有工具分组及其包含的工具数量。
     """
-    from app.tools import list_groups
-
     groups = list_groups()
 
     return {

@@ -5,6 +5,8 @@ LangGraph Checkpointer 管理器
 提供统一的 checkpointer 接口，支持多种后端实现（SQLite、PostgreSQL、Redis 等）。
 """
 
+import os
+import aiosqlite
 from abc import ABC, abstractmethod
 from typing import Optional
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -68,9 +70,6 @@ class SQLiteCheckpointerFactory(CheckpointerFactory):
         Returns:
             已初始化的 AsyncSqliteSaver 实例
         """
-        import os
-        import aiosqlite
-
         if self._checkpointer is not None:
             return self._checkpointer
 

@@ -1,7 +1,7 @@
 # app/schemas/rbac.py
 """RBAC 相关的 Pydantic 模型"""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional
 from datetime import datetime
 
@@ -32,13 +32,12 @@ class RoleUpdate(BaseModel):
 class RoleResponse(RoleBase):
     """角色响应模型"""
 
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     is_system: bool
     created_at: datetime
     updated_at: datetime
-
-    class Config:
-        from_attributes = True
 
 
 class RoleWithPermissions(RoleResponse):
@@ -63,11 +62,10 @@ class PermissionBase(BaseModel):
 class PermissionResponse(PermissionBase):
     """权限响应模型"""
 
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     created_at: datetime
-
-    class Config:
-        from_attributes = True
 
 
 # ========== 角色权限关联 Schemas ==========

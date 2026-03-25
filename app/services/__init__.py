@@ -5,7 +5,6 @@
 模块分类：
 - 飞书集成：approval_intent_service, chat_service, session_state_manager
 - 批准流程：approval_config_service
-- 提示词管理：prompt_management, unified_prompt_optimizer
 """
 
 # 飞书相关服务

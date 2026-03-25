@@ -4,6 +4,7 @@
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 from app.utils.logger import get_logger
+from app.integrations.feishu.client import get_feishu_client
 
 logger = get_logger(__name__)
 
@@ -27,8 +28,6 @@ async def send_notification(chat_id: str, message: str, level: str = "info") -> 
             level="success"
         )
     """
-    from app.integrations.feishu.client import get_feishu_client
-
     try:
         client = get_feishu_client()
 
@@ -62,8 +61,6 @@ async def send_card(chat_id: str, card: Dict[str, Any]) -> Dict[str, Any]:
         card = build_workflow_notification_card(...)
         result = await send_card(chat_id, card)
     """
-    from app.integrations.feishu.client import get_feishu_client
-
     try:
         client = get_feishu_client()
         return await client.send_card_message(chat_id, card)

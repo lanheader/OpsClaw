@@ -1,0 +1,396 @@
+"""
+LLM 辅助工具函数
+
+提供通用的 LLM 响应解析和处理函数
+"""
+
+import json
+import re
+from typing import Any, Dict, Iterable, Optional, TypeVar, Type
+
+from langchain_core.messages import AIMessage, HumanMessage
+
+from app.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
+T = TypeVar("T", bound=Dict[str, Any])
+
+
+def _normalize_message_content(content: Any) -> str:
+    """将 LangChain message content 规范化为纯文本。"""
+    if content is None:
+        return ""
+
+    if isinstance(content, str):
+        return content.strip()
+
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                text = item.strip()
+                if text:
+                    parts.append(text)
+                continue
+
+            if not isinstance(item, dict):
+                continue
+
+            item_type = item.get("type")
+            if item_type == "text":
+                text = str(item.get("text", "")).strip()
+                if text:
+                    parts.append(text)
+
+        return "\n".join(parts).strip()
+
+    if isinstance(content, dict):
+        text = content.get("text")
+        return str(text).strip() if text else ""
+
+    return str(content).strip()
+
+
+def extract_final_report_from_messages(messages: Iterable[Any]) -> str:
+    """从消息列表中提取最后一个有意义的 AI 回复。"""
+    meaningful_messages: list[Any] = list(messages)
+    current_turn_messages: list[Any] = []
+
+    for message in reversed(meaningful_messages):
+        if isinstance(message, HumanMessage):
+            break
+
+        if isinstance(message, dict) and message.get("type") == "human":
+            break
+
+        current_turn_messages.append(message)
+
+    search_messages = list(reversed(current_turn_messages)) if current_turn_messages else []
+
+    for message in reversed(search_messages):
+        if isinstance(message, AIMessage):
+            if getattr(message, "tool_calls", None):
+                continue
+
+            text = _normalize_message_content(getattr(message, "content", None))
+            if text:
+                return text
+            continue
+
+        if isinstance(message, dict) and message.get("type") in {"ai", "assistant"}:
+            if message.get("tool_calls"):
+                continue
+
+            text = _normalize_message_content(message.get("content"))
+            if text:
+                return text
+
+    return ""
+
+
+def _ensure_list(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    return [value]
+
+
+def _stringify_items(items: list[Any], prefix: str = "- ") -> list[str]:
+    lines: list[str] = []
+    for item in items:
+        if isinstance(item, dict):
+            description = (
+                item.get("description")
+                or item.get("action")
+                or item.get("title")
+                or item.get("summary")
+                or item.get("content")
+            )
+            if description:
+                lines.append(f"{prefix}{description}")
+                continue
+
+        text = _normalize_message_content(item)
+        if text:
+            lines.append(f"{prefix}{text}")
+
+    return lines
+
+
+def _format_key_label(key: str) -> str:
+    mapping = {
+        "total_pods": "总 Pod 数",
+        "running": "Running",
+        "pending": "Pending",
+        "failed": "Failed",
+        "total": "总数",
+        "success": "成功数",
+    }
+    return mapping.get(key, key.replace("_", " "))
+
+
+def _build_query_report(
+    analysis_result: Dict[str, Any],
+    collected_data: Dict[str, Any],
+    recommendation_lines: list[str],
+) -> str:
+    summary = analysis_result.get("summary") if isinstance(analysis_result.get("summary"), dict) else {}
+    anomalies = analysis_result.get("anomalies") if isinstance(analysis_result.get("anomalies"), list) else []
+
+    lines = ["✅ 任务完成", ""]
+    if summary:
+        for key, value in summary.items():
+            lines.append(f"{_format_key_label(str(key))}: {value}")
+        lines.append("")
+
+    if anomalies:
+        lines.append("异常项:")
+        for item in anomalies:
+            if isinstance(item, dict):
+                resource = item.get("resource") or item.get("name") or "未知资源"
+                status = item.get("status") or "未知状态"
+                reason = item.get("reason") or item.get("description") or ""
+                suffix = f", {reason}" if reason else ""
+                lines.append(f"- {resource} ({status}{suffix})")
+        lines.append("")
+
+    if not summary and collected_data:
+        lines.append("结果摘要:")
+        lines.append(f"- 已采集数据项: {', '.join(sorted(collected_data.keys()))}")
+        lines.append("")
+
+    if recommendation_lines:
+        lines.append("建议:")
+        lines.extend(recommendation_lines)
+
+    return "\n".join(line for line in lines if line is not None).strip()
+
+
+def _build_operate_report(
+    state: Dict[str, Any],
+    collected_data: Dict[str, Any],
+    recommendation_lines: list[str],
+    plan_lines: list[str],
+) -> str:
+    remediation_plan = state.get("remediation_plan") if isinstance(state.get("remediation_plan"), dict) else {}
+    verification = collected_data.get("verification") if isinstance(collected_data.get("verification"), dict) else {}
+    action = _normalize_message_content(remediation_plan.get("action"))
+    success = bool(state.get("execution_success"))
+
+    lines = ["🚀 执行成功" if success else "❌ 执行失败", ""]
+    if action:
+        lines.append(f"操作: {action}")
+    if verification:
+        lines.extend(["", "验证:"])
+        for key, value in verification.items():
+            lines.append(f"- {_format_key_label(str(key))}: {value}")
+    if plan_lines:
+        lines.extend(["", "执行结果:"])
+        lines.extend(plan_lines)
+    if recommendation_lines:
+        lines.extend(["", "后续建议:"])
+        lines.extend(recommendation_lines)
+
+    return "\n".join(lines).strip()
+
+
+def synthesize_final_report_from_state(state: Dict[str, Any]) -> str:
+    """从结构化 state 字段中兜底组装用户可读的最终回复。"""
+    intent_type = state.get("intent_type", "unknown")
+    root_cause = _normalize_message_content(state.get("root_cause"))
+    severity = _normalize_message_content(state.get("severity"))
+
+    analysis_result = state.get("analysis_result") if isinstance(state.get("analysis_result"), dict) else {}
+    remediation_plan = state.get("remediation_plan") if isinstance(state.get("remediation_plan"), dict) else {}
+    collected_data = state.get("collected_data") if isinstance(state.get("collected_data"), dict) else {}
+
+    evidence_lines = _stringify_items(_ensure_list(analysis_result.get("evidence")))
+    recommendation_lines = _stringify_items(_ensure_list(analysis_result.get("recommendations")))
+    plan_lines = _stringify_items(_ensure_list(remediation_plan.get("steps")))
+
+    recommendation_lines.extend(
+        line
+        for line in _stringify_items(_ensure_list(remediation_plan.get("recommendations")))
+        if line not in recommendation_lines
+    )
+    plan_lines = [line for line in plan_lines if line not in recommendation_lines]
+
+    summary_lines: list[str] = []
+    if collected_data:
+        summary_lines.append(f"- 已采集数据项: {', '.join(sorted(collected_data.keys()))}")
+
+    if intent_type == "query":
+        return _build_query_report(analysis_result, collected_data, recommendation_lines)
+
+    if intent_type == "operate":
+        return _build_operate_report(state, collected_data, recommendation_lines, plan_lines)
+
+    if intent_type == "diagnose" or root_cause or evidence_lines:
+        lines = ["🔍 诊断结果", ""]
+        if root_cause:
+            lines.append(f"根本原因: {root_cause}")
+        if severity:
+            lines.append(f"严重程度: {severity}")
+        if summary_lines:
+            lines.extend(["", "补充信息:"])
+            lines.extend(summary_lines)
+        if evidence_lines:
+            lines.extend(["", "关键证据:"])
+            lines.extend(evidence_lines)
+        if recommendation_lines or plan_lines:
+            lines.extend(["", "建议方案:"])
+            lines.extend(recommendation_lines)
+            lines.extend(plan_lines)
+        return "\n".join(lines).strip()
+
+    if recommendation_lines or plan_lines:
+        lines = ["✅ 任务完成", ""]
+        if summary_lines:
+            lines.extend(["结果摘要:"])
+            lines.extend(summary_lines)
+            lines.append("")
+        lines.append("后续建议:")
+        lines.extend(recommendation_lines or plan_lines)
+        return "\n".join(lines).strip()
+
+    return ""
+
+
+def ensure_final_report_in_state(state: Dict[str, Any]) -> Dict[str, Any]:
+    """在状态中补齐 final_report，已存在时保持原值。"""
+    synthesized_report = synthesize_final_report_from_state(state)
+    if synthesized_report:
+        return {**state, "final_report": synthesized_report}
+
+    existing_report = _normalize_message_content(state.get("final_report"))
+    if existing_report:
+        if existing_report != state.get("final_report"):
+            state = {**state, "final_report": existing_report}
+        return state
+
+    messages = state.get("messages", [])
+    final_report = extract_final_report_from_messages(messages)
+    if not final_report:
+        return state
+
+    return {**state, "final_report": final_report}
+
+
+def extract_json_from_llm_response(
+    content: str,
+    default: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """
+    从 LLM 响应中提取 JSON 数据
+
+    支持多种格式：
+    1. ```json ... ``` 代码块
+    2. ``` ... ``` 代码块
+    3. 纯 JSON 对象
+
+    Args:
+        content: LLM 返回的内容
+        default: 解析失败时返回的默认值
+
+    Returns:
+        解析后的 JSON 字典，失败返回默认值
+    """
+    if default is None:
+        default = {}
+
+    content = content.strip()
+
+    # 尝试提取 ```json 代码块
+    if "```json" in content:
+        try:
+            json_start = content.find("```json") + 7
+            json_end = content.find("```", json_start)
+            if json_end > json_start:
+                json_str = content[json_start:json_end].strip()
+                return json.loads(json_str)
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.debug(f"解析 ```json 代码块失败: {e}")
+
+    # 尝试提取 ``` 代码块
+    if "```" in content:
+        try:
+            json_start = content.find("```") + 3
+            # 跳过语言标识符（如 "json"）
+            while json_start < len(content) and content[json_start] not in ["\n", "{", "["]:
+                json_start += 1
+
+            json_end = content.find("```", json_start)
+            if json_end > json_start:
+                json_str = content[json_start:json_end].strip()
+                return json.loads(json_str)
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.debug(f"解析 ``` 代码块失败: {e}")
+
+    # 尝试直接解析
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError:
+        pass
+
+    # 尝试提取花括号内的 JSON
+    try:
+        start = content.find("{")
+        if start >= 0:
+            end = content.rfind("}") + 1
+            if end > start:
+                json_str = content[start:end]
+                return json.loads(json_str)
+    except (json.JSONDecodeError, ValueError) as e:
+        logger.debug(f"提取 JSON 对象失败: {e}")
+
+    # 尝试提取方括号内的 JSON 数组
+    try:
+        start = content.find("[")
+        if start >= 0:
+            end = content.rfind("]") + 1
+            if end > start:
+                json_str = content[start:end]
+                return json.loads(json_str)
+    except (json.JSONDecodeError, ValueError) as e:
+        logger.debug(f"提取 JSON 数组失败: {e}")
+
+    logger.warning(f"无法解析 JSON，内容预览: {content[:200]}")
+    return default
+
+
+def parse_structured_response(
+    content: str,
+    response_model: Type[T],
+    default: Optional[T] = None
+) -> T:
+    """
+    解析结构化响应（使用 Pydantic 模型）
+
+    Args:
+        content: LLM 返回的内容
+        response_model: Pydantic 模型类
+        default: 解析失败时返回的默认值
+
+    Returns:
+        解析后的模型实例
+    """
+    json_data = extract_json_from_llm_response(content)
+    if not json_data:
+        return default or response_model()
+
+    try:
+        return response_model(**json_data)
+    except (TypeError, ValueError) as e:
+        logger.warning(f"无法将 JSON 转换为 {response_model.__name__}: {e}")
+        return default or response_model()
+
+
+__all__ = [
+    "extract_json_from_llm_response",
+    "parse_structured_response",
+    "extract_final_report_from_messages",
+    "ensure_final_report_in_state",
+    "synthesize_final_report_from_state",
+]

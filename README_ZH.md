@@ -20,18 +20,18 @@
 
 Ops Agent 是一个基于 **DeepAgents 框架**的智能运维自动化平台，通过主智能体和多个专业化子智能体协同工作，实现从监控、诊断到自愈的全流程自动化。
 
-**当前版本**: v3.0.0 | **工具数量**: 24 个 | **子智能体**: 6 个
+**当前版本**: v3.2.0 | **子智能体**: 3 个 | **中间件**: 3 个
 
 ### ✨ 核心特性
 
-- 🤖 **DeepAgents 架构**: 主智能体 + 6 个专业子智能体协同工作
+- 🤖 **DeepAgents 架构**: 主智能体 + 3 个专业子智能体协同工作
 - 🎯 **智能任务规划**: 使用 `write_todos` 自动分解复杂任务
 - 🔄 **子智能体委派**: 通过 `task()` 工具委派专业任务
-- 🛡️ **工具降级机制**: SDK 优先，自动降级到命令行工具（24 个工具，6 个分组）
-- 🔐 **中间件架构**: 批准流程、安全审核、智能路由
+- 🛡️ **工具降级机制**: SDK 优先，自动降级到命令行工具
+- 📉 **上下文压缩**: 自动压缩早期历史消息，保留关键信息
 - 📊 **多渠道接入**: 支持 Web UI 和飞书集成
 - 🧠 **会话记忆**: 支持多轮对话和上下文记忆
-- 🔒 **动态权限**: 工具权限自动发现，11 个细粒度权限
+- 🔒 **消息索引持久化**: 解决服务重启后重复发送历史消息问题
 
 ### 🎯 三大核心场景
 
@@ -105,7 +105,7 @@ uv run python scripts/init_auth_db.py
 
 ```bash
 # 启动后端服务
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 # 启动前端服务（新终端）
 cd frontend
@@ -123,229 +123,7 @@ npm run dev
 
 ### 方式二：Docker 部署（推荐生产环境）
 
-#### 1. 创建 Dockerfile
-
-在项目根目录创建 `Dockerfile`：
-
-```dockerfile
-# 多阶段构建 - 前端构建阶段
-FROM node:18-alpine AS frontend-builder
-
-WORKDIR /app/frontend
-
-# 复制前端依赖文件
-COPY frontend/package*.json ./
-
-# 安装前端依赖
-RUN npm ci
-
-# 复制前端源码
-COPY frontend/ ./
-
-# 构建前端
-RUN npm run build
-
-# 多阶段构建 - 后端运行阶段
-FROM python:3.11-slim
-
-# 设置工作目录
-WORKDIR /app
-
-# 安装系统依赖
-RUN apt-get update && apt-get install -y \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
-
-# 安装 UV
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
-ENV PATH="/root/.cargo/bin:$PATH"
-
-# 复制项目文件
-COPY pyproject.toml uv.lock ./
-COPY app/ ./app/
-COPY scripts/ ./scripts/
-COPY config/ ./config/
-COPY .env.example ./.env
-
-# 安装 Python 依赖
-RUN uv sync --frozen
-
-# 复制前端构建产物
-COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
-
-# 创建数据目录
-RUN mkdir -p /app/data
-
-# 暴露端口
-EXPOSE 8000
-
-# 健康检查
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
-
-# 启动命令
-CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
-```
-
-#### 2. 创建 docker-compose.yml
-
-在项目根目录创建 `docker-compose.yml`：
-
-```yaml
-version: '3.8'  # Docker Compose 格式版本（非项目版本）
-
-services:
-  ops-agent:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: ops-agent
-    ports:
-      - "8000:8000"
-    environment:
-      # LLM 配置
-      - DEFAULT_LLM_PROVIDER=${DEFAULT_LLM_PROVIDER:-zhipu}
-      - ZHIPU_API_KEY=${ZHIPU_API_KEY}
-      - ZHIPU_MODEL=${ZHIPU_MODEL:-glm-4}
-
-      # 数据库
-      - DATABASE_URL=sqlite:///./data/ops_agent_v2.db
-
-      # JWT
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
-
-      # 飞书配置（可选）
-      - FEISHU_ENABLED=${FEISHU_ENABLED:-false}
-      - FEISHU_APP_ID=${FEISHU_APP_ID}
-      - FEISHU_APP_SECRET=${FEISHU_APP_SECRET}
-
-      # K8s 配置（可选）
-      - K8S_ENABLED=${K8S_ENABLED:-false}
-      - KUBECONFIG=/app/.kube/config
-
-      # Prometheus 配置（可选）
-      - PROMETHEUS_ENABLED=${PROMETHEUS_ENABLED:-false}
-      - PROMETHEUS_URL=${PROMETHEUS_URL}
-
-      # Loki 配置（可选）
-      - LOKI_ENABLED=${LOKI_ENABLED:-false}
-      - LOKI_URL=${LOKI_URL}
-
-      # 安全配置
-      - SECURITY_ENVIRONMENT=${SECURITY_ENVIRONMENT:-production}
-
-      # API 配置
-      - ENABLE_DOCS=${ENABLE_DOCS:-false}
-      - ENABLE_CORS=${ENABLE_CORS:-true}
-      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:5173}
-
-    volumes:
-      # 持久化数据
-      - ./data:/app/data
-      # K8s 配置（如果需要）
-      - ~/.kube:/app/.kube:ro
-      # 安全策略配置
-      - ./config:/app/config:ro
-
-    restart: unless-stopped
-
-    networks:
-      - ops-agent-network
-
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-
-networks:
-  ops-agent-network:
-    driver: bridge
-```
-
-#### 3. 创建 .dockerignore
-
-在项目根目录创建 `.dockerignore`：
-
-```
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-env/
-venv/
-.venv/
-ENV/
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-
-# 测试和覆盖率
-.pytest_cache/
-.coverage
-htmlcov/
-.tox/
-.hypothesis/
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# 环境变量
-.env
-.env.local
-.env.*.local
-
-# 数据库
-*.db
-*.sqlite
-*.sqlite3
-data/
-
-# 日志
-*.log
-logs/
-
-# 前端
-frontend/node_modules/
-frontend/dist/
-frontend/.next/
-frontend/out/
-
-# Git
-.git/
-.gitignore
-
-# 文档
-docs/
-*.md
-!README.md
-
-# 其他
-.DS_Store
-*.bak
-*.tmp
-```
-
-#### 4. 构建和启动
+#### 1. 构建和启动
 
 ```bash
 # 构建镜像
@@ -361,7 +139,7 @@ docker-compose logs -f
 docker-compose down
 ```
 
-#### 5. 初始化数据库（首次启动）
+#### 2. 初始化数据库（首次启动）
 
 ```bash
 # 进入容器
@@ -374,184 +152,11 @@ uv run python scripts/init_auth_db.py
 exit
 ```
 
-#### 6. 访问应用
+#### 3. 访问应用
 
 - **Web UI**: http://localhost:8000
 - **API 文档**: http://localhost:8000/docs（需要在 .env 中设置 `ENABLE_DOCS=true`）
 - **默认账号**: `admin` / `admin123`
-
----
-
-### 方式三：Kubernetes 部署
-
-#### 1. 创建 Kubernetes 部署文件
-
-创建 `k8s/deployment.yaml`：
-
-```yaml
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: ops-agent
-
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: ops-agent-config
-  namespace: ops-agent
-data:
-  DATABASE_URL: "sqlite:///./data/ops_agent_v2.db"
-  DEFAULT_LLM_PROVIDER: "zhipu"
-  SECURITY_ENVIRONMENT: "production"
-  ENABLE_CORS: "true"
-  CORS_ORIGINS: "http://localhost:5173"
-
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: ops-agent-secrets
-  namespace: ops-agent
-type: Opaque
-stringData:
-  ZHIPU_API_KEY: "your_key_here"
-  JWT_SECRET_KEY: "your-secret-key-here-change-in-production"
-  FEISHU_APP_ID: "cli_xxxxxxxxxxxxx"
-  FEISHU_APP_SECRET: "xxxxxxxxxxxxxxxxxxxxx"
-
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: ops-agent-data
-  namespace: ops-agent
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 10Gi
-
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: ops-agent
-  namespace: ops-agent
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: ops-agent
-  template:
-    metadata:
-      labels:
-        app: ops-agent
-    spec:
-      containers:
-      - name: ops-agent
-        image: your-registry/ops-agent:latest
-        ports:
-        - containerPort: 8000
-          name: http
-        envFrom:
-        - configMapRef:
-            name: ops-agent-config
-        - secretRef:
-            name: ops-agent-secrets
-        volumeMounts:
-        - name: data
-          mountPath: /app/data
-        - name: config
-          mountPath: /app/config
-          readOnly: true
-        resources:
-          requests:
-            memory: "512Mi"
-            cpu: "500m"
-          limits:
-            memory: "2Gi"
-            cpu: "2000m"
-        livenessProbe:
-          httpGet:
-            path: /health
-            port: 8000
-          initialDelaySeconds: 40
-          periodSeconds: 30
-          timeoutSeconds: 10
-        readinessProbe:
-          httpGet:
-            path: /health
-            port: 8000
-          initialDelaySeconds: 20
-          periodSeconds: 10
-          timeoutSeconds: 5
-      volumes:
-      - name: data
-        persistentVolumeClaim:
-          claimName: ops-agent-data
-      - name: config
-        configMap:
-          name: ops-agent-security-config
-
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: ops-agent
-  namespace: ops-agent
-spec:
-  type: ClusterIP
-  ports:
-  - port: 8000
-    targetPort: 8000
-    protocol: TCP
-    name: http
-  selector:
-    app: ops-agent
-
----
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: ops-agent
-  namespace: ops-agent
-  annotations:
-    nginx.ingress.kubernetes.io/rewrite-target: /
-spec:
-  rules:
-  - host: ops-agent.example.com
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: ops-agent
-            port:
-              number: 8000
-```
-
-#### 2. 部署到 Kubernetes
-
-```bash
-# 构建并推送镜像
-docker build -t your-registry/ops-agent:latest .
-docker push your-registry/ops-agent:latest
-
-# 应用 Kubernetes 配置
-kubectl apply -f k8s/deployment.yaml
-
-# 查看部署状态
-kubectl get pods -n ops-agent
-
-# 查看日志
-kubectl logs -f -n ops-agent deployment/ops-agent
-
-# 初始化数据库（首次部署）
-kubectl exec -it -n ops-agent deployment/ops-agent -- uv run python scripts/init_auth_db.py
-```
 
 ---
 
@@ -567,11 +172,8 @@ kubectl exec -it -n ops-agent deployment/ops-agent -- uv run python scripts/init
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
 │              主智能体层 (Main Agent Layer)                        │
-│                                                                  │
 │  ┌────────────────────────────────────────────────────────┐    │
 │  │         DeepAgents Main Agent (主智能体)                │    │
-│  │                                                          │    │
-│  │  🎯 核心能力:                                            │    │
 │  │  • write_todos: 任务规划和分解                          │    │
 │  │  • task(subagent, task): 委派任务给子智能体             │    │
 │  │  • request_approval(action): 请求用户批准               │    │
@@ -582,23 +184,17 @@ kubectl exec -it -n ops-agent deployment/ops-agent -- uv run python scripts/init
 ┌─────────────────────────────────────────────────────────────────┐
 │                中间件层 (Middleware Layer)                        │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐         │
-│  │  Approval    │  │  Security    │  │  Routing     │         │
-│  │  Middleware  │  │  Middleware  │  │  Middleware  │         │
-│  │  (批准流程)  │  │  (安全审核)  │  │  (智能路由)  │         │
+│  │  Context     │  │  Message     │  │  Logging     │         │
+│  │  Compression │  │  Trimming    │  │  Middleware  │         │
+│  │  (上下文压缩)│  │  (消息截断)  │  │  (日志记录)  │         │
 │  └──────────────┘  └──────────────┘  └──────────────┘         │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
-│              子智能体层 (Subagents Layer)                         │
-│                                                                  │
+│              子智能体层 (Subagents Layer) - 3 个                 │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐         │
-│  │ intent-agent │  │  data-agent  │  │analyze-agent │         │
-│  │  (意图识别)  │  │  (数据采集)  │  │  (分析决策)  │         │
-│  └──────────────┘  └──────────────┘  └──────────────┘         │
-│                                                                  │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐         │
-│  │execute-agent │  │ report-agent │  │ format-agent │         │
-│  │  (执行操作)  │  │  (报告生成)  │  │  (响应格式化)│         │
+│  │  data-agent  │  │analyze-agent │  │execute-agent │         │
+│  │  (数据采集)  │  │  (分析决策)  │  │  (执行操作)  │         │
 │  └──────────────┘  └──────────────┘  └──────────────┘         │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
@@ -609,7 +205,21 @@ kubectl exec -it -n ops-agent deployment/ops-agent -- uv run python scripts/init
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-详细架构说明请查看 [DeepAgents 架构设计文档](./docs/DEEPAGENTS_ARCHITECTURE_DESIGN.md)。
+---
+
+## 🤖 子智能体说明
+
+### 1. data-agent（数据采集子智能体）
+**职责**：执行数据采集命令，调用 K8s/Prometheus/Loki 工具
+**工具**：k8s_tools, prometheus_tools, loki_tools
+
+### 2. analyze-agent（分析决策子智能体）
+**职责**：分析采集的数据，诊断问题根因，规划修复方案
+**输出**：root_cause, severity, remediation_plan
+
+### 3. execute-agent（执行操作子智能体）
+**职责**：执行修复命令，监控执行结果
+**工具**：command_executor_tools, k8s_tools
 
 ---
 
@@ -644,38 +254,20 @@ kubectl exec -it -n ops-agent deployment/ops-agent -- uv run python scripts/init
 ### 核心文档
 
 - **[📖 项目完整文档](./PROJECT_DOCUMENTATION.md)** - 包含所有功能、架构、API、部署等详细说明
-- **[📑 文档索引](./DOCUMENTATION_INDEX.md)** - 所有文档的分类索引
 - **[🤖 Claude 指南](./CLAUDE.md)** - Claude Code 项目指南
-
-### 功能文档
-
 - **[🔧 工具降级机制](./docs/TOOL_FALLBACK_SUMMARY.md)** - SDK 优先，自动降级到命令行
-- **[✅ 用户确认流程](./docs/APPROVAL_FLOW_IMPLEMENTATION_SUMMARY.md)** - 命令规划后暂停等待批准
 - **[🔗 飞书集成](./docs/FEISHU_INTEGRATION.md)** - 飞书长连接和卡片交互
-- **[💬 Web 聊天集成](./docs/WEB_CHAT_AGENT_INTEGRATION.md)** - Web UI 流式对话
-
-### API 文档
-
-- **[API 指南（中文）](./docs/api-guide-cn.md)**
-- **[API 指南（英文）](./docs/api-guide.md)**
 
 ---
 
 ## 🔧 配置说明
-
-### 环境变量配置
-
-详细的环境变量说明请查看 [.env.example](./.env.example) 文件。
 
 ### 关键配置项
 
 #### LLM 配置
 
 ```bash
-# 选择 LLM 提供商
 DEFAULT_LLM_PROVIDER=zhipu  # openai, claude, zhipu, ollama
-
-# 智谱 AI 配置
 ZHIPU_API_KEY=your_key_here
 ZHIPU_MODEL=glm-4
 ```
@@ -689,21 +281,16 @@ FEISHU_APP_SECRET=xxxxxxxxxxxxxxxxxxxxx
 FEISHU_CONNECTION_MODE=auto  # webhook | longconn | auto
 ```
 
-#### Kubernetes 配置
+#### 中间件配置
 
 ```bash
-K8S_ENABLED=true
-KUBECONFIG=/path/to/kubeconfig
-```
+# 消息截断配置
+MAX_MESSAGES_TO_KEEP=40  # 保留最近 40 条消息
+MIN_MESSAGES_TO_KEEP=10  # 最少保留 10 条消息
 
-#### 安全配置
-
-```bash
-# JWT 密钥（生产环境必须修改）
-JWT_SECRET_KEY=your-secret-key-here-change-in-production
-
-# 安全环境
-SECURITY_ENVIRONMENT=production  # production | testing | development
+# 上下文压缩配置
+COMPRESSION_THRESHOLD=30  # 超过 30 条消息触发压缩
+MAX_FULL_MESSAGES=20      # 保留最近 20 条完整消息
 ```
 
 ---
@@ -717,14 +304,21 @@ ops-agent-langgraph/
 ├── app/                         # 应用主目录
 │   ├── main.py                  # FastAPI 应用入口
 │   ├── deepagents/              # DeepAgents 主智能体和子智能体
+│   │   ├── main_agent.py        # 主智能体
+│   │   └── subagents/           # 子智能体
+│   │       ├── data_agent.py    # 数据采集
+│   │       ├── analyze_agent.py # 分析决策
+│   │       └── execute_agent.py # 执行操作
 │   ├── middleware/              # 中间件层
+│   │   ├── context_compression_middleware.py  # 上下文压缩
+│   │   ├── message_trimming_middleware.py     # 消息截断
+│   │   └── logging_middleware.py              # 日志记录
 │   ├── tools/                   # Agent 工具集
 │   ├── integrations/            # 外部服务集成
 │   ├── api/                     # API 路由层
 │   ├── core/                    # 核心模块
 │   ├── models/                  # 数据库模型
-│   ├── services/                # 业务服务层
-│   └── schemas/                 # Pydantic 模式
+│   └── services/                # 业务服务层
 ├── frontend/                    # React 前端
 ├── config/                      # 配置文件
 ├── scripts/                     # 脚本工具
@@ -748,26 +342,33 @@ pytest tests/integration/ -v
 pytest --cov=app --cov-report=html
 ```
 
-### 代码质量
-
-```bash
-# 格式化代码
-black app/ tests/
-
-# 代码检查
-ruff check app/ tests/
-
-# 类型检查
-mypy app/
-```
-
 ---
 
 ## 🐛 故障排查
 
 ### 常见问题
 
-#### 1. 数据库初始化失败
+#### 1. 服务重启后历史消息重复发送
+
+**原因**：消息索引未持久化
+**解决**：确保数据库中 `chat_sessions.last_processed_message_index` 字段存在
+
+```bash
+# 检查字段是否存在
+sqlite3 data/ops_agent_v2.db "PRAGMA table_info(chat_sessions);" | grep last_processed
+```
+
+#### 2. 模型回答与当前问题不相关
+
+**原因**：历史消息过多，上下文丢失
+**解决**：检查中间件是否正常工作
+
+```bash
+# 查看日志中的压缩记录
+grep "上下文压缩" logs/app.log
+```
+
+#### 3. 数据库初始化失败
 
 ```bash
 # 删除旧数据库
@@ -775,30 +376,6 @@ rm -rf data/ops_agent_v2.db
 
 # 重新初始化
 uv run python scripts/init_auth_db.py
-```
-
-#### 2. LLM API 调用失败
-
-检查 `.env` 文件中的 API Key 配置：
-```bash
-# 验证 API Key
-echo $ZHIPU_API_KEY
-```
-
-#### 3. 飞书长连接失败
-
-检查飞书配置：
-```bash
-# 验证飞书配置
-FEISHU_ENABLED=true
-FEISHU_CONNECTION_MODE=longconn
-```
-
-#### 4. Docker 容器无法启动
-
-查看容器日志：
-```bash
-docker-compose logs -f ops-agent
 ```
 
 ---
@@ -825,7 +402,7 @@ docker-compose logs -f ops-agent
 
 ## 📞 联系方式
 
-- **维护者**: lanheader
+- **维护者**: lanjiaxuan
 - **项目地址**: https://github.com/your-org/ops-agent-langgraph
 - **问题反馈**: https://github.com/your-org/ops-agent-langgraph/issues
 
@@ -846,7 +423,7 @@ docker-compose logs -f ops-agent
 
 <div align="center">
 
-**最后更新**: 2026-03-20
+**最后更新**: 2026-03-25 | **版本**: v3.2.0
 
 Made with ❤️ by Ops Team
 

@@ -14,8 +14,8 @@ from app.utils.logger import get_logger
 logger = get_logger(__name__)
 
 # 配置：保留最近的消息数量
-MAX_MESSAGES_TO_KEEP = 20  # 保留最近 20 条消息（约 5-10 轮对话）
-MIN_MESSAGES_TO_KEEP = 6  # 最少保留 6 条消息（约 2-3 轮对话）
+MAX_MESSAGES_TO_KEEP = 40  # 保留最近 40 条消息（约 10-20 轮对话）
+MIN_MESSAGES_TO_KEEP = 10  # 最少保留 10 条消息（约 3-5 轮对话）
 
 
 class MessageTrimmingMiddleware(AgentMiddleware):

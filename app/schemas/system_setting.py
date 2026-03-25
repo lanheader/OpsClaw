@@ -1,6 +1,6 @@
 """系统设置相关的 Pydantic 模型"""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, Any
 from datetime import datetime
 
@@ -35,12 +35,11 @@ class SystemSettingUpdate(BaseModel):
 class SystemSettingResponse(SystemSettingBase):
     """系统设置响应模型"""
 
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     created_at: datetime
     updated_at: datetime
-
-    class Config:
-        from_attributes = True
 
 
 class SystemSettingBatchUpdate(BaseModel):

@@ -345,7 +345,8 @@
   background: rgba(255, 255, 255, 0.2);
 }
 
-.message-content pre.code-block {
+/* 代码块包装器 - 替代 pre 避免嵌套警告 */
+.message-content .code-block-wrapper {
   margin: 10px 0;
   padding: 12px;
   background: #1f2937;
@@ -353,11 +354,33 @@
   overflow-x: auto;
 }
 
-.message-content pre.code-block code {
+.message-content .code-block-wrapper code {
+  display: block;
   color: #e5e7eb;
   font-family: 'Courier New', monospace;
   font-size: 13px;
   background: transparent;
+  white-space: pre;
+}
+
+/* Markdown 段落 - 用于包含代码块的情况 */
+.message-content .markdown-paragraph {
+  margin: 0 0 8px 0;
+}
+
+.message-content .markdown-paragraph:last-child {
+  margin-bottom: 0;
+}
+
+/* Markdown 列表样式 */
+.message-content .markdown-list {
+  margin: 8px 0;
+  padding-left: 20px;
+}
+
+/* Markdown 强调样式 */
+.message-content .markdown-strong {
+  font-weight: 600;
 }
 
 /* 消息时间 */

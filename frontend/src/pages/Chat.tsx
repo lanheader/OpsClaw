@@ -302,12 +302,31 @@ const Chat: React.FC = () => {
   useEffect(() => {
     if (sessionId) {
       loadMessages(sessionId);
-      // 使用函数式更新避免依赖 sessions
-      setSessions(currentSessions => {
-        const session = currentSessions.find(s => s.session_id === sessionId);
-        setCurrentSession(session || null);
-        return currentSessions;
-      });
+
+      // 同时获取会话详情（确保 currentSession 正确设置）
+      chatApi.getSession(sessionId)
+        .then(session => {
+          setCurrentSession(session);
+          // 更新 sessions 列表中的该会话
+          setSessions(currentSessions => {
+            const exists = currentSessions.some(s => s.session_id === sessionId);
+            if (!exists) {
+              return [...currentSessions, session];
+            }
+            return currentSessions.map(s =>
+              s.session_id === sessionId ? session : s
+            );
+          });
+        })
+        .catch(error => {
+          console.error('Failed to load session details:', error);
+          // 如果获取失败，尝试从列表中查找
+          setSessions(currentSessions => {
+            const session = currentSessions.find(s => s.session_id === sessionId);
+            setCurrentSession(session || null);
+            return currentSessions;
+          });
+        });
     } else {
       setMessages([]);
       setCurrentSession(null);
@@ -315,8 +334,29 @@ const Chat: React.FC = () => {
   }, [sessionId]);
 
   // 格式化时间
-  const formatTime = (dateString: string) => {
-    const date = new Date(dateString);
+  const formatTime = (dateString: string | Date) => {
+    let date: Date;
+
+    // 处理不同的日期格式
+    if (typeof dateString === 'string') {
+      // 处理 ISO 格式（如 "2026-03-23T02:25:38.293554"）
+      // 注意：这种格式缺少时区信息，需要添加 Z 或手动处理
+      if (dateString.includes('T') && !dateString.includes('Z')) {
+        // 添加 UTC 时区标记
+        dateString = dateString + 'Z';
+      }
+      date = new Date(dateString);
+    } else if (dateString instanceof Date) {
+      date = dateString;
+    } else {
+      return '未知时间';
+    }
+
+    // 检查日期是否有效
+    if (isNaN(date.getTime())) {
+      return '时间解析失败';
+    }
+
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();
     const diffMins = Math.floor(diffMs / 60000);
@@ -324,7 +364,29 @@ const Chat: React.FC = () => {
     if (diffMins < 1) return '刚刚';
     if (diffMins < 60) return `${diffMins}分钟前`;
     if (diffMins < 1440) return `${Math.floor(diffMins / 60)}小时前`;
-    return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
+
+    // 超过一天显示具体时间
+    const year = date.getFullYear();
+    const nowYear = now.getFullYear();
+
+    if (year !== nowYear) {
+      // 不同年份，显示完整日期
+      return date.toLocaleDateString('zh-CN', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    }
+
+    // 同一年，显示月日和时分
+    return date.toLocaleDateString('zh-CN', {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
   };
 
   // 渲染消息气泡
@@ -360,29 +422,36 @@ const Chat: React.FC = () => {
                   remarkPlugins={[remarkGfm]}
                   components={
                     {
-                      code: (props: any) =>
-                        props.inline || (!props.className && !props.node?.position) ? (
-                          <code className="inline-code">{props.children}</code>
-                        ) : (
-                          <pre className="code-block">
-                            <code className={props.className}>{props.children}</code>
-                          </pre>
-                        ),
+                      // 代码块和内联代码
+                      code: (props: any) => {
+                        // 内联代码：props.inline 为 true 或没有语言标记
+                        if (props.inline || !props.className) {
+                          return <code className="inline-code">{props.children}</code>;
+                        }
+                        // 代码块：返回 code 元素，让外部 pre 包装
+                        return <code className={props.className}>{props.children}</code>;
+                      },
+                      // 代码块容器：使用 div 而不是 pre，避免 HTML 嵌套警告
+                      pre: ({ children }: any) => (
+                        <div className="code-block-wrapper">{children}</div>
+                      ),
+                      // 段落：检查是否包含代码块
                       p: ({ children }: any) => {
-                        // 检查是否包含代码块元素
-                        const hasCodeBlock = typeof children === 'string' &&
-                          (children.includes('<pre') || children.includes('<code>'));
-
-                        // 如果包含代码块，使用 div 避免嵌套警告
+                        // 检查子元素是否包含代码块包装器
+                        const hasCodeBlock = React.Children.toArray(children).some(
+                          (child: any) =>
+                            child?.props?.className?.includes('code-block-wrapper') ||
+                            child?.type === 'div'
+                        );
                         if (hasCodeBlock) {
-                          return <div>{children}</div>;
+                          return <div className="markdown-paragraph">{children}</div>;
                         }
                         return <p>{children}</p>;
                       },
-                      ul: ({ children }: any) => <ul>{children}</ul>,
-                      ol: ({ children }: any) => <ol>{children}</ol>,
+                      ul: ({ children }: any) => <ul className="markdown-list">{children}</ul>,
+                      ol: ({ children }: any) => <ol className="markdown-list">{children}</ol>,
                       li: ({ children }: any) => <li>{children}</li>,
-                      strong: ({ children }: any) => <strong>{children}</strong>,
+                      strong: ({ children }: any) => <strong className="markdown-strong">{children}</strong>,
                       em: ({ children }: any) => <em>{children}</em>,
                     } as Components
                   }
@@ -525,7 +594,33 @@ const Chat: React.FC = () => {
                         </div>
                         <div className="message-bubble assistant-bubble">
                           <div className="message-content">
-                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            <ReactMarkdown
+                              remarkPlugins={[remarkGfm]}
+                              components={
+                                {
+                                  code: (props: any) => {
+                                    if (props.inline || !props.className) {
+                                      return <code className="inline-code">{props.children}</code>;
+                                    }
+                                    return <code className={props.className}>{props.children}</code>;
+                                  },
+                                  pre: ({ children }: any) => (
+                                    <div className="code-block-wrapper">{children}</div>
+                                  ),
+                                  p: ({ children }: any) => {
+                                    const hasCodeBlock = React.Children.toArray(children).some(
+                                      (child: any) =>
+                                        child?.props?.className?.includes('code-block-wrapper') ||
+                                        child?.type === 'div'
+                                    );
+                                    if (hasCodeBlock) {
+                                      return <div className="markdown-paragraph">{children}</div>;
+                                    }
+                                    return <p>{children}</p>;
+                                  },
+                                } as Components
+                              }
+                            >
                               {streamingContent}
                             </ReactMarkdown>
                           </div>

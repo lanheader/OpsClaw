@@ -6,6 +6,7 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
 import httpx
 from app.utils.logger import get_logger
+from app.core.config import get_settings
 
 logger = get_logger(__name__)
 
@@ -431,8 +432,6 @@ def get_feishu_client() -> FeishuClient:
     global _feishu_client
 
     if _feishu_client is None:
-        from app.core.config import get_settings
-
         settings = get_settings()
 
         if not settings.FEISHU_ENABLED:

@@ -3,12 +3,32 @@
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import OperationalError
 import logging
+import time
 
 from app.models.chat_session import ChatSession, SessionState
 from app.models.database import SessionLocal
 
 logger = logging.getLogger(__name__)
+
+
+def _retry_on_db_lock(max_retries: int = 3, delay: float = 0.1):
+    """重试装饰器，处理数据库锁定错误"""
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            for attempt in range(max_retries):
+                try:
+                    return func(*args, **kwargs)
+                except OperationalError as e:
+                    if "database is locked" in str(e) and attempt < max_retries - 1:
+                        logger.warning(f"数据库锁定，重试 {attempt + 1}/{max_retries}...")
+                        time.sleep(delay * (attempt + 1))
+                    else:
+                        raise
+            return None
+        return wrapper
+    return decorator
 
 
 class SessionStateManager:
@@ -180,3 +200,60 @@ class SessionStateManager:
 
     # 移除 cleanup_expired_approvals 方法，因为不需要定时清理
     # 状态由用户的批准/拒绝操作来改变
+
+    @staticmethod
+    def get_last_processed_message_index(session_id: str) -> int:
+        """
+        获取会话已处理的消息索引
+
+        Args:
+            session_id: 会话ID
+
+        Returns:
+            已处理的消息索引，如果会话不存在则返回 -1
+        """
+        db = SessionLocal()
+        try:
+            session = db.query(ChatSession).filter_by(session_id=session_id).first()
+            if not session:
+                return -1
+            return session.last_processed_message_index or -1
+        except Exception as e:
+            logger.error(f"获取已处理消息索引失败: {e}")
+            return -1
+        finally:
+            db.close()
+
+    @staticmethod
+    @_retry_on_db_lock(max_retries=3, delay=0.1)
+    def set_last_processed_message_index(session_id: str, index: int) -> bool:
+        """
+        设置会话已处理的消息索引（带重试机制）
+
+        Args:
+            session_id: 会话ID
+            index: 已处理的消息索引
+
+        Returns:
+            是否设置成功
+        """
+        db = SessionLocal()
+        try:
+            session = db.query(ChatSession).filter_by(session_id=session_id).first()
+            if not session:
+                logger.error(f"会话不存在: {session_id}")
+                return False
+
+            # 只更新为更大的索引（避免并发问题导致回退）
+            if index > (session.last_processed_message_index or -1):
+                session.last_processed_message_index = index
+                db.commit()
+                logger.debug(f"会话 {session_id} 已处理消息索引更新为 {index}")
+            return True
+
+        except Exception as e:
+            logger.error(f"设置已处理消息索引失败: {e}")
+            db.rollback()
+            return False
+        finally:
+            db.close()

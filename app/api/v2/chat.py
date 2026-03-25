@@ -1,8 +1,10 @@
 # app/api/v2/chat.py
 """聊天 API 端点"""
 
+import asyncio
 import json
 import logging
+import time
 import uuid
 from typing import List, Optional
 from datetime import datetime, timezone
@@ -25,7 +27,9 @@ from app.schemas.chat import (
     ChatMessageCreate,
     ChatMessageResponse,
 )
+from app.utils.llm_helper import ensure_final_report_in_state
 from app.utils.logger import set_request_context, clear_request_context, get_logger
+from app.memory.memory_manager import get_memory_manager
 
 router = APIRouter(prefix="/v2/chat", tags=["chat"])
 logger = get_logger(__name__)
@@ -346,34 +350,52 @@ async def send_message(
                 user_permissions=user_permissions,
             )
 
-            # 初始化状态
-            initial_state: OpsState = {
-                "user_id": str(current_user.id),
-                "user_role": "admin" if current_user.is_superuser else "user",
-                "session_id": session_id,
-                "user_input": message_data.content,
-                "trigger_source": "web",
-                "workflow_status": "running",
-                "waiting_for_approval": False,
-                "approval_required": False,
-                "execution_success": False,
-                "need_remediation": False,
-                "diagnosis_round": 0,
-                "max_diagnosis_rounds": 3,
-                "current_command_index": 0,
-                "data_sufficient": False,
-                "security_check_passed": True,
-                "permission_granted": True,
-                "collected_data": {},
-                "execution_history": [],
+            # ========== 记忆系统：检索相关记忆并增强输入 ==========
+            memory_manager = get_memory_manager(user_id=str(current_user.id))
+            enhanced_user_input = message_data.content
+
+            try:
+                # 检索相关记忆（Mem0 + 运维领域）
+                context = await memory_manager.build_context(
+                    user_query=message_data.content,
+                    session_id=session_id,
+                    include_incidents=True,   # 故障记忆
+                    include_knowledge=True,   # 知识库
+                    include_session=True,     # 会话记忆
+                    include_mem0=True         # Mem0 通用对话记忆
+                )
+
+                if context:
+                    # 将记忆注入到用户输入中
+                    enhanced_user_input = f"""{message_data.content}
+
+---
+**参考资料**（来自历史对话和知识库）：
+{context}
+---
+"""
+                    logger.info(f"🧠 [Chat] 记忆已注入 | context 长度: {len(context)} 字符")
+            except Exception as e:
+                logger.warning(f"⚠️ 记忆检索失败: {e}，使用原始输入")
+
+            # ========== 构建输入状态 ==========
+            # DeepAgents 使用 LangGraph 的 messages channel 来管理对话历史
+            # 我们传入当前用户消息，LangGraph 会自动从 checkpoint 加载历史消息
+            from langchain_core.messages import HumanMessage
+
+            input_state = {
+                "messages": [HumanMessage(content=enhanced_user_input)],
             }
+
+            # 注意：不再使用 OpsState 的完整结构
+            # DeepAgents 会自动管理其他内部字段
 
             # 【调试】增强日志
             logger.info(f"🚀 开始执行 DeepAgents 工作流")
             logger.info(f"   会话ID: {session_id}")
             logger.info(f"   用户输入: {message_data.content[:100]}")
             logger.info(
-                f"   初始状态: {json.dumps({k: v for k, v in initial_state.items() if k not in ['collected_data', 'execution_history']}, ensure_ascii=False)}"
+                f"   输入消息: {enhanced_user_input[:100]}..."
             )
 
             # 发送状态事件：开始处理
@@ -393,8 +415,6 @@ async def send_message(
             final_state = None
 
             # 【调试】添加超时检测
-            import time
-
             start_time = time.time()
             timeout = 300  # 5 分钟超时
 
@@ -406,7 +426,7 @@ async def send_message(
                 }
             }
 
-            async for event in agent.astream(initial_state, config=config):
+            async for event in agent.astream(input_state, config=config):
                 # 检查超时
                 elapsed = time.time() - start_time
                 if elapsed > timeout:
@@ -476,13 +496,15 @@ async def send_message(
 
                 elif event_type == "complete":
                     # 工作流完成
-                    final_state = event.get("state", {})
+                    final_state = ensure_final_report_in_state(event.get("state", {}))
                     workflow_completed = True
 
                     logger.info(f"✅ 工作流执行完成")
 
                     # 构建最终响应
-                    final_report = final_state.get("final_report", "")
+                    final_report = final_state.get("formatted_response", "") or final_state.get(
+                        "final_report", ""
+                    )
                     if final_report:
                         full_response += final_report
 
@@ -543,71 +565,6 @@ async def send_message(
                 )
                 db.add(assistant_message)
 
-                # 3.1 收集训练数据用于 DSPy 优化（异步执行，不阻塞响应）
-                try:
-                    from app.services.unified_prompt_optimizer import collect_interaction_for_training
-
-                    # 确定示例类型
-                    intent_type = final_state.get("intent_type", "unknown") if final_state else "unknown"
-                    example_type_map = {
-                        "query": "query",
-                        "diagnose": "diagnose",
-                        "operate": "execute",
-                        "unknown": "query",
-                    }
-                    example_type = example_type_map.get(intent_type, "query")
-
-                    # 构建上下文
-                    context = {
-                        "session_id": session_id,
-                        "workflow_status": final_state.get("workflow_status") if final_state else "unknown",
-                        "intent_type": intent_type,
-                        "diagnosis_round": final_state.get("diagnosis_round", 0) if final_state else 0,
-                        "data_sufficient": final_state.get("data_sufficient", False) if final_state else False,
-                        "collected_data_keys": list(final_state.get("collected_data", {}).keys()) if final_state else [],
-                    }
-
-                    # 为每个 subagent 收集训练数据
-                    # 根据工作流状态确定参与的 subagents
-                    subagents_to_collect = []
-
-                    # 所有请求都涉及 data-agent
-                    subagents_to_collect.append("data-agent")
-
-                    # 诊断类请求涉及 analyze-agent
-                    if intent_type in ["diagnose", "operate"]:
-                        subagents_to_collect.append("analyze-agent")
-
-                    # 操作类请求涉及 execute-agent
-                    if intent_type == "operate":
-                        subagents_to_collect.append("execute-agent")
-
-                    # 异步收集训练数据（不阻塞主流程）
-                    import asyncio
-
-                    async def collect_training_data():
-                        for subagent_name in subagents_to_collect:
-                            try:
-                                await collect_interaction_for_training(
-                                    subagent_name=subagent_name,
-                                    user_input=message_data.content,
-                                    agent_output=full_response,
-                                    context=context,
-                                    example_type=example_type,
-                                    session_id=session_id,
-                                    user_id=current_user.id,
-                                )
-                                logger.info(f"✅ 收集训练数据: {subagent_name}")
-                            except Exception as e:
-                                logger.error(f"❌ 收集训练数据失败 {subagent_name}: {e}")
-
-                    # 在后台执行训练数据收集
-                    asyncio.create_task(collect_training_data())
-
-                except Exception as e:
-                    logger.error(f"收集训练数据时出错: {e}")
-                    # 不阻塞主流程，只记录错误
-
                 # 更新会话
                 session.updated_at = datetime.now(timezone.utc)
                 if not session.title:
@@ -622,42 +579,25 @@ async def send_message(
                     f"Assistant message saved: session={session_id}, message_id={assistant_message.id}"
                 )
 
-                # 4. 自动收集训练数据用于 DSPy 优化
+                # ========== 记忆系统：自动学习 ==========
                 try:
-                    from app.services.unified_prompt_optimizer import collect_interaction_for_training
+                    # 构建对话消息列表（用于 Mem0 学习）
+                    conversation_messages = [
+                        {"role": "user", "content": message_data.content},
+                        {"role": "assistant", "content": full_response}
+                    ]
 
-                    # 推断示例类型
-                    intent_type = final_state.get("intent_type", "query") if final_state else "query"
-                    example_type_map = {
-                        "query": "query",
-                        "diagnose": "diagnose",
-                        "operate": "execute",
-                        "inspect": "query",
-                        "unknown": "query",
-                    }
-                    example_type = example_type_map.get(intent_type, "query")
-
-                    # 收集数据（异步，不阻塞响应）
-                    asyncio.create_task(
-                        collect_interaction_for_training(
-                            subagent_name="analyze-agent",  # 简化：使用 analyze-agent
-                            user_input=message_data.content,
-                            agent_output=full_response,
-                            context={
-                                "intent_type": intent_type,
-                                "workflow_status": final_state.get("workflow_status") if final_state else "unknown",
-                                "collected_data_keys": list(final_state.get("collected_data", {}).keys()) if final_state else [],
-                            },
-                            example_type=example_type,
-                            session_id=session_id,
-                            user_id=current_user.id,
-                        )
+                    # 自动学习（包含 Mem0 和 MemoryManager）
+                    await memory_manager.auto_learn_from_result(
+                        user_query=message_data.content,
+                        result={"messages": [{"content": full_response}]},
+                        session_id=session_id,
+                        messages=conversation_messages  # 传递完整对话给 Mem0
                     )
-                    logger.info(f"✅ 训练数据已收集: {example_type}")
 
+                    logger.info(f"🧠 [Chat] 自动学习完成")
                 except Exception as e:
-                    # 训练数据收集失败不影响正常响应
-                    logger.warning(f"收集训练数据失败（不影响响应）: {e}")
+                    logger.warning(f"⚠️ 记忆自动学习失败: {e}")
 
                 # 发送完成事件
                 done_data = json.dumps(
@@ -781,8 +721,6 @@ async def resume_workflow(
             final_state = None
 
             # 【调试】添加超时检测
-            import time
-
             start_time = time.time()
             timeout = 300  # 5 分钟超时
 
@@ -854,13 +792,15 @@ async def resume_workflow(
 
                 elif event_type == "complete":
                     # 工作流完成
-                    final_state = event.get("state", {})
+                    final_state = ensure_final_report_in_state(event.get("state", {}))
                     workflow_completed = True
 
                     logger.info(f"✅ 工作流恢复执行完成")
 
                     # 构建最终响应
-                    final_report = final_state.get("final_report", "")
+                    final_report = final_state.get("formatted_response", "") or final_state.get(
+                        "final_report", ""
+                    )
                     if final_report:
                         full_response += final_report
 

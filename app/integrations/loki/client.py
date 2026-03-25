@@ -2,6 +2,7 @@
 """用于日志聚合的 Loki 客户端"""
 
 import logging
+import os
 from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
 import httpx
@@ -325,8 +326,6 @@ def get_loki_client(base_url: Optional[str] = None) -> LokiClient:
 
     if _loki_client is None:
         if base_url is None:
-            import os
-
             base_url = os.getenv("LOKI_URL", "http://loki:3100")
 
         _loki_client = LokiClient(base_url=base_url)

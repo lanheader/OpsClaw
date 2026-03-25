@@ -7,6 +7,9 @@ K8s 删除操作工具（新架构）
 
 from typing import Dict, Any, Optional
 
+from kubernetes import client
+from app.integrations.kubernetes.client import create_client
+
 from app.tools.base import (
     BaseOpTool,
     register_tool,
@@ -24,7 +27,6 @@ logger = get_logger(__name__)
 # 通用初始化函数
 def _init_k8s_client(db=None):
     """初始化 K8s 客户端"""
-    from app.integrations.kubernetes.client import create_client
     return create_client(db)
 
 
@@ -330,8 +332,6 @@ class ForceDeletePodTool(BaseOpTool):
         """执行工具操作"""
         _log_tool_start("force_delete_pod", name=name, namespace=namespace)
         try:
-            from kubernetes import client
-
             # 使用 grace_period_seconds=0 强制删除
             self.k8s_client.core_v1.delete_namespaced_pod(
                 name=name,

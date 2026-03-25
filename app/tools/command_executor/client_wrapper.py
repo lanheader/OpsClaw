@@ -11,6 +11,7 @@
 import asyncio
 import logging
 import os
+import re
 from typing import Dict, Any, Optional, List
 from sqlalchemy.orm import Session
 
@@ -247,8 +248,6 @@ class RedisExecutor(CommandExecutor):
             port: Redis 端口
             password: Redis 密码
         """
-        import re
-
         # 安全检查
         for pattern in self.DANGEROUS_PATTERNS:
             if re.search(pattern, command, re.IGNORECASE):

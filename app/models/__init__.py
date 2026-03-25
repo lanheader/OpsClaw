@@ -11,8 +11,6 @@ from app.models.role_permission import RolePermission
 from app.models.user_role import UserRole
 from app.models.chat_session import ChatSession
 from app.models.chat_message import ChatMessage, MessageRole
-from app.models.dspy_prompt import TrainingExample, PromptOptimizationLog
-from app.models.subagent_prompt import SubagentPrompt, PromptChangeLog
 from app.models.approval_config import ApprovalConfig
 from app.models.system_setting import SystemSetting
 
@@ -29,10 +27,6 @@ __all__ = [
     "ChatSession",
     "ChatMessage",
     "MessageRole",
-    "TrainingExample",
-    "PromptOptimizationLog",
-    "SubagentPrompt",
-    "PromptChangeLog",
     "ApprovalConfig",
     "SystemSetting",
 ]

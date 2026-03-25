@@ -11,6 +11,7 @@ import os
 import tempfile
 from typing import Optional, Dict, Any
 from urllib3.exceptions import InsecureRequestWarning
+from app.core.integration_config import IntegrationConfig
 
 try:
     from kubernetes import client, config
@@ -312,8 +313,6 @@ def create_client(
     """
     # 如果提供了 db 且没有指定参数，从数据库读取配置
     if db and auth_mode is None:
-        from app.core.integration_config import IntegrationConfig
-
         if not IntegrationConfig.is_k8s_enabled(db):
             raise RuntimeError("K8s integration is not enabled")
 

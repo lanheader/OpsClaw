@@ -7,6 +7,8 @@ K8s 读操作工具（新架构）
 
 from typing import Dict, Any, Optional
 
+from app.integrations.kubernetes.client import create_client
+
 from app.tools.base import (
     BaseOpTool,
     register_tool,
@@ -24,7 +26,6 @@ logger = get_logger(__name__)
 # 通用初始化函数
 def _init_k8s_client(db=None):
     """初始化 K8s 客户端"""
-    from app.integrations.kubernetes.client import create_client
     return create_client(db)
 
 
@@ -561,6 +562,57 @@ class GetEventsTool(BaseOpTool):
             )
 
 
+# ==================== ConfigMap 操作 ====================
+
+@register_tool(
+    group="k8s.read",
+    operation_type=OperationType.READ,
+    risk_level=RiskLevel.LOW,
+    permissions=["k8s.view"],
+    description="获取 Kubernetes ConfigMap 列表",
+    examples=[
+        "get_config_maps(namespace='default')",
+        "get_config_maps(namespace='ka-baseline-tms')",
+    ],
+)
+class GetConfigMapsTool(BaseOpTool):
+    """获取 ConfigMap 列表工具"""
+
+    def __init__(self, db=None):
+        self.k8s_client = _init_k8s_client(db)
+
+    async def execute(
+        self,
+        namespace: str = "default",
+        **kwargs
+    ) -> Dict[str, Any]:
+        """执行工具操作"""
+        _log_tool_start("get_configmaps", namespace=namespace)
+        try:
+            configmaps = self.k8s_client.core_v1.list_namespaced_config_map(namespace=namespace)
+
+            data = [
+                {
+                    "name": cm.metadata.name,
+                    "namespace": cm.metadata.namespace,
+                    "keys": list(cm.data.keys()) if cm.data else [],
+                    "created": cm.metadata.creation_timestamp.isoformat()
+                    if cm.metadata.creation_timestamp
+                    else None,
+                }
+                for cm in configmaps.items
+            ]
+
+            _log_tool_success("get_configmaps", len(data))
+            return tool_success_response(data, "get_configmaps", source="kubernetes-sdk")
+
+        except Exception as e:
+            return tool_error_response(
+                e, "get_configmaps",
+                context={"namespace": namespace}
+            )
+
+
 __all__ = [
     "GetPodsTool",
     "GetPodTool",
@@ -571,4 +623,5 @@ __all__ = [
     "GetNodesTool",
     "GetNamespacesTool",
     "GetEventsTool",
+    "GetConfigMapsTool",
 ]

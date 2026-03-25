@@ -2,6 +2,7 @@
 """用于指标采集的 Prometheus 客户端"""
 
 import logging
+import os
 from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
 import httpx
@@ -290,8 +291,6 @@ def get_prometheus_client(base_url: Optional[str] = None) -> PrometheusClient:
 
     if _prometheus_client is None:
         if base_url is None:
-            import os
-
             base_url = os.getenv("PROMETHEUS_URL", "http://prometheus:9090")
 
         _prometheus_client = PrometheusClient(base_url=base_url)

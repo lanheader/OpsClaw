@@ -7,6 +7,8 @@ https://open.feishu.cn/document/server-docs/event-subscription-guide/event-subsc
 """
 
 import asyncio
+import json
+import time
 from threading import Thread
 from typing import Optional
 
@@ -72,8 +74,6 @@ class FeishuLongConnClient:
                 content = message.content  # JSON 字符串
 
                 # 解析消息内容
-                import json
-
                 try:
                     content_obj = json.loads(content) if content else {}
 
@@ -192,7 +192,6 @@ class FeishuLongConnClient:
 
             # HACK: 替换 SDK 的全局 loop 变量
             import lark_oapi.ws.client as ws_client_module
-
             ws_client_module.loop = new_loop
 
             try:
@@ -288,7 +287,7 @@ if __name__ == "__main__":
     app_secret = os.getenv("FEISHU_APP_SECRET")
 
     if not app_id or not app_secret:
-        print("请设置环境变量: FEISHU_APP_ID, FEISHU_APP_SECRET")
+        logger.info("请设置环境变量: FEISHU_APP_ID, FEISHU_APP_SECRET")
         exit(1)
 
     client = start_feishu_longconn(app_id, app_secret)
@@ -296,8 +295,6 @@ if __name__ == "__main__":
     # 主线程阻塞，等待事件
     try:
         while True:
-            import time
-
             time.sleep(1)
     except KeyboardInterrupt:
         print("\n正在停止...")

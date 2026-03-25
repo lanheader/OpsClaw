@@ -9,7 +9,12 @@ from enum import Enum
 from typing import Dict, Any, Optional, List, Set, Callable
 from functools import wraps
 import traceback
+import re
+import inspect
+from typing import get_type_hints
 
+from langchain_core.tools import tool
+from pydantic import BaseModel, Field
 from app.utils.logger import get_logger, get_request_context
 
 logger = get_logger(__name__)
@@ -287,11 +292,6 @@ class BaseOpTool(ABC):
         if not cls._metadata:
             raise ValueError(f"Tool {cls.__name__} not registered")
 
-        from langchain_core.tools import tool
-        from pydantic import BaseModel, Field
-        import inspect
-        from typing import get_type_hints
-
         metadata = cls._metadata
 
         # ========== 提取 execute 方法的签名 ==========
@@ -425,7 +425,6 @@ def register_tool(
         if name.endswith("Tool"):
             name = name[:-4]
         # 转换为 snake_case
-        import re
         name = re.sub('(?<!^)(?=[A-Z])', '_', name).lower()
 
         # 创建元数据
@@ -444,7 +443,7 @@ def register_tool(
         # 设置类级别元数据
         cls._metadata = metadata
 
-        # 自动注册到工具注册表
+        # 自动注册到工具注册表（延迟导入避免循环依赖）
         from app.tools.registry import ToolRegistry
         ToolRegistry.register_tool_class(cls)
 

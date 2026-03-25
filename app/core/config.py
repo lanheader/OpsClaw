@@ -156,6 +156,13 @@ class Settings(BaseSettings):
     SUBAGENT_REPORT_MODEL: str = Field(default="glm-4", description="报告生成子智能体使用的模型")
     SUBAGENT_FORMAT_MODEL: str = Field(default="glm-4-flash", description="响应格式化子智能体使用的模型")
 
+    # ========== Mem0 记忆系统配置 ==========
+    MEM0_ENABLED: bool = Field(default=True, description="是否启用 Mem0 通用对话记忆")
+    MEM0_API_KEY: Optional[str] = Field(default=None, description="Mem0 Platform API Key（使用托管服务，留空则自托管）")
+    MEM0_PROVIDER: Optional[str] = Field(default=None, description="Mem0 使用的 LLM 提供商（留空则使用 DEFAULT_LLM_PROVIDER）")
+    MEM0_MODEL: Optional[str] = Field(default=None, description="Mem0 使用的模型（留空则使用对应 provider 的默认模型）")
+    MEM0_AUTO_LEARN: bool = Field(default=True, description="是否自动从对话中学习")
+
     def get_checkpoint_db_url(self) -> str:
         """返回 LangGraph checkpoint 使用的数据库 URL。"""
         if self.DATABASE_URL.startswith("sqlite:///"):
