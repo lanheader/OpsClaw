@@ -134,6 +134,10 @@ class FeishuLongConnClient:
             "message_type": message.message_type,
             "chat_id": message.chat_id,
             "content": message.content,
+            "root_id": getattr(message, "root_id", None),
+            "parent_id": getattr(message, "parent_id", None),
+            "thread_id": getattr(message, "thread_id", None),
+            "upper_message_id": getattr(message, "upper_message_id", None),
             "sender": {
                 "sender_id": {
                     "user_id": (

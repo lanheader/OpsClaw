@@ -19,6 +19,30 @@ from app.utils.logger import get_logger, get_request_context, log_tool_call
 logger = get_logger(__name__)
 
 
+def _extract_model_metadata(model: Any) -> tuple[str, str]:
+    """提取模型 provider / model 元数据，优先使用工厂注入的诊断字段。"""
+    provider = getattr(model, "_ops_provider", "unknown")
+    model_name = getattr(model, "_ops_model", None)
+
+    if not model_name:
+        model_name = getattr(model, "model_name", None) or getattr(model, "model", None) or "unknown"
+
+    if provider == "unknown":
+        class_name = type(model).__name__.lower()
+        if "openai" in class_name:
+            provider = "openai"
+        elif "anthropic" in class_name or "claude" in class_name:
+            provider = "claude"
+        elif "zhipu" in class_name:
+            provider = "zhipu"
+        elif "ollama" in class_name:
+            provider = "ollama"
+        elif "router" in class_name:
+            provider = "openrouter"
+
+    return str(provider), str(model_name)
+
+
 class LoggingMiddleware(AgentMiddleware):
     """日志中间件 - 记录模型调用、工具执行和耗时（支持请求追踪）"""
 
@@ -59,8 +83,10 @@ class LoggingMiddleware(AgentMiddleware):
             response = await handler(request)
         except Exception as exc:
             elapsed = time.time() - start
+            provider, model_name = _extract_model_metadata(request.model)
             logger.error(
-                f"❌ [{session_id}] [{agent_name}] LLM 调用失败 | 耗时={elapsed:.2f}s | {type(exc).__name__}: {exc}"
+                f"❌ [{session_id}] [{agent_name}] LLM 调用失败 | 耗时={elapsed:.2f}s | "
+                f"provider={provider} | model={model_name} | {type(exc).__name__}: {exc}"
             )
             raise
 
@@ -68,6 +94,7 @@ class LoggingMiddleware(AgentMiddleware):
         ai_msg = response.result[0] if response.result else None
         tool_calls = getattr(ai_msg, "tool_calls", []) if ai_msg else []
         content_preview = str(getattr(ai_msg, "content", ""))[:80] if ai_msg else ""
+        provider, model_name = _extract_model_metadata(request.model)
 
         if tool_calls:
             tools_info = ", ".join(
@@ -75,6 +102,11 @@ class LoggingMiddleware(AgentMiddleware):
             )
             logger.info(
                 f"✅ [{session_id}] [{agent_name}] LLM 完成 | 耗时={elapsed:.2f}s | 工具调用: {tools_info}"
+            )
+        elif not content_preview:
+            logger.error(
+                f"❌ [{session_id}] [{agent_name}] LLM 返回了空内容！ | 耗时={elapsed:.2f}s | "
+                f"provider={provider} | model={model_name} | content='' | tool_calls数量=0"
             )
         else:
             logger.info(

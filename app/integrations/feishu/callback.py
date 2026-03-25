@@ -793,6 +793,27 @@ def _extract_message_text(content: Any) -> str:
     return text.replace("@_user_1", "").replace("@Ops Agent", "").strip()
 
 
+def _extract_sent_message_ids(response: Dict[str, Any]) -> list[str]:
+    """从飞书 API 响应中提取发送的消息 ID 列表。"""
+    message_ids: list[str] = []
+    if not isinstance(response, dict):
+        return message_ids
+
+    # 检查响应是否成功
+    if response.get("code") != 0:
+        logger.warning(f"飞书 API 响应错误: {response.get('msg')}")
+        return message_ids
+
+    # 提取 message_id
+    data = response.get("data", {})
+    if isinstance(data, dict):
+        message_id = data.get("message_id")
+        if message_id:
+            message_ids.append(message_id)
+
+    return message_ids
+
+
 async def _fetch_sender_name(sender_id: str) -> Optional[str]:
     """获取飞书用户名称。"""
     try:
@@ -1030,6 +1051,7 @@ async def _process_normal_workflow(
         }
 
         all_replies: list[str] = []
+        all_reply_message_ids: list[str] = []
 
         # 诊断信息收集器
         diag_collector = {
@@ -1063,10 +1085,11 @@ async def _process_normal_workflow(
                 chat_id=chat_id,
                 session_id=session_id,
                 all_replies=all_replies,
+                all_reply_message_ids=all_reply_message_ids,
                 diag_collector=diag_collector,  # 传递诊断收集器
             )
             if event_result == "interrupted":
-                await _persist_assistant_reply(session_id, all_replies)
+                await _persist_assistant_reply(session_id, all_replies, all_reply_message_ids)
                 return
 
         logger.info(f"🏁 工作流执行完成，共 {event_count} 个事件，{len(all_replies)} 条回复")
@@ -1078,7 +1101,7 @@ async def _process_normal_workflow(
             if fallback_replies:
                 logger.info(f"💾 [后备回复] 使用 {len(fallback_replies)} 条后备回复")
                 for fallback in fallback_replies:
-                    await _send_text_reply(chat_id, fallback)
+                    all_reply_message_ids.extend(await _send_text_reply(chat_id, fallback) or [])
                     all_replies.append(fallback)
                 logger.info(f"✅ [后备回复] 已发送 {len(all_replies)} 条回复")
 
@@ -1090,7 +1113,7 @@ async def _process_normal_workflow(
             for i, reply in enumerate(all_replies, 1):
                 logger.info(f"   回复 #{i}: {reply[:100]}...")
 
-        await _persist_assistant_reply(session_id, all_replies)
+        await _persist_assistant_reply(session_id, all_replies, all_reply_message_ids)
     except NotImplementedError as exc:
         logger.error(f"❌ astream NotImplementedError: {exc}")
         traceback.print_exc()
@@ -1109,13 +1132,14 @@ async def _send_final_state_reply(
     chat_id: str,
     final_state: Dict[str, Any],
     all_replies: list[str],
+    all_reply_message_ids: list[str],
 ) -> None:
     """根据 complete 事件中的最终状态发送最终回复。"""
     response_to_send = final_state.get("formatted_response", "") or final_state.get(
         "final_report", ""
     )
     if response_to_send:
-        await _send_text_reply(chat_id, response_to_send)
+        all_reply_message_ids.extend(await _send_text_reply(chat_id, response_to_send) or [])
         all_replies.append(response_to_send)
         return
 
@@ -1125,7 +1149,7 @@ async def _send_final_state_reply(
         f"诊断轮次: {final_state.get('diagnosis_round', 0)}\n"
         f"数据充足: {'是' if final_state.get('data_sufficient') else '否'}\n"
     )
-    await _send_text_reply(chat_id, status_msg)
+    all_reply_message_ids.extend(await _send_text_reply(chat_id, status_msg) or [])
     all_replies.append(status_msg)
 
 
@@ -1134,16 +1158,20 @@ async def _handle_workflow_stream_event(
     chat_id: str,
     session_id: str,
     all_replies: list[str],
+    all_reply_message_ids: Optional[list[str]] = None,
     diag_collector: Optional[Dict[str, Any]] = None,
 ) -> Optional[Literal["completed", "interrupted"]]:
     """处理普通工作流中的单个流事件。"""
+    all_reply_message_ids = (
+        all_reply_message_ids if all_reply_message_ids is not None else []
+    )
     event_type = event.get("type")
     if event_type == "interrupt":
         interrupt_data = event.get("data", {})
         approval_message = interrupt_data.get("message", "")
         logger.info("⏸️ 工作流暂停，需要用户批准")
 
-        await _send_text_reply(chat_id, approval_message)
+        all_reply_message_ids.extend(await _send_text_reply(chat_id, approval_message) or [])
         all_replies.append(approval_message)
         SessionStateManager.set_awaiting_approval(
             session_id=session_id,
@@ -1164,13 +1192,17 @@ async def _handle_workflow_stream_event(
         final_state = ensure_final_report_in_state(event.get("state", {}))
         if diag_collector:
             diag_collector["final_state"] = final_state
-        await _send_final_state_reply(chat_id, final_state, all_replies)
+        await _send_final_state_reply(
+            chat_id, final_state, all_replies, all_reply_message_ids
+        )
         return "completed"
 
     if event_type == "error":
         error_msg = event.get("error", "未知错误")
         logger.error(f"❌ 工作流事件错误: {error_msg}")
-        await _send_text_reply(chat_id, f"工作流执行失败: {error_msg}")
+        all_reply_message_ids.extend(
+            await _send_text_reply(chat_id, f"工作流执行失败: {error_msg}") or []
+        )
         all_replies.append(f"工作流执行失败: {error_msg}")
         return None
 
@@ -1179,7 +1211,9 @@ async def _handle_workflow_stream_event(
 
         if node_name == "__interrupt__":
             logger.warning(f"⏸️ 工作流被中断: {state_update}")
-            await _send_text_reply(chat_id, INTERRUPT_PLACEHOLDER_MESSAGE)
+            all_reply_message_ids.extend(
+                await _send_text_reply(chat_id, INTERRUPT_PLACEHOLDER_MESSAGE) or []
+            )
             continue
 
         actual_update = unwrap_overwrite(state_update)
@@ -1188,7 +1222,14 @@ async def _handle_workflow_stream_event(
             continue
 
         # 收集后备回复
-        fallback_reply = await _process_message_update(actual_update["messages"], chat_id, all_replies, diag_collector)
+        fallback_reply = await _process_message_update(
+            actual_update["messages"],
+            session_id,
+            chat_id,
+            all_replies,
+            all_reply_message_ids,
+            diag_collector,
+        )
         if fallback_reply and diag_collector is not None:
             if "fallback_replies" not in diag_collector:
                 diag_collector["fallback_replies"] = []
@@ -1199,8 +1240,10 @@ async def _handle_workflow_stream_event(
 
 async def _process_message_update(
     raw_messages: Any,
+    session_id: str,
     chat_id: str,
     all_replies: list[str],
+    all_reply_message_ids: list[str],
     diag_collector: Optional[Dict[str, Any]] = None,
 ) -> Optional[str]:
     """
@@ -1219,13 +1262,6 @@ async def _process_message_update(
         logger.warning(f"⚠️ [消息处理] 消息为空或不是列表")
         return
 
-    # 通过 external_chat_id 找到对应的 session_id
-    session = SessionStateManager.get_session_by_external_chat_id(chat_id)
-    if not session:
-        logger.warning(f"⚠️ [消息处理] 未找到会话: {chat_id}")
-        return
-
-    session_id = session.session_id
     last_processed = SessionStateManager.get_last_processed_message_index(session_id)
 
     # 只处理新增的消息（索引 > last_processed）
@@ -1320,7 +1356,9 @@ async def _process_message_update(
                     "content_preview": str(content)[:200],
                 })
 
-            await _send_formatted_result(chat_id, content, all_replies)
+            all_reply_message_ids.extend(
+                await _send_formatted_result(chat_id, content, all_replies) or []
+            )
 
         # 处理 ToolMessage（工具返回结果）
         elif isinstance(message, ToolMessage):
@@ -1376,7 +1414,7 @@ async def _send_formatted_result(
     chat_id: str,
     content: str,
     all_replies: list[str],
-) -> None:
+) -> list[str]:
     """根据格式化结果发送卡片或文本消息。"""
     formatted_result = await format_tool_output(content)
     logger.info(f"📍 格式化结果类型: {type(formatted_result)}")
@@ -1391,13 +1429,13 @@ async def _send_formatted_result(
     }:
         logger.info("📤 准备发送飞书卡片")
         client = get_feishu_client()
-        await client.send_card_message(chat_id, formatted_result["card"])
+        response = await client.send_card_message(chat_id, formatted_result["card"])
 
         # 将卡片转换为可读文本保存到数据库
         readable_text = _convert_card_to_readable_text(formatted_result["card"])
         all_replies.append(readable_text)
         logger.info("✅ 已发送飞书卡片")
-        return
+        return _extract_sent_message_ids(response)
 
     text_content = (
         formatted_result.get("text", "")
@@ -1405,12 +1443,17 @@ async def _send_formatted_result(
         else str(formatted_result)
     )
     logger.info(f"📤 准备发送文本消息: {text_content[:100]}")
-    await _send_text_reply(chat_id, text_content)
+    message_ids = await _send_text_reply(chat_id, text_content)
     all_replies.append(text_content)
     logger.info("✅ 已发送文本回复")
+    return message_ids
 
 
-async def _persist_assistant_reply(session_id: Optional[str], replies: list[str]) -> None:
+async def _persist_assistant_reply(
+    session_id: Optional[str],
+    replies: list[str],
+    reply_message_ids: Optional[list[str]] = None,
+) -> None:
     """保存助手回复到数据库。"""
     if not session_id or not replies:
         return
@@ -1418,7 +1461,19 @@ async def _persist_assistant_reply(session_id: Optional[str], replies: list[str]
     db = SessionLocal()
     try:
         combined_reply = "\n\n".join(replies)
-        save_feishu_message(db, session_id, MessageRole.ASSISTANT, combined_reply)
+        meta_data = None
+        if reply_message_ids:
+            meta_data = json.dumps(
+                {"feishu_message_ids": list(dict.fromkeys(reply_message_ids))},
+                ensure_ascii=False,
+            )
+        save_feishu_message(
+            db,
+            session_id,
+            MessageRole.ASSISTANT,
+            combined_reply,
+            meta_data=meta_data,
+        )
         logger.info("✅ 已保存飞书AI回复到数据库")
     except Exception as exc:
         logger.error(f"❌ 保存飞书AI回复失败: {exc}")
@@ -1445,27 +1500,31 @@ async def _send_help_message(chat_id: str) -> None:
     await _send_text_reply(chat_id, format_help_message())
 
 
-async def _send_text_reply(chat_id: str, text: str) -> None:
+async def _send_text_reply(chat_id: str, text: str) -> list[str]:
     """发送文本回复，自动处理长消息分段。"""
+    message_ids: list[str] = []
     try:
         client = get_feishu_client()
 
         if len(text) <= MAX_FEISHU_MESSAGE_LENGTH:
-            await client.send_text_message(chat_id, text)
+            response = await client.send_text_message(chat_id, text)
+            message_ids.extend(_extract_sent_message_ids(response))
             logger.info(f"✅ 已发送回复到 {chat_id} (长度: {len(text)})")
-            return
+            return message_ids
 
         logger.warning(f"⚠️ 消息过长 ({len(text)} 字符)，将分段发送")
         parts = _split_long_text(text, MAX_FEISHU_MESSAGE_LENGTH)
 
         for index, part in enumerate(parts, 1):
             header = f"📄 **消息 {index}/{len(parts)}**\n\n" if len(parts) > 1 else ""
-            await client.send_text_message(chat_id, header + part)
+            response = await client.send_text_message(chat_id, header + part)
+            message_ids.extend(_extract_sent_message_ids(response))
             logger.info(f"✅ 已发送第 {index}/{len(parts)} 部分到 {chat_id} (长度: {len(part)})")
             if index < len(parts):
                 await asyncio.sleep(0.5)
     except Exception as exc:
         logger.exception(f"发送回复失败: {exc}")
+    return message_ids
 
 
 def _split_long_text(text: str, max_length: int) -> list[str]:
@@ -1554,18 +1613,20 @@ async def _handle_approval_response(
         }
 
         all_replies: list[str] = []
+        all_reply_message_ids: list[str] = []
         async for event in agent.astream(resume_state):
             event_result = await _handle_workflow_stream_event(
                 event=event,
                 chat_id=chat_id,
                 session_id=session_id,
                 all_replies=all_replies,
+                all_reply_message_ids=all_reply_message_ids,
             )
             if event_result == "interrupted":
-                await _persist_assistant_reply(session_id, all_replies)
+                await _persist_assistant_reply(session_id, all_replies, all_reply_message_ids)
                 return "interrupted"
 
-        await _persist_assistant_reply(session_id, all_replies)
+        await _persist_assistant_reply(session_id, all_replies, all_reply_message_ids)
         return "completed"
     except Exception as exc:
         logger.error(f"❌ 处理批准响应失败: {exc}", exc_info=True)
