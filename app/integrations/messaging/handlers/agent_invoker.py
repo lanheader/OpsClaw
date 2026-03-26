@@ -151,7 +151,12 @@ class AgentInvoker:
 
             # 5. 空回复兜底
             if not replies:
-                fallback = "⚠️ Agent 未能生成有效回复，请稍后重试或换一种方式提问。"
+                fallback = (
+                    "⚠️ 本次未能生成回复，可能原因：\n"
+                    "- 对话上下文过长，模型处理超限\n"
+                    "- 模型暂时无响应\n\n"
+                    "建议：发送 /new 开启新会话后重试。"
+                )
                 await self._send_reply(context.chat_id, fallback)
                 logger.warning(f"⚠️ 所有尝试均未产生有效回复: session={context.session_id}")
 

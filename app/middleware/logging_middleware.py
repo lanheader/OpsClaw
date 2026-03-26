@@ -93,7 +93,16 @@ class LoggingMiddleware(AgentMiddleware):
         elapsed = time.time() - start
         ai_msg = response.result[0] if response.result else None
         tool_calls = getattr(ai_msg, "tool_calls", []) if ai_msg else []
-        content_preview = str(getattr(ai_msg, "content", ""))[:80] if ai_msg else ""
+        raw_content = getattr(ai_msg, "content", "") if ai_msg else ""
+        # content 可能是 list（多模态）或 str
+        if isinstance(raw_content, list):
+            content_text = " ".join(
+                item.get("text", "") if isinstance(item, dict) else str(item)
+                for item in raw_content
+            ).strip()
+        else:
+            content_text = str(raw_content).strip()
+        content_preview = content_text[:80]
         provider, model_name = _extract_model_metadata(request.model)
 
         if tool_calls:
@@ -103,10 +112,11 @@ class LoggingMiddleware(AgentMiddleware):
             logger.info(
                 f"✅ [{session_id}] [{agent_name}] LLM 完成 | 耗时={elapsed:.2f}s | 工具调用: {tools_info}"
             )
-        elif not content_preview:
+        elif not content_text:
             logger.error(
                 f"❌ [{session_id}] [{agent_name}] LLM 返回了空内容！ | 耗时={elapsed:.2f}s | "
-                f"provider={provider} | model={model_name} | content='' | tool_calls数量=0"
+                f"provider={provider} | model={model_name} | 消息数={msg_count} | "
+                f"可能原因: 上下文过长或模型超时"
             )
         else:
             logger.info(

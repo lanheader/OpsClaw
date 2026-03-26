@@ -1139,30 +1139,30 @@ class DescribePodTool(BaseOpTool):
                 # 获取容器状态
                 for status in (pod.status.container_statuses or []):
                     if status.name == container.name:
+                        s = status.state  # V1ContainerState
                         container_info["state"] = {
-                            "state": status.state,
                             "running": {
-                                "started_at": status.running.started_at.isoformat()
-                                if status.running and status.running.started_at
+                                "started_at": s.running.started_at.isoformat()
+                                if s and s.running and s.running.started_at
                                 else None,
                             }
-                            if status.running else {},
+                            if (s and s.running) else {},
                             "terminated": {
-                                "exit_code": status.terminated.exit_code,
-                                "finished_at": status.terminated.finished_at.isoformat()
-                                if status.terminated and status.terminated.finished_at
+                                "exit_code": s.terminated.exit_code,
+                                "finished_at": s.terminated.finished_at.isoformat()
+                                if s.terminated and s.terminated.finished_at
                                 else None,
-                                "reason": status.terminated.reason,
-                                "message": status.terminated.message,
+                                "reason": s.terminated.reason,
+                                "message": s.terminated.message,
                             }
-                            if status.terminated else {},
+                            if (s and s.terminated) else {},
                             "waiting": {
-                                "reason": status.waiting.reason,
-                                "message": status.waiting.message,
+                                "reason": s.waiting.reason,
+                                "message": s.waiting.message,
                             }
-                            if status.waiting else {},
+                            if (s and s.waiting) else {},
                         }
-                        if status.state == "running":
+                        if s and s.running:
                             container_info["ready"] = status.ready
                         container_info["restart_count"] = status.restart_count
                         break
