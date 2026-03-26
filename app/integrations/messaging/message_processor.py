@@ -102,6 +102,13 @@ class MessageProcessor:
             # 设置原始消息ID（用于添加表情回复）
             context.message_id = message.message_id
 
+            # 立即添加 THUMBSUP 表情，表示消息已收到
+            if message.message_id:
+                try:
+                    await self.channel.add_reaction(message.message_id, "THUMBSUP")
+                except Exception:
+                    pass
+
             # 3. 处理特殊命令
             if await self.command_handler.handle_command(message.text, context):
                 return

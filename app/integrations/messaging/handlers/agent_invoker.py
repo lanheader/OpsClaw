@@ -18,6 +18,8 @@ from app.deepagents.main_agent import get_thread_config
 from app.utils.llm_helper import ensure_final_report_in_state
 from app.memory.memory_manager import get_memory_manager
 from app.integrations.messaging.base_channel import ChannelContext, MessageType, OutgoingMessage
+from app.integrations.feishu.message import build_formatted_reply_card
+from app.integrations.feishu.message_formatter import clean_xml_tags
 
 logger = get_logger(__name__)
 
@@ -162,15 +164,7 @@ class AgentInvoker:
 
             logger.info(f"✅ Agent 调用完成: session={context.session_id}, replies={len(replies)}")
 
-            # 6. 添加 THUMBSUP 表情
-            if replies and context.message_id:
-                try:
-                    await self.channel.add_reaction(context.message_id, "THUMBSUP")
-                    logger.debug(f"已添加 OK 表情回复: message_id={context.message_id}")
-                except Exception as e:
-                    logger.debug(f"添加表情回复失败: {e}")
-
-            # 7. 自动学习（对齐 chat.py）
+            # 6. 自动学习（对齐 chat.py）
             if replies and memory_manager:
                 try:
                     await memory_manager.auto_learn_from_result(
@@ -208,12 +202,14 @@ class AgentInvoker:
         return f"你的回复不够完整，请重新分析并给出更详细的回答：{original_text}"
 
     async def _send_reply(self, chat_id: str, content: str) -> None:
-        """发送回复消息"""
+        """发送回复消息（卡片格式，支持 Markdown 渲染）"""
         try:
+            cleaned = clean_xml_tags(content)
+            card = build_formatted_reply_card(content=cleaned)
             outgoing = OutgoingMessage(
                 chat_id=chat_id,
-                message_type=MessageType.TEXT,
-                content={"text": content},
+                message_type=MessageType.CARD,
+                content=card,
             )
             await self.channel.send_message(outgoing)
         except Exception as e:
