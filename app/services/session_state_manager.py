@@ -244,8 +244,10 @@ class SessionStateManager:
                 logger.error(f"会话不存在: {session_id}")
                 return False
 
-            # 只更新为更大的索引（避免并发问题导致回退）
-            if index > (session.last_processed_message_index or -1):
+            # ✅ 修复：允许更新为相同或更大的索引
+            # 原因：工作流最后一条消息的索引可能等于 last_processed
+            # 之前的条件 (>) 会导致最后一条消息被跳过
+            if index >= (session.last_processed_message_index or -1):
                 session.last_processed_message_index = index
                 db.commit()
                 logger.debug(f"会话 {session_id} 已处理消息索引更新为 {index}")
