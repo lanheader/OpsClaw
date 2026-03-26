@@ -43,6 +43,16 @@ from app.deepagents.main_agent import get_ops_agent_enhanced
 
 logger = get_logger(__name__)
 
+# 🔒 会话并发锁（防止同一会话并发处理）
+_session_locks: Dict[str, asyncio.Lock] = {}
+
+
+def get_session_lock(session_id: str) -> asyncio.Lock:
+    """获取会话专属锁"""
+    if session_id not in _session_locks:
+        _session_locks[session_id] = asyncio.Lock()
+    return _session_locks[session_id]
+
 
 def _convert_card_to_readable_text(card: Dict[str, Any]) -> str:
     """
@@ -937,11 +947,20 @@ async def _process_normal_workflow(
     chat_id: str, session_id: str, text: str, sender_id: str
 ) -> None:
     """处理普通查询/执行类工作流。"""
-    logger.info(f"📝 会话 {session_id} 处于正常状态，开始执行工作流")
+    # 🔒 获取会话锁，防止并发处理
+    session_lock = get_session_lock(session_id)
+    
+    # 检查锁是否已被占用
+    if session_lock.locked():
+        logger.warning(f"⚠️ 会话 {session_id} 正在处理中，跳过并发请求")
+        return
+    
+    async with session_lock:
+        logger.info(f"📝 会话 {session_id} 处于正常状态，开始执行工作流（已获取锁）")
 
-    # 注意：不再需要手动加载历史消息
-    # LangGraph 的 SQLite checkpointer 会自动通过 thread_id 恢复会话状态
-    logger.info(f"📚 使用 LangGraph checkpointer 自动恢复会话状态（thread_id={session_id}）")
+        # 注意：不再需要手动加载历史消息
+        # LangGraph 的 SQLite checkpointer 会自动通过 thread_id 恢复会话状态
+        logger.info(f"📚 使用 LangGraph checkpointer 自动恢复会话状态（thread_id={session_id}）")
 
     try:
         # 获取用户权限
