@@ -62,6 +62,7 @@ from app.api.v2 import chat
 from app.api.v2 import inspection
 from app.api.v2 import workflow
 from app.api.v2 import knowledge_base
+from app.api.v2 import messaging
 from app.core.llm_factory import LLMFactory
 from app.deepagents.main_agent import get_ops_agent as _init_ops_agent
 from app.utils.logger import RequestContextFilter, ContextFormatter
@@ -307,6 +308,18 @@ app.include_router(chat.router, prefix="/api")
 app.include_router(inspection.router, prefix="/api/v2")
 app.include_router(alert.router, prefix="/api/v2")
 app.include_router(knowledge_base.router, prefix="/api")  # 新增：知识库管理
+
+# 统一消息 API（新架构）
+if get_settings().USE_NEW_MESSAGING_ARCH:
+    try:
+        from app.integrations.messaging.registry import initialize_channels
+        initialize_channels()  # 初始化渠道适配器
+        app.include_router(messaging.router, prefix="/api/v2/messaging")
+        logger.info("✅ 新消息架构已启用")
+    except Exception as e:
+        logger.warning(f"⚠️ 新消息架构初始化失败: {e}，回退到旧架构")
+
+# 飞书 API（兼容层，重定向到新架构）
 app.include_router(feishu.router, prefix="/api/v1")
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(users.router, prefix="/api/v1")

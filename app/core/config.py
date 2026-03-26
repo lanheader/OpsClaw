@@ -102,6 +102,12 @@ class Settings(BaseSettings):
         default=0.5, ge=0.0, le=1.0, description="意图相关性阈值 (0-1)，高于此值才会响应"
     )
 
+    # ========== 消息渠道架构配置 ==========
+    USE_NEW_MESSAGING_ARCH: bool = Field(
+        default=False,
+        description="是否使用新的消息渠道抽象架构（True=新架构, False=旧 callback.py）"
+    )
+
     # ========== Prometheus ==========
     PROMETHEUS_ENABLED: bool = False
     PROMETHEUS_URL: Optional[str] = None

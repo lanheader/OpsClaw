@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.models.permission import Permission
 from app.models.role_permission import RolePermission
 from app.models.user_role import UserRole
+from app.models.user import User
 from app.core.deps import get_current_user
 from app.models.database import get_db, SessionLocal
 
@@ -88,7 +89,6 @@ def is_admin(db: Session, user_id: int) -> bool:
     Returns:
         bool: 是否是管理员
     """
-    from app.models.user import User
     user = db.query(User).filter(User.id == user_id).first()
     return user is not None and user.is_superuser
 

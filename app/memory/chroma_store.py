@@ -100,16 +100,43 @@ class ChromaVectorStore:
 
     @property
     def embedding_function(self):
-        """延迟加载 embedding 函数"""
+        """延迟加载 embedding 函数，优先使用 Ollama 本地 embedding"""
         if self._embedding_function is None:
-            # 使用 OpenAI 的 embedding 函数
             settings = get_settings()
-            self._embedding_function = embedding_functions.OpenAIEmbeddingFunction(
-                api_key=settings.OPENAI_API_KEY,
-                model_name="text-embedding-3-small",
-                openai_api_base=settings.OPENAI_BASE_URL
-            )
-            logger.info("🔑 初始化 OpenAI Embedding 函数")
+            ollama_base = settings.OLLAMA_BASE_URL.rstrip("/")
+
+            # 优先：Ollama 本地 embedding（不依赖外部服务）
+            try:
+                import httpx
+                resp = httpx.get(f"{ollama_base}/api/tags", timeout=2)
+                models = [m["name"] for m in resp.json().get("models", [])]
+                embed_model = next(
+                    (m for m in models if any(k in m for k in ["nomic-embed", "bge-m3", "embed"])),
+                    None,
+                )
+                if embed_model:
+                    self._embedding_function = embedding_functions.OllamaEmbeddingFunction(
+                        url=f"{ollama_base}/api/embeddings",
+                        model_name=embed_model,
+                    )
+                    logger.info(f"🔑 ChromaDB 使用 Ollama Embedding: {embed_model}")
+                    return self._embedding_function
+            except Exception as e:
+                logger.debug(f"Ollama embedding 不可用: {e}")
+
+            # 降级：OpenAI embedding
+            if settings.OPENAI_API_KEY:
+                self._embedding_function = embedding_functions.OpenAIEmbeddingFunction(
+                    api_key=settings.OPENAI_API_KEY,
+                    model_name="text-embedding-3-small",
+                    openai_api_base=settings.OPENAI_BASE_URL,
+                )
+                logger.info("🔑 ChromaDB 使用 OpenAI Embedding")
+            else:
+                # 最终降级：ChromaDB 默认 embedding（sentence-transformers，纯本地）
+                self._embedding_function = embedding_functions.DefaultEmbeddingFunction()
+                logger.info("🔑 ChromaDB 使用默认 Embedding (sentence-transformers)")
+
         return self._embedding_function
 
     async def store_incident(
@@ -448,7 +475,7 @@ class ChromaVectorStore:
                 query=query,
                 session_id=session_id,
                 top_k=top_k,
-                threshold=threshold
+                importance_threshold=threshold
             )
             return results
 

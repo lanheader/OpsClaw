@@ -246,6 +246,12 @@ class FeishuClient:
 
         try:
             response = await self._client.post(url, headers=headers, json=payload)
+
+            # 检查响应状态
+            if response.status_code != 200:
+                logger.error(f"Failed to add reaction: HTTP {response.status_code} - {response.text[:100]}")
+                return {"code": -1, "msg": f"HTTP {response.status_code}"}
+
             data = response.json()
 
             if data.get("code") != 0:
