@@ -10,6 +10,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from typing import Any, Dict, Optional, List, cast
 import logging
+import httpx
 
 from app.core.config import Settings, get_settings
 
@@ -461,5 +462,4 @@ __all__ = [
     "reset_llm",
     "get_llm",
     "MockEmbeddings",
-    "create_embeddings",
 ]

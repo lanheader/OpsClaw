@@ -5,7 +5,8 @@ K8s 读操作工具（新架构）
 直接使用 Kubernetes SDK，不使用 CLI 降级。
 """
 
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
+from datetime import datetime, timedelta
 
 from app.integrations.kubernetes.client import create_client
 
@@ -624,4 +625,670 @@ __all__ = [
     "GetNamespacesTool",
     "GetEventsTool",
     "GetConfigMapsTool",
+    "GetSecretsTool",
+    "GetStatefulSetsTool",
+    "GetDaemonSetsTool",
+    "GetIngressTool",
+    "GetPVsTool",
+    "GetPVCsTool",
+    "GetResourceQuotasTool",
+    "DescribePodTool",
+    "DescribeNodeTool",
 ]
+
+
+# ==================== Secret 操作 ====================
+
+@register_tool(
+    group="k8s.read",
+    operation_type=OperationType.READ,
+    risk_level=RiskLevel.MEDIUM,
+    permissions=["k8s.view"],
+    description="获取 Kubernetes Secret 列表",
+    examples=[
+        "get_secrets(namespace='default')",
+        "get_secrets(namespace='kube-system')",
+    ],
+)
+class GetSecretsTool(BaseOpTool):
+    """获取 Secret 列表工具（敏感信息，需谨慎）"""
+
+    def __init__(self, db=None):
+        self.k8s_client = _init_k8s_client(db)
+
+    async def execute(
+        self,
+        namespace: str = "default",
+        **kwargs
+    ) -> Dict[str, Any]:
+        """执行工具操作"""
+        _log_tool_start("get_secrets", namespace=namespace)
+        try:
+            secrets = self.k8s_client.core_v1.list_namespaced_secret(namespace=namespace)
+
+            data = [
+                {
+                    "name": secret.metadata.name,
+                    "namespace": secret.metadata.namespace,
+                    "type": secret.type,
+                    "keys": list(secret.data.keys()) if secret.data else [],
+                    "created": secret.metadata.creation_timestamp.isoformat()
+                    if secret.metadata.creation_timestamp
+                    else None,
+                }
+                for secret in secrets.items
+            ]
+
+            _log_tool_success("get_secrets", len(data))
+            return tool_success_response(data, "get_secrets", source="kubernetes-sdk")
+
+        except Exception as e:
+            return tool_error_response(
+                e, "get_secrets",
+                context={"namespace": namespace}
+            )
+
+
+# ==================== StatefulSet 操作 ====================
+
+@register_tool(
+    group="k8s.read",
+    operation_type=OperationType.READ,
+    risk_level=RiskLevel.LOW,
+    permissions=["k8s.view"],
+    description="获取 Kubernetes StatefulSet 列表",
+    examples=[
+        "get_statefulsets(namespace='default')",
+        "get_statefulsets(namespace='production')",
+    ],
+)
+class GetStatefulSetsTool(BaseOpTool):
+    """获取 StatefulSet 列表工具"""
+
+    def __init__(self, db=None):
+        self.k8s_client = _init_k8s_client(db)
+
+    async def execute(
+        self,
+        namespace: str = "default",
+        **kwargs
+    ) -> Dict[str, Any]:
+        """执行工具操作"""
+        _log_tool_start("get_statefulsets", namespace=namespace)
+        try:
+            statefulsets = self.k8s_client.apps_v1.list_namespaced_stateful_set(namespace=namespace)
+
+            data = [
+                {
+                    "name": sts.metadata.name,
+                    "namespace": sts.metadata.namespace,
+                    "replicas": sts.spec.replicas,
+                    "ready_replicas": (
+                        sts.status.ready_replicas
+                        if sts.status.ready_replicas
+                        else 0
+                    ),
+                    "current_replicas": (
+                        sts.status.current_replicas
+                        if sts.status.current_replicas
+                        else 0
+                    ),
+                    "service_name": sts.spec.service_name,
+                }
+                for sts in statefulsets.items
+            ]
+
+            _log_tool_success("get_statefulsets", len(data))
+            return tool_success_response(data, "get_statefulsets", source="kubernetes-sdk")
+
+        except Exception as e:
+            return tool_error_response(
+                e, "get_statefulsets",
+                context={"namespace": namespace}
+            )
+
+
+# ==================== DaemonSet 操作 ====================
+
+@register_tool(
+    group="k8s.read",
+    operation_type=OperationType.READ,
+    risk_level=RiskLevel.LOW,
+    permissions=["k8s.view"],
+    description="获取 Kubernetes DaemonSet 列表",
+    examples=[
+        "get_daemonsets(namespace='kube-system')",
+        "get_daemonsets(namespace='monitoring')",
+    ],
+)
+class GetDaemonSetsTool(BaseOpTool):
+    """获取 DaemonSet 列表工具"""
+
+    def __init__(self, db=None):
+        self.k8s_client = _init_k8s_client(db)
+
+    async def execute(
+        self,
+        namespace: str = "default",
+        **kwargs
+    ) -> Dict[str, Any]:
+        """执行工具操作"""
+        _log_tool_start("get_daemonsets", namespace=namespace)
+        try:
+            daemonsets = self.k8s_client.apps_v1.list_namespaced_daemon_set(namespace=namespace)
+
+            data = [
+                {
+                    "name": ds.metadata.name,
+                    "namespace": ds.metadata.namespace,
+                    "current_number_scheduled": (
+                        ds.status.current_number_scheduled
+                        if ds.status.current_number_scheduled
+                        else 0
+                    ),
+                    "desired_number_scheduled": ds.spec.desired_number_scheduled,
+                    "number_ready": (
+                        ds.status.number_ready
+                        if ds.status.number_ready
+                        else 0
+                    ),
+                    "number_misscheduled": (
+                        ds.status.number_misscheduled
+                        if ds.status.number_misscheduled
+                        else 0
+                    ),
+                }
+                for ds in daemonsets.items
+            ]
+
+            _log_tool_success("get_daemonsets", len(data))
+            return tool_success_response(data, "get_daemonsets", source="kubernetes-sdk")
+
+        except Exception as e:
+            return tool_error_response(
+                e, "get_daemonsets",
+                context={"namespace": namespace}
+            )
+
+
+# ==================== Ingress 操作 ====================
+
+@register_tool(
+    group="k8s.read",
+    operation_type=OperationType.READ,
+    risk_level=RiskLevel.LOW,
+    permissions=["k8s.view"],
+    description="获取 Kubernetes Ingress 列表",
+    examples=[
+        "get_ingress(namespace='ingress-nginx')",
+        "get_ingress(namespace='production')",
+    ],
+)
+class GetIngressTool(BaseOpTool):
+    """获取 Ingress 列表工具"""
+
+    def __init__(self, db=None):
+        self.k8s_client = _init_k8s_client(db)
+
+    async def execute(
+        self,
+        namespace: str = "default",
+        **kwargs
+    ) -> Dict[str, Any]:
+        """执行工具操作"""
+        _log_tool_start("get_ingress", namespace=namespace)
+        try:
+            # 尝试使用 networking.k8s.io/v1 API
+            try:
+                ingresses = self.k8s_client.networking_v1.list_namespaced_ingress(namespace=namespace)
+            except AttributeError:
+                # 降级到 extensions/v1beta1 API
+                ingresses = self.k8s_client.extensions_v1beta1.list_namespaced_ingress(namespace=namespace)
+
+            data = [
+                {
+                    "name": ing.metadata.name,
+                    "namespace": ing.metadata.namespace,
+                    "hosts": [
+                        host.host for host in (ing.spec.rules or [])
+                        for host in (host.host or [])
+                    ],
+                    "class_name": ing.metadata.annotations.get("nginx.ingress.kubernetes.io/ingress.class", ""),
+                    "created": ing.metadata.creation_timestamp.isoformat()
+                    if ing.metadata.creation_timestamp
+                    else None,
+                }
+                for ing in ingresses.items
+            ]
+
+            _log_tool_success("get_ingress", len(data))
+            return tool_success_response(data, "get_ingress", source="kubernetes-sdk")
+
+        except Exception as e:
+            return tool_error_response(
+                e, "get_ingress",
+                context={"namespace": namespace},
+                suggestion="请确认集群中安装了 Ingress Controller"
+            )
+
+
+# ==================== PV 操作 ====================
+
+@register_tool(
+    group="k8s.read",
+    operation_type=OperationType.READ,
+    risk_level=RiskLevel.LOW,
+    permissions=["k8s.view"],
+    description="获取 PersistentVolume 列表",
+    examples=[
+        "get_pvs()",
+    ],
+)
+class GetPVsTool(BaseOpTool):
+    """获取 PersistentVolume 列表工具"""
+
+    def __init__(self, db=None):
+        self.k8s_client = _init_k8s_client(db)
+
+    async def execute(self, **kwargs) -> Dict[str, Any]:
+        """执行工具操作"""
+        _log_tool_start("get_pvs")
+        try:
+            pvs = self.k8s_client.core_v1.list_persistent_volume()
+
+            data = [
+                {
+                    "name": pv.metadata.name,
+                    "capacity": pv.spec.capacity.get("storage", ""),
+                    "access_modes": pv.spec.access_modes or [],
+                    "persistent_volume_ref": pv.spec.persistent_volume_ref,
+                    "status": pv.status.phase,
+                    "reason": pv.status.reason,
+                }
+                for pv in pvs.items
+            ]
+
+            _log_tool_success("get_pvs", len(data))
+            return tool_success_response(data, "get_pvs", source="kubernetes-sdk")
+
+        except Exception as e:
+            return tool_error_response(e, "get_pvs")
+
+
+# ==================== PVC 操作 ====================
+
+@register_tool(
+    group="k8s.read",
+    operation_type=OperationType.READ,
+    risk_level=RiskLevel.LOW,
+    permissions=["k8s.view"],
+    description="获取 PersistentVolumeClaim 列表",
+    examples=[
+        "get_pvcs(namespace='default')",
+        "get_pvcs(namespace='production')",
+    ],
+)
+class GetPVCsTool(BaseOpTool):
+    """获取 PersistentVolumeClaim 列表工具"""
+
+    def __init__(self, db=None):
+        self.k8s_client = _init_k8s_client(db)
+
+    async def execute(
+        self,
+        namespace: str = "default",
+        **kwargs
+    ) -> Dict[str, Any]:
+        """执行工具操作"""
+        _log_tool_start("get_pvcs", namespace=namespace)
+        try:
+            pvcs = self.k8s_client.core_v1.list_namespaced_persistent_volume_claim(namespace=namespace)
+
+            data = [
+                {
+                    "name": pvc.metadata.name,
+                    "namespace": pvc.metadata.namespace,
+                    "status": pvc.status.phase,
+                    "capacity": pvc.spec.resources.requests.get("storage", ""),
+                    "access_modes": pvc.spec.access_modes or [],
+                    "volume_name": pvc.spec.volume_name,
+                }
+                for pvc in pvcs.items
+            ]
+
+            _log_tool_success("get_pvcs", len(data))
+            return tool_success_response(data, "get_pvcs", source="kubernetes-sdk")
+
+        except Exception as e:
+            return tool_error_response(
+                e, "get_pvcs",
+                context={"namespace": namespace}
+            )
+
+
+# ==================== ResourceQuota 操作 ====================
+
+@register_tool(
+    group="k8s.read",
+    operation_type=OperationType.READ,
+    risk_level=RiskLevel.LOW,
+    permissions=["k8s.view"],
+    description="获取 ResourceQuota 列表",
+    examples=[
+        "get_resourcequotas(namespace='default')",
+    ],
+)
+class GetResourceQuotasTool(BaseOpTool):
+    """获取 ResourceQuota 列表工具"""
+
+    def __init__(self, db=None):
+        self.k8s_client = _init_k8s_client(db)
+
+    async def execute(
+        self,
+        namespace: str = "default",
+        **kwargs
+    ) -> Dict[str, Any]:
+        """执行工具操作"""
+        _log_tool_start("get_resourcequotas", namespace=namespace)
+        try:
+            quotas = self.k8s_client.core_v1.list_namespaced_resource_quota(namespace=namespace)
+
+            data = [
+                {
+                    "name": quota.metadata.name,
+                    "namespace": quota.metadata.namespace,
+                    "created": quota.metadata.creation_timestamp.isoformat()
+                    if quota.metadata.creation_timestamp
+                    else None,
+                    "scopes": quota.spec.scopes or [],
+                    "hard": {
+                        resource: str(limit) if limit else "0"
+                        for resource, limit in (quota.spec.hard or {}).items()
+                    },
+                    "used": {
+                        resource: str(used) if used else "0"
+                        for resource, used in (quota.status.used or {}).items()
+                    },
+                }
+                for quota in quotas.items
+            ]
+
+            _log_tool_success("get_resourcequotas", len(data))
+            return tool_success_response(data, "get_resourcequotas", source="kubernetes-sdk")
+
+        except Exception as e:
+            return tool_error_response(
+                e, "get_resourcequotas",
+                context={"namespace": namespace}
+            )
+
+
+# ==================== Describe 操作 ====================
+
+@register_tool(
+    group="k8s.read",
+    operation_type=OperationType.READ,
+    risk_level=RiskLevel.LOW,
+    permissions=["k8s.view"],
+    description="获取 Pod 详细描述信息（类似 kubectl describe pod）",
+    examples=[
+        "describe_pod(name='nginx-pod', namespace='default')",
+        "describe_pod(name='my-app-abc123', namespace='production')",
+    ],
+)
+class DescribePodTool(BaseOpTool):
+    """
+    获取 Pod 详细描述信息工具
+
+    提供类似于 `kubectl describe pod` 的详细信息，包括：
+    - 状态信息
+    - 容器状态
+    - 最近事件
+    - 资源使用
+    """
+
+    def __init__(self, db=None):
+        self.k8s_client = _init_k8s_client(db)
+
+    async def execute(
+        self,
+        name: str,
+        namespace: str = "default",
+        **kwargs
+    ) -> Dict[str, Any]:
+        """执行工具操作"""
+        _log_tool_start("describe_pod", name=name, namespace=namespace)
+        try:
+            # 获取 Pod 详情
+            pod = self.k8s_client.core_v1.read_namespaced_pod(name=name, namespace=namespace)
+
+            # 获取 Pod 事件
+            field_selector = f"involvedObject.name={name}"
+            events = self.k8s_client.core_v1.list_namespaced_event(
+                namespace=namespace,
+                field_selector=field_selector
+            )
+
+            # 构建详细描述信息
+            data = {
+                "name": pod.metadata.name,
+                "namespace": pod.metadata.namespace,
+                "labels": pod.metadata.labels or {},
+                "annotations": pod.metadata.annotations or {},
+                "creation_timestamp": pod.metadata.creation_timestamp.isoformat()
+                if pod.metadata.creation_timestamp
+                else None,
+                "phase": pod.status.phase,
+                "conditions": [
+                    {
+                        "type": condition.type,
+                        "status": condition.status,
+                        "reason": condition.reason,
+                        "message": condition.message,
+                        "last_transition_time": condition.last_transition_time.isoformat()
+                        if condition.last_transition_time
+                        else None,
+                    }
+                    for condition in (pod.status.conditions or [])
+                ],
+                "containers": [],
+                "init_containers": [],
+                "volumes": [],
+                "node": pod.spec.node_name,
+                "service_account_name": pod.spec.service_account_name,
+                "restart_policy": pod.spec.restart_policy,
+                "qos_class": pod.status.qos_class,
+                "events": [
+                    {
+                        "type": event.type,
+                        "reason": event.reason,
+                        "message": event.message,
+                        "first_timestamp": event.first_timestamp.isoformat()
+                        if event.first_timestamp
+                        else None,
+                        "last_timestamp": event.last_timestamp.isoformat()
+                        if event.last_timestamp
+                        else None,
+                        "count": event.count,
+                    }
+                    for event in events.items[:10]  # 只取最近 10 个事件
+                ],
+            }
+
+            # 处理容器信息
+            for container in (pod.spec.containers or []):
+                container_info = {
+                    "name": container.name,
+                    "image": container.image,
+                    "image_pull_policy": container.image_pull_policy,
+                    "ports": [
+                        {
+                            "name": port.name,
+                            "container_port": port.container_port,
+                            "protocol": port.protocol,
+                        }
+                        for port in (container.ports or [])
+                    ],
+                    "resources": {
+                        "limits": container.resources.limits or {},
+                        "requests": container.resources.requests or {},
+                    }
+                }
+
+                # 获取容器状态
+                for status in (pod.status.container_statuses or []):
+                    if status.name == container.name:
+                        container_info["state"] = {
+                            "state": status.state,
+                            "running": {
+                                "started_at": status.running.started_at.isoformat()
+                                if status.running and status.running.started_at
+                                else None,
+                            }
+                            if status.running else {},
+                            "terminated": {
+                                "exit_code": status.terminated.exit_code,
+                                "finished_at": status.terminated.finished_at.isoformat()
+                                if status.terminated and status.terminated.finished_at
+                                else None,
+                                "reason": status.terminated.reason,
+                                "message": status.terminated.message,
+                            }
+                            if status.terminated else {},
+                            "waiting": {
+                                "reason": status.waiting.reason,
+                                "message": status.waiting.message,
+                            }
+                            if status.waiting else {},
+                        }
+                        if status.state == "running":
+                            container_info["ready"] = status.ready
+                        container_info["restart_count"] = status.restart_count
+                        break
+
+                data["containers"].append(container_info)
+
+            # 处理 init 容器
+            for container in (pod.spec.init_containers or []):
+                container_info = {
+                    "name": container.name,
+                    "image": container.image,
+                    "resources": {
+                        "limits": container.resources.limits or {},
+                        "requests": container.resources.requests or {},
+                    }
+                }
+                data["init_containers"].append(container_info)
+
+            # 处理卷
+            for volume in (pod.spec.volumes or []):
+                volume_info = {"name": volume.name}
+                if volume.secret:
+                    volume_info["secret"] = volume.secret.secret_name
+                elif volume.config_map:
+                    volume_info["config_map"] = volume.config_map.name
+                elif volume.persistent_volume_claim:
+                    volume_info["pvc"] = volume.persistent_volume_claim.claim_name
+                elif volume.empty_dir:
+                    volume_info["empty_dir"] = {}
+                elif volume.host_path:
+                    volume_info["host_path"] = volume.host_path.path
+                data["volumes"].append(volume_info)
+
+            _log_tool_success("describe_pod")
+            return tool_success_response(data, "describe_pod", source="kubernetes-sdk")
+
+        except Exception as e:
+            return tool_error_response(
+                e, "describe_pod",
+                context={"name": name, "namespace": namespace},
+                suggestion=f"请确认 Pod '{name}' 存在于命名空间 '{namespace}'"
+            )
+
+
+@register_tool(
+    group="k8s.read",
+    operation_type=OperationType.READ,
+    risk_level=RiskLevel.LOW,
+    permissions=["k8s.view"],
+    description="获取 Node 详细描述信息（类似 kubectl describe node）",
+    examples=[
+        "describe_node(name='node-1')",
+        "describe_node(name='node-2')",
+    ],
+)
+class DescribeNodeTool(BaseOpTool):
+    """
+    获取 Node 详细描述信息工具
+
+    提供类似于 `kubectl describe node` 的详细信息，包括：
+    - 状态信息
+    - 资源容量
+    - 条件
+    - Pod 列表
+    """
+
+    def __init__(self, db=None):
+        self.k8s_client = _init_k8s_client(db)
+
+    async def execute(
+        self,
+        name: str,
+        **kwargs
+    ) -> Dict[str, Any]:
+        """执行工具操作"""
+        _log_tool_start("describe_node", name=name)
+        try:
+            node = self.k8s_client.core_v1.read_node(name=name)
+
+            # 获取节点上的 Pod
+            field_selector = f"spec.nodeName={name}"
+            pods = self.k8s_client.core_v1.list_pod_for_all_namespaces(field_selector=field_selector)
+
+            data = {
+                "name": node.metadata.name,
+                "labels": node.metadata.labels or {},
+                "annotations": node.metadata.annotations or {},
+                "creation_timestamp": node.metadata.creation_timestamp.isoformat()
+                if node.metadata.creation_timestamp
+                else None,
+                "conditions": [
+                    {
+                        "type": condition.type,
+                        "status": condition.status,
+                        "reason": condition.reason,
+                        "message": condition.message,
+                        "last_transition_time": condition.last_transition_time.isoformat()
+                        if condition.last_transition_time
+                        else None,
+                    }
+                    for condition in (node.status.conditions or [])
+                ],
+                "capacity": node.status.capacity or {},
+                "allocatable": node.status.allocatable or {},
+                "status": {
+                    "phase": node.status.phase if node.status.phase else "Unknown",
+                    "addresses": node.status.addresses or [],
+                },
+                "unschedulable": node.spec.unschedulable or False,
+                "info": node.status.node_info or {},
+                "pods": [
+                    {
+                        "name": pod.metadata.name,
+                        "namespace": pod.metadata.namespace,
+                        "phase": pod.status.phase,
+                    }
+                    for pod in pods.items[:50]  # 限制最多 50 个 Pod
+                ],
+            }
+
+            _log_tool_success("describe_node")
+            return tool_success_response(data, "describe_node", source="kubernetes-sdk")
+
+        except Exception as e:
+            return tool_error_response(
+                e, "describe_node",
+                context={"name": name},
+                suggestion=f"请确认节点 '{name}' 存在"
+            )

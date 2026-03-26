@@ -277,12 +277,13 @@ class PrometheusClient:
 _prometheus_client: Optional[PrometheusClient] = None
 
 
-def get_prometheus_client(base_url: Optional[str] = None) -> PrometheusClient:
+def get_prometheus_client(base_url: Optional[str] = None, db=None) -> PrometheusClient:
     """
     获取单例 Prometheus 客户端实例。
 
     参数：
         base_url: Prometheus 服务器 URL（仅在首次调用时使用）
+        db: 数据库会话（用于读取系统设置）
 
     返回：
         PrometheusClient 实例
@@ -291,7 +292,21 @@ def get_prometheus_client(base_url: Optional[str] = None) -> PrometheusClient:
 
     if _prometheus_client is None:
         if base_url is None:
-            base_url = os.getenv("PROMETHEUS_URL", "http://prometheus:9090")
+            # 1. 优先从环境变量读取
+            base_url = os.getenv("PROMETHEUS_URL")
+
+            # 2. 如果环境变量不存在，从数据库读取
+            if base_url is None and db is not None:
+                from app.models.system_setting import SystemSetting
+                setting = db.query(SystemSetting).filter(
+                    SystemSetting.key == "prometheus.url"
+                ).first()
+                if setting:
+                    base_url = setting.value
+
+            # 3. 默认值
+            if base_url is None:
+                base_url = "http://prometheus:9090"
 
         _prometheus_client = PrometheusClient(base_url=base_url)
 

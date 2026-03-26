@@ -39,6 +39,7 @@ from app.services.chat_service import get_or_create_feishu_session, save_feishu_
 from app.services.session_state_manager import SessionStateManager
 from app.utils.llm_helper import ensure_final_report_in_state
 from app.utils.logger import get_logger, set_request_context, clear_request_context
+from app.deepagents.main_agent import get_ops_agent_enhanced
 
 logger = get_logger(__name__)
 
@@ -963,12 +964,19 @@ async def _process_normal_workflow(
             db.close()
 
         logger.info("📦 正在获取 Agent...")
-        agent = await create_agent_for_session(
-            session_id=session_id,
-            enable_approval=True,
-            enable_security=True,
+        # agent = await create_agent_for_session(
+        #     session_id=session_id,
+        #     enable_approval=True,
+        #     enable_security=True,
+        #     user_permissions=user_permissions,
+        # )
+
+        agent = await get_ops_agent_enhanced(
+            enable_memory=True,
+            enable_auto_learn=True,
             user_permissions=user_permissions,
         )
+
         logger.info(f"✅ Agent 获取成功: {type(agent)}")
 
         # 【诊断】检查 checkpointer 中的历史状态
@@ -1019,6 +1027,7 @@ async def _process_normal_workflow(
         logger.info(f"🚀 [feishu_callback] 开始流式执行工作流，session_id={session_id}")
 
         event_count = 0
+        final_state = None  # 捕获最终状态
         async for event in agent.astream(input_state, config=config):
             event_count += 1
             event_type = list(event.keys()) if isinstance(event, dict) else "unknown"
@@ -1030,6 +1039,19 @@ async def _process_normal_workflow(
             })
 
             logger.info(f"📍 事件 #{event_count}: {event_type}")
+
+            # 检查是否是最终状态
+            if "__end__" in event:
+                logger.info(f"🏁 检测到流结束事件")
+                final_state = event.get("__end__", {})
+                if diag_collector:
+                    diag_collector["final_state"] = final_state
+                logger.info(f"📍 [诊断] 最终状态类型: {type(final_state)}, 键: {list(final_state.keys()) if isinstance(final_state, dict) else 'N/A'}")
+                logger.info(f"📍 [诊断] 最终状态内容预览: {str(final_state)[:500] if final_state else 'None'}")
+                # 处理最终状态中的回复
+                await _send_final_state_reply(chat_id, final_state, all_replies, all_reply_message_ids)
+                break
+
             event_result = await _handle_workflow_stream_event(
                 event=event,
                 chat_id=chat_id,
@@ -1085,13 +1107,47 @@ async def _send_final_state_reply(
     all_reply_message_ids: list[str],
 ) -> None:
     """根据 complete 事件中的最终状态发送最终回复。"""
-    response_to_send = final_state.get("formatted_response", "") or final_state.get(
-        "final_report", ""
+    logger.info(f"📍 [最终状态] final_state 键: {list(final_state.keys()) if isinstance(final_state, dict) else 'N/A'}")
+
+    # 尝试多个可能的键来获取回复
+    response_to_send = (
+        final_state.get("formatted_response", "") or
+        final_state.get("final_report", "") or
+        final_state.get("response", "") or
+        final_state.get("answer", "") or
+        final_state.get("output", "") or
+        ""
     )
+
+    # 如果直接键没有找到，尝试从 messages 中获取最后一条 AI 消息
+    if not response_to_send and "messages" in final_state:
+        messages = final_state.get("messages", [])
+        if messages:
+            # 从后往前找最后一条有内容的 AIMessage
+            for msg in reversed(messages):
+                if isinstance(msg, AIMessage):
+                    content = getattr(msg, "content", None)
+                    if content:
+                        response_to_send = content
+                        logger.info(f"📍 [最终状态] 从 messages 中提取到回复，长度: {len(response_to_send)}")
+                        break
+
+    logger.info(f"📍 [最终状态] 提取的回复长度: {len(response_to_send) if response_to_send else 0}")
+
     if response_to_send:
         all_reply_message_ids.extend(await _send_text_reply(chat_id, response_to_send) or [])
         all_replies.append(response_to_send)
+        logger.info(f"✅ [最终状态] 已发送最终回复，长度: {len(response_to_send)}")
         return
+
+    # 如果还是没有回复，记录详细的 final_state 内容
+    logger.warning(f"⚠️ [最终状态] 未找到回复内容")
+    logger.warning(f"   final_state 类型: {type(final_state)}")
+    logger.warning(f"   final_state 键: {list(final_state.keys()) if isinstance(final_state, dict) else 'N/A'}")
+    if isinstance(final_state, dict):
+        for key, value in final_state.items():
+            value_preview = str(value)[:100] if value not in [None, "", []] else "empty"
+            logger.warning(f"   - {key}: {value_preview}")
 
     status_msg = (
         "✅ **工作流执行完成**\n\n"
@@ -1168,6 +1224,16 @@ async def _handle_workflow_stream_event(
 
         actual_update = unwrap_overwrite(state_update)
         logger.info(f"📍 解包后类型: {type(actual_update)}")
+
+        # 🔍 详细日志：诊断 state_update 的内容
+        logger.debug(f"📍 [诊断] 节点={node_name}, state_update类型={type(state_update)}, 内容预览={str(state_update)[:200] if state_update else 'None'}")
+        logger.debug(f"📍 [诊断] actual_update类型={type(actual_update)}, 是否dict={isinstance(actual_update, dict)}, 有messages={isinstance(actual_update, dict) and 'messages' in actual_update}")
+
+        # 特殊处理：如果是 model 节点但没有 messages，尝试从其他地方获取
+        if node_name == "model" and actual_update is None:
+            logger.warning(f"⚠️ [诊断] model 节点的 state_update 为 None，尝试检查完整事件")
+            logger.debug(f"📍 [诊断] 完整事件: {event}")
+
         if not isinstance(actual_update, dict) or "messages" not in actual_update:
             continue
 

@@ -18,9 +18,28 @@ from app.tools.base import (
     tool_success_response,
 )
 from app.integrations.prometheus.client import get_prometheus_client
+from app.models.database import SessionLocal
+from app.models.system_setting import SystemSetting
 from app.utils.logger import get_logger, get_request_context
 
 logger = get_logger(__name__)
+
+
+def _get_prometheus_url_from_db() -> Optional[str]:
+    """从数据库获取 Prometheus URL 配置"""
+    try:
+        db = SessionLocal()
+        setting = db.query(SystemSetting).filter(
+            SystemSetting.key == "prometheus.url"
+        ).first()
+        if setting:
+            return setting.value
+    except Exception as e:
+        logger.warning(f"从数据库读取 Prometheus URL 失败: {e}")
+    finally:
+        if 'db' in locals():
+            db.close()
+    return None
 
 
 def _log_tool_start(tool_name: str, **kwargs):
@@ -59,9 +78,6 @@ class QueryCPUUsageTool(BaseOpTool):
     查询指定标签过滤的 CPU 使用率指标。
     """
 
-    def __init__(self):
-        self.client = get_prometheus_client()
-
     async def execute(
         self,
         labels: Optional[Dict[str, str]] = None,
@@ -71,11 +87,16 @@ class QueryCPUUsageTool(BaseOpTool):
         """执行工具操作"""
         _log_tool_start("query_cpu_usage", labels=labels, time_range=time_range)
         try:
+            # 动态获取 Prometheus 客户端（使用最新配置）
+            prometheus_url = _get_prometheus_url_from_db()
+            client = get_prometheus_client(base_url=prometheus_url)
+            logger.info(f"📡 [Prometheus] 使用 URL: {client.base_url}")
+
             # 构建 PromQL 查询
             query = self._build_query("cpu", labels)
 
             # 执行即时查询
-            result = await self.client.query(query=query)
+            result = await client.query(query=query)
 
             if result.get("status") == "success":
                 data = result.get("data", {})
@@ -130,9 +151,6 @@ class QueryMemoryUsageTool(BaseOpTool):
     查询指定标签过滤的内存使用率指标。
     """
 
-    def __init__(self):
-        self.client = get_prometheus_client()
-
     async def execute(
         self,
         labels: Optional[Dict[str, str]] = None,
@@ -142,11 +160,16 @@ class QueryMemoryUsageTool(BaseOpTool):
         """执行工具操作"""
         _log_tool_start("query_memory_usage", labels=labels, time_range=time_range)
         try:
+            # 动态获取 Prometheus 客户端（使用最新配置）
+            prometheus_url = _get_prometheus_url_from_db()
+            client = get_prometheus_client(base_url=prometheus_url)
+            logger.info(f"📡 [Prometheus] 使用 URL: {client.base_url}")
+
             # 构建 PromQL 查询
             query = self._build_query("memory", labels)
 
             # 执行即时查询
-            result = await self.client.query(query=query)
+            result = await client.query(query=query)
 
             if result.get("status") == "success":
                 data = result.get("data", {})
@@ -212,9 +235,6 @@ class QueryRangeTool(BaseOpTool):
     执行指定时间范围的 PromQL 查询。
     """
 
-    def __init__(self):
-        self.client = get_prometheus_client()
-
     async def execute(
         self,
         query: str,
@@ -227,12 +247,17 @@ class QueryRangeTool(BaseOpTool):
         _log_tool_start("query_range", query=query, start=start, end=end, step=step)
 
         try:
+            # 动态获取 Prometheus 客户端（使用最新配置）
+            prometheus_url = _get_prometheus_url_from_db()
+            client = get_prometheus_client(base_url=prometheus_url)
+            logger.info(f"📡 [Prometheus] 使用 URL: {client.base_url}")
+
             # 解析时间参数
             start_dt = self._parse_time_param(start) if start else datetime.now() - timedelta(hours=1)
             end_dt = self._parse_time_param(end) if end else datetime.now()
 
             # 执行范围查询
-            result = await self.client.query_range(
+            result = await client.query_range(
                 query=query,
                 start=start_dt,
                 end=end_dt,
