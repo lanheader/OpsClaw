@@ -193,8 +193,6 @@ class OpsKnowledgeBase:
         return context
 
 
-# ==================== 增强分析服务 ====================
-
 class EnhancedAnalyzeService:
     """
     增强的分析服务 - 组合多种设计模式
@@ -256,15 +254,15 @@ class EnhancedAnalyzeService:
                 
                 # 2. 如果有记忆，构建上下文
                 if memories:
-                memory_context = await self.memory.build_context(
-                    user_query=user_query,
-                    include_mem0=True,
-                    include_incidents=True,
-                    include_knowledge=True,
-                    max_tokens=2000
-                )
-                
-                memory_context = f"""
+                    memory_context = await self.memory.build_context(
+                        user_query=user_query,
+                        include_mem0=True,
+                        include_incidents=True,
+                        include_knowledge=True,
+                        max_tokens=2000
+                    )
+
+                    memory_context = f"""
 ## 历史参考资料（仅供参考）
 
 {memory_context}
@@ -274,9 +272,9 @@ class EnhancedAnalyzeService:
 2. 优先分析实时采集的数据，历史案例仅作参考
 3. 如果历史解决方案不适用，请提出新的方案
 """
-                logger.info(f"🧠 [Memory] 检索到 {len(memories)} 条相关记忆")
-        except Exception as e:
-            logger.warning(f"⚠️ [Memory] 记忆检索失败: {e}")
+                    logger.info(f"🧠 [Memory] 检索到 {len(memories)} 条相关记忆")
+            except Exception as e:
+                logger.warning(f"⚠️ [Memory] 记忆检索失败: {e}")
 
         # Phase 1: RAG - 检索相关案例
         referenced_cases = []
@@ -863,22 +861,22 @@ def get_enhanced_analyze_service() -> EnhancedAnalyzeService:
 
 
     
-    def _should_use_memory(self, query: str) -> bool:
-        """
-        判断是否需要使用记忆（参考 OpenClaw）
-        
-        规则：
-        - 故障诊断 → 使用记忆
-        - 其他查询 → 使用记忆
-        
-        Args:
-            query: 用户查询
-        
-        Returns:
-            是否需要使用记忆
-        """
-        # 分析诊断默认使用记忆
-        return True
+def _should_use_memory(self, query: str) -> bool:
+    """
+    判断是否需要使用记忆（参考 OpenClaw）
+
+    规则：
+    - 故障诊断 → 使用记忆
+    - 其他查询 → 使用记忆
+
+    Args:
+        query: 用户查询
+
+    Returns:
+        是否需要使用记忆
+    """
+    # 分析诊断默认使用记忆
+    return True
 
 __all__ = [
     "EnhancedAnalyzeService",

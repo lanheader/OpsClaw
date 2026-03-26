@@ -1,8 +1,8 @@
 """
-Prometheus 工具（新架构示例）
+Prometheus 工具（使用 HTTP API）
 
 使用 BaseOpTool 基类和 @register_tool 装饰器。
-支持 SDK → CLI 降级机制。
+使用 PrometheusClient HTTP API 进行查询。
 """
 
 from typing import Dict, Any, Optional
@@ -17,17 +17,10 @@ from app.tools.base import (
     tool_error_response,
     tool_success_response,
 )
-from app.tools.fallback import get_prometheus_fallback
+from app.integrations.prometheus.client import get_prometheus_client
 from app.utils.logger import get_logger, get_request_context
 
 logger = get_logger(__name__)
-
-# Try to import PrometheusToolFactory, but don't fail if it doesn't exist
-try:
-    from app.tools.prometheus.factory import PrometheusToolFactory, MetricType
-except ImportError:
-    PrometheusToolFactory = None
-    MetricType = None
 
 
 def _log_tool_start(tool_name: str, **kwargs):
@@ -56,7 +49,7 @@ def _log_tool_success(tool_name: str, result_count: int = None):
     description="查询 CPU 使用率指标",
     examples=[
         "query_cpu_usage(labels={'namespace': 'default'})",
-        "query_cpu_usage(labels={'pod': 'nginx'}, time_range='1h')",
+        "query_cpu_usage(labels={'pod': 'nginx'})",
     ],
 )
 class QueryCPUUsageTool(BaseOpTool):
@@ -67,7 +60,7 @@ class QueryCPUUsageTool(BaseOpTool):
     """
 
     def __init__(self):
-        self.fallback = get_prometheus_fallback()
+        self.client = get_prometheus_client()
 
     async def execute(
         self,
@@ -78,56 +71,39 @@ class QueryCPUUsageTool(BaseOpTool):
         """执行工具操作"""
         _log_tool_start("query_cpu_usage", labels=labels, time_range=time_range)
         try:
-            # 优先使用 SDK
-            result = await self._execute_with_sdk(labels, time_range)
-            _log_tool_success("query_cpu_usage")
-            return result
+            # 构建 PromQL 查询
+            query = self._build_query("cpu", labels)
+
+            # 执行即时查询
+            result = await self.client.query(query=query)
+
+            if result.get("status") == "success":
+                data = result.get("data", {})
+                _log_tool_success("query_cpu_usage", result_count=len(data.get("result", [])))
+                return tool_success_response(
+                    {
+                        "metric": "cpu_usage",
+                        "values": data.get("result", []),
+                        "labels": labels,
+                        "time_range": time_range,
+                    },
+                    "query_cpu_usage",
+                    source="prometheus-http-api"
+                )
+            else:
+                raise Exception(result.get("error", "Unknown error"))
+
         except Exception as e:
-            logger.warning(f"Prometheus SDK 失败，降级到 CLI: {e}")
-            try:
-                # 降级到 CLI
-                query = self._build_query("cpu", labels)
-                result = await self.fallback.execute(
-                    operation="query",
-                    query=query,
-                    time=time_range
-                )
-                _log_tool_success("query_cpu_usage")
-                return result
-            except Exception as fallback_error:
-                return tool_error_response(
-                    fallback_error, "query_cpu_usage",
-                    context={"labels": labels, "time_range": time_range},
-                    suggestion="请检查 Prometheus 服务是否正常运行"
-                )
-
-    async def _execute_with_sdk(
-        self,
-        labels: Optional[Dict[str, str]],
-        time_range: str,
-    ) -> Dict[str, Any]:
-        """直接使用 CLI 降级（SDK 工厂未实现）"""
-        # Prometheus SDK 工厂未实现，直接降级到 CLI
-        raise NotImplementedError("Prometheus SDK not implemented, using CLI fallback")
-
-        if result.get("success"):
-            data = result.get("data", {})
-            return tool_success_response(
-                {
-                    "metric": "cpu_usage",
-                    "values": data,
-                    "labels": labels,
-                    "time_range": time_range,
-                },
-                "query_cpu_usage",
-                source="prometheus-sdk"
+            logger.error(f"Prometheus CPU 查询失败: {e}")
+            return tool_error_response(
+                e, "query_cpu_usage",
+                context={"labels": labels, "time_range": time_range},
+                suggestion="请检查 Prometheus 服务是否正常运行"
             )
-        else:
-            raise Exception(result.get("error", "Unknown error"))
 
     def _build_query(self, metric_type: str, labels: Optional[Dict[str, str]]) -> str:
         """构建 PromQL 查询"""
-        query = f'rate(container_cpu_usage_seconds_total[5m])'
+        query = 'rate(container_cpu_usage_seconds_total[5m])'
 
         if labels:
             label_filters = ",".join(f'{k}="{v}"' for k, v in labels.items())
@@ -144,7 +120,7 @@ class QueryCPUUsageTool(BaseOpTool):
     description="查询内存使用率指标",
     examples=[
         "query_memory_usage(labels={'namespace': 'default'})",
-        "query_memory_usage(time_range='30m')",
+        "query_memory_usage(labels={'pod': 'nginx'})",
     ],
 )
 class QueryMemoryUsageTool(BaseOpTool):
@@ -155,7 +131,7 @@ class QueryMemoryUsageTool(BaseOpTool):
     """
 
     def __init__(self):
-        self.fallback = get_prometheus_fallback()
+        self.client = get_prometheus_client()
 
     async def execute(
         self,
@@ -166,54 +142,39 @@ class QueryMemoryUsageTool(BaseOpTool):
         """执行工具操作"""
         _log_tool_start("query_memory_usage", labels=labels, time_range=time_range)
         try:
-            result = await self._execute_with_sdk(labels, time_range)
-            _log_tool_success("query_memory_usage")
-            return result
+            # 构建 PromQL 查询
+            query = self._build_query("memory", labels)
+
+            # 执行即时查询
+            result = await self.client.query(query=query)
+
+            if result.get("status") == "success":
+                data = result.get("data", {})
+                _log_tool_success("query_memory_usage", result_count=len(data.get("result", [])))
+                return tool_success_response(
+                    {
+                        "metric": "memory_usage",
+                        "values": data.get("result", []),
+                        "labels": labels,
+                        "time_range": time_range,
+                    },
+                    "query_memory_usage",
+                    source="prometheus-http-api"
+                )
+            else:
+                raise Exception(result.get("error", "Unknown error"))
+
         except Exception as e:
-            logger.warning(f"Prometheus SDK 失败，降级到 CLI: {e}")
-            try:
-                query = self._build_query("memory", labels)
-                result = await self.fallback.execute(
-                    operation="query",
-                    query=query,
-                    time=time_range
-                )
-                _log_tool_success("query_memory_usage")
-                return result
-            except Exception as fallback_error:
-                return tool_error_response(
-                    fallback_error, "query_memory_usage",
-                    context={"labels": labels, "time_range": time_range},
-                    suggestion="请检查 Prometheus 服务是否正常运行"
-                )
-
-    async def _execute_with_sdk(
-        self,
-        labels: Optional[Dict[str, str]],
-        time_range: str,
-    ) -> Dict[str, Any]:
-        """直接使用 CLI 降级（SDK 工厂未实现）"""
-        # Prometheus SDK 工厂未实现，直接降级到 CLI
-        raise NotImplementedError("Prometheus SDK not implemented, using CLI fallback")
-
-        if result.get("success"):
-            data = result.get("data", {})
-            return tool_success_response(
-                {
-                    "metric": "memory_usage",
-                    "values": data,
-                    "labels": labels,
-                    "time_range": time_range,
-                },
-                "query_memory_usage",
-                source="prometheus-sdk"
+            logger.error(f"Prometheus 内存查询失败: {e}")
+            return tool_error_response(
+                e, "query_memory_usage",
+                context={"labels": labels, "time_range": time_range},
+                suggestion="请检查 Prometheus 服务是否正常运行"
             )
-        else:
-            raise Exception(result.get("error", "Unknown error"))
 
     def _build_query(self, metric_type: str, labels: Optional[Dict[str, str]]) -> str:
         """构建 PromQL 查询"""
-        query = f'rate(container_memory_working_set_bytes[5m])'
+        query = 'rate(container_memory_working_set_bytes[5m])'
 
         if labels:
             label_filters = ",".join(f'{k}="{v}"' for k, v in labels.items())
@@ -231,17 +192,16 @@ class QueryMemoryUsageTool(BaseOpTool):
         "执行 PromQL 范围查询\n"
         "时间参数支持多种格式:\n"
         "- 相对时间: '5m' (5分钟前), '1h' (1小时前), '1d' (1天前)\n"
-        "- 负相对时间: '-1h' (从现在往后1小时，仅用于 end)\n"
         "- 特殊值: 'now' (当前时间)\n"
         "- 绝对时间: '2024-01-01T00:00:00Z' (ISO 8601格式)\n\n"
         "示例:\n"
-        "- query_range(query='up') - 查询当前状态\n"
-        "- query_range(query='rate(http_requests_total[5m])', start='1h') - 最近1小时\n"
-        "- query_range(query='up', start='2024-01-01T00:00:00Z', end='2024-01-01T01:00:00Z') - 指定时间范围"
+        "- query_range(query='up') - 最近1小时\n"
+        "- query_range(query='rate(http_requests_total[5m])', start='2h', end='1h') - 2小时前到1小时前\n"
+        "- query_range(query='up', start='2024-01-01T00:00:00Z', end='2024-01-01T01:00:00Z', step='1m') - 指定时间范围"
     ),
     examples=[
         "query_range(query='up')",
-        "query_range(query='rate(http_requests_total[5m])', start='1h')",
+        "query_range(query='rate(http_requests_total[5m])', start='2h')",
         "query_range(query='up', start='2024-01-01T00:00:00Z', end='2024-01-01T01:00:00Z', step='1m')",
     ],
 )
@@ -253,7 +213,7 @@ class QueryRangeTool(BaseOpTool):
     """
 
     def __init__(self):
-        self.fallback = get_prometheus_fallback()
+        self.client = get_prometheus_client()
 
     async def execute(
         self,
@@ -265,119 +225,89 @@ class QueryRangeTool(BaseOpTool):
     ) -> Dict[str, Any]:
         """执行工具操作"""
         _log_tool_start("query_range", query=query, start=start, end=end, step=step)
-        # Prometheus SDK 工厂未实现，直接使用 CLI 降级
+
         try:
-            # 构建 CLI 命令
-            cli = get_prometheus_fallback()
-            cmd = cli.build_command(
-                operation="query_range",
+            # 解析时间参数
+            start_dt = self._parse_time_param(start) if start else datetime.now() - timedelta(hours=1)
+            end_dt = self._parse_time_param(end) if end else datetime.now()
+
+            # 执行范围查询
+            result = await self.client.query_range(
                 query=query,
-                start=start or "1h",
-                end=end or "now",
-                step=step,
+                start=start_dt,
+                end=end_dt,
+                step=step
             )
 
-            # 执行命令
-            result = await cli.execute(cmd)
-            _log_tool_success("query_range")
-            return result
+            if result.get("status") == "success":
+                data = result.get("data", {})
+                result_count = len(data.get("result", []))
+                _log_tool_success("query_range", result_count=result_count)
+                return tool_success_response(
+                    {
+                        "query": query,
+                        "values": data.get("result", []),
+                        "start": start_dt.isoformat(),
+                        "end": end_dt.isoformat(),
+                        "step": step,
+                    },
+                    "query_range",
+                    source="prometheus-http-api"
+                )
+            else:
+                raise Exception(result.get("error", "Unknown error"))
+
         except Exception as e:
-            logger.warning(f"Prometheus CLI 执行失败: {e}")
+            logger.error(f"Prometheus 范围查询失败: {e}")
             return tool_error_response(
                 str(e), "query_range",
                 context={"query": query, "start": start, "end": end, "step": step},
                 suggestion="请检查 PromQL 查询语法是否正确，以及 Prometheus 服务是否正常运行"
             )
 
-    async def _execute_with_sdk(
-        self,
-        query: str,
-        start: Optional[str],
-        end: Optional[str],
-        step: str,
-    ) -> Dict[str, Any]:
-        """使用 SDK 执行"""
-        # 解析时间参数
-        start_dt = None
-        end_dt = None
-
-        if start:
-            start_lower = start.lower()
-            if start_lower == "now":
-                # 当前时间
-                start_dt = datetime.now()
-            elif start_lower.endswith("m") or start_lower.endswith("h") or start_lower.endswith("d"):
-                # 相对时间，如 "5m", "1h", "1d"（视为负数，即从现在往前）
-                start_dt = self._parse_relative_time(start)
-            elif start.startswith("-"):
-                # 相对时间，如 "-1h"
-                start_dt = datetime.now() + timedelta(hours=int(start[1:-1]))
-            else:
-                # ISO 8601 格式
-                start_dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
-
-        if end:
-            end_lower = end.lower()
-            if end_lower == "now":
-                # 当前时间
-                end_dt = datetime.now()
-            elif end_lower.endswith("m") or end_lower.endswith("h") or end_lower.endswith("d"):
-                # 相对时间，如 "5m", "1h", "1d"（视为负数，即从现在往前）
-                end_dt = self._parse_relative_time(end)
-            elif end.startswith("-"):
-                end_dt = datetime.now() + timedelta(hours=int(end[1:-1]))
-            else:
-                end_dt = datetime.fromisoformat(end.replace("Z", "+00:00"))
-
-        result = await self.factory.query_range(
-            query=query,
-            start=start_dt,
-            end=end_dt,
-            step=step,
-        )
-
-        if result.get("success"):
-            data = result.get("data", {})
-            return tool_success_response(
-                {
-                    "query": query,
-                    "values": data,
-                    "start": start,
-                    "end": end,
-                    "step": step,
-                },
-                "query_range",
-                source="prometheus-sdk"
-            )
-        else:
-            raise Exception(result.get("error", "Unknown error"))
-
-    @staticmethod
-    def _parse_relative_time(time_str: str) -> datetime:
+    def _parse_time_param(self, time_str: str) -> datetime:
         """
-        解析相对时间字符串（如 "5m", "1h", "1d"）为 datetime
+        解析时间参数
 
         Args:
-            time_str: 时间字符串，如 "5m"（5分钟前）, "1h"（1小时前）, "1d"（1天前）
+            time_str: 时间字符串，支持多种格式
 
         Returns:
             解析后的 datetime 对象
         """
         time_lower = time_str.lower()
-        value = int(time_lower[:-1])
 
+        # 特殊值: now
+        if time_lower == "now":
+            return datetime.now()
+
+        # 相对时间: 5m, 1h, 1d（从现在往前）
         if time_lower.endswith("m"):
+            value = int(time_lower[:-1])
             return datetime.now() - timedelta(minutes=value)
         elif time_lower.endswith("h"):
+            value = int(time_lower[:-1])
             return datetime.now() - timedelta(hours=value)
         elif time_lower.endswith("d"):
+            value = int(time_lower[:-1])
             return datetime.now() - timedelta(days=value)
-        else:
-            # 如果不匹配已知格式，尝试解析为 ISO 格式
-            try:
-                return datetime.fromisoformat(time_str.replace("Z", "+00:00"))
-            except ValueError:
-                raise ValueError(f"不支持的时间格式: {time_str}。支持的格式: 5m, 1h, 1d, -1h, ISO 8601")
+
+        # 负相对时间: -1h（从现在往后）
+        if time_lower.startswith("-") and (time_lower.endswith("h") or time_lower.endswith("m")):
+            value = int(time_lower[1:-1])
+            if time_lower.endswith("h"):
+                return datetime.now() + timedelta(hours=value)
+            else:
+                return datetime.now() + timedelta(minutes=value)
+
+        # ISO 8601 格式
+        try:
+            return datetime.fromisoformat(time_str.replace("Z", "+00:00"))
+        except ValueError:
+            raise ValueError(
+                f"不支持的时间格式: {time_str}。"
+                f"支持的格式: now, 5m, 1h, 1d, -1h, ISO 8601"
+            )
 
 
 __all__ = [

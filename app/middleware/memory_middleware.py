@@ -234,5 +234,3 @@ __all__ = [
     "MemoryMiddleware",
     "MemoryEnhancedAgent",
 ]
-gent",
-]
