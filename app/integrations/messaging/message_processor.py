@@ -26,6 +26,9 @@ from app.integrations.messaging.handlers.session_handler import SessionHandler
 from app.integrations.messaging.handlers.command_handler import CommandHandler
 from app.integrations.messaging.handlers.approval_handler import ApprovalHandler
 from app.integrations.messaging.handlers.agent_invoker import AgentInvoker
+from app.models.database import SessionLocal
+from app.services.chat_service import save_feishu_message
+from app.models.chat_message import MessageRole
 
 logger = get_logger(__name__)
 
@@ -101,6 +104,17 @@ class MessageProcessor:
 
             # 设置原始消息ID（用于添加表情回复）
             context.message_id = message.message_id
+
+            # 保存用户消息到数据库
+            if context.session_id:
+                db = SessionLocal()
+                try:
+                    save_feishu_message(db, context.session_id, MessageRole.USER, message.text)
+                    logger.info(f"✅ 已保存用户消息到数据库: session={context.session_id}")
+                except Exception as e:
+                    logger.error(f"❌ 保存用户消息失败: {e}")
+                finally:
+                    db.close()
 
             # 立即添加 THUMBSUP 表情，表示消息已收到
             if message.message_id:

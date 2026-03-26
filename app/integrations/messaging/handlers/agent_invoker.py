@@ -20,6 +20,9 @@ from app.memory.memory_manager import get_memory_manager
 from app.integrations.messaging.base_channel import ChannelContext, MessageType, OutgoingMessage
 from app.integrations.feishu.message import build_formatted_reply_card
 from app.integrations.feishu.message_formatter import clean_xml_tags
+from app.models.database import SessionLocal
+from app.services.chat_service import save_feishu_message
+from app.models.chat_message import MessageRole
 
 logger = get_logger(__name__)
 
@@ -124,6 +127,7 @@ class AgentInvoker:
                             content_hash = hash(final_report)
                             if content_hash not in all_reply_hashes:
                                 await self._send_reply(context.chat_id, final_report)
+                                self._save_to_db(context.session_id, MessageRole.ASSISTANT, final_report)
                                 replies.append(final_report)
                                 all_reply_hashes.append(content_hash)
                         done = True
@@ -160,6 +164,7 @@ class AgentInvoker:
                     "建议：发送 /new 开启新会话后重试。"
                 )
                 await self._send_reply(context.chat_id, fallback)
+                self._save_to_db(context.session_id, MessageRole.ASSISTANT, fallback)
                 logger.warning(f"⚠️ 所有尝试均未产生有效回复: session={context.session_id}")
 
             logger.info(f"✅ Agent 调用完成: session={context.session_id}, replies={len(replies)}")
@@ -200,6 +205,19 @@ class AgentInvoker:
         if not poor_response or len(poor_response.strip()) < 20:
             return f"你没有给出有效回复，请重新回答：{original_text}"
         return f"你的回复不够完整，请重新分析并给出更详细的回答：{original_text}"
+
+    def _save_to_db(self, session_id: Optional[str], role: MessageRole, content: str) -> None:
+        """保存消息到数据库"""
+        if not session_id:
+            return
+        db = SessionLocal()
+        try:
+            save_feishu_message(db, session_id, role, content)
+            logger.info(f"✅ 已保存消息到数据库: session={session_id}, role={role.value}")
+        except Exception as e:
+            logger.error(f"❌ 保存消息到数据库失败: {e}")
+        finally:
+            db.close()
 
     async def _send_reply(self, chat_id: str, content: str) -> None:
         """发送回复消息（卡片格式，支持 Markdown 渲染）"""
