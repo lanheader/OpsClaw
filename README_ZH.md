@@ -20,20 +20,44 @@
 
 Ops Agent 是一个基于 **DeepAgents 框架**的智能运维自动化平台，通过主智能体和多个专业化子智能体协同工作，实现从监控、诊断到自愈的全流程自动化。
 
-**当前版本**: v3.3 | **子智能体**: 3 个 | **中间件**: 5 个
+**当前版本**: v3.3 | **子智能体**: 6 个 | **中间件**: 5 个 | **K8s 工具**: 19 个
 
 ### ✨ 核心特性
 
-- 🤖 **DeepAgents 架构**: 主智能体 + 3 个专业子智能体协同工作
-- 🎯 **智能任务规划**: 使用 `write_todos` 自动分解复杂任务
-- 🔄 **子智能体委派**: 通过 `task()` 工具委派专业任务
-- 🛡️ **工具降级机制**: SDK 优先，自动降级到命令行工具
-- 📉 **上下文压缩**: 自动压缩早期历史消息，保留关键信息
-- 🔒 **错误消息过滤**: 过滤工具调用错误，防止 LLM 响应错误消息
-- 💾 **后备回复机制**: 确保至少有一条友好回复发送给用户
-- 📨 **多渠道消息架构**: 渠道抽象层，支持飞书/Slack/钉钉等多渠道接入
-- 🧠 **记忆增强**: 跨会话长期记忆，ChromaDB 向量存储
-- 🔒 **消息索引持久化**: 解决服务重启后重复发送历史消息问题
+#### 🤖 DeepAgents 架构
+- **主智能体 + 6 个专业子智能体**协同工作
+- **智能任务规划**：使用 `write_todos` 自动分解复杂任务
+- **子智能体委派**：通过 `task()` 工具委派专业任务
+- **智能路由**：根据意图和上下文自动决策工作流
+
+#### 🛡️ 工具与集成
+- **工具降级机制**：SDK 优先，自动降级到 CLI（kubectl/prometheus/loki）
+- **19 个 K8s 读工具**：覆盖 Pod、Deployment、Service、ConfigMap 等
+- **3 个 K8s 写工具**：重启、扩容、更新镜像
+- **Prometheus/Loki 集成**：指标查询和日志检索
+
+#### 📨 多渠道消息架构（v3.3 新增）
+- **渠道抽象层**：统一的消息处理框架
+- **飞书长连接模式**：实时消息推送，支持卡片交互
+- **可扩展设计**：轻松接入 Slack、钉钉等新渠道
+- **AgentInvoker 链路增强**：
+  - ⏰ 超时保护（300 秒）
+  - 🧠 记忆注入（历史对话和知识库）
+  - 🔄 自我验证重试（质量检查 + 自动重试）
+  - 💾 空回复兜底（确保用户收到友好提示）
+  - 📚 自动学习（对话写入长期记忆）
+
+#### 🔧 中间件层（5 个）
+- **ErrorFilteringMiddleware**：过滤工具调用错误，防止 LLM 响应错误消息
+- **ContextCompressionMiddleware**：压缩早期历史消息为摘要（≥30 条触发）
+- **MessageTrimmingMiddleware**：智能截断消息（保留最近 40 条）
+- **LoggingMiddleware**：记录模型调用、工具执行和耗时
+- **MemoryEnhancedAgent**：从 ChromaDB 检索相关历史知识，增强上下文
+
+#### 🧠 记忆系统
+- **ChromaDB 向量存储**：轻量级、易使用、纯 Python 实现
+- **跨会话长期记忆**：自动学习和知识积累
+- **消息索引持久化**：解决服务重启后重复发送历史消息问题
 
 ### 🎯 三大核心场景
 
@@ -180,6 +204,7 @@ exit
 │  │  • task(subagent, task): 委派任务给子智能体             │    │
 │  │  • request_approval(action): 请求用户批准               │    │
 │  │  • 智能路由: 根据意图和上下文决策工作流                 │    │
+│  │  • 37 个工具: K8s(22) + Prometheus(3) + Loki(3) + 其他  │    │
 │  └────────────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
@@ -197,35 +222,80 @@ exit
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
-│              子智能体层 (Subagents Layer) - 3 个                 │
+│              子智能体层 (Subagents Layer) - 6 个                 │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐         │
-│  │  data-agent  │  │analyze-agent │  │execute-agent │         │
-│  │  (数据采集)  │  │  (分析决策)  │  │  (执行操作)  │         │
+│  │intent-agent  │  │  data-agent  │  │analyze-agent │         │
+│  │  (意图识别)  │  │  (数据采集)  │  │  (分析决策)  │         │
+│  └──────────────┘  └──────────────┘  └──────────────┘         │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐         │
+│  │execute-agent │  │ report-agent │  │ format-agent │         │
+│  │  (执行操作)  │  │  (报告生成)  │  │  (格式化)    │         │
 │  └──────────────┘  └──────────────┘  └──────────────┘         │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
 │                    工具层 (Tools Layer)                          │
-│  K8s Tools / Prometheus Tools / Loki Tools / Command Executor   │
+│  K8s Tools (22) / Prometheus Tools (3) / Loki Tools (3)         │
+│  Command Executor / Alert Tools / Chat History Tools            │
 │  (所有工具支持 SDK 优先，自动降级到 CLI)                         │
 └─────────────────────────────────────────────────────────────────┘
+```
+
+### 多渠道消息架构（v3.3）
+
+```
+飞书/Slack/钉钉 → ChannelAdapter → IncomingMessage
+  ↓
+MessageProcessor (统一消息处理编排器)
+  1. UserBindingHandler: 验证用户绑定
+  2. SessionHandler: 获取/创建会话
+  3. CommandHandler: 处理特殊命令（/new, /end, /help）
+  4. ApprovalHandler: 检查审批状态
+  5. AgentInvoker: 调用 Agent 处理（增强版）
+     ├── 超时保护（300 秒）
+     ├── 记忆注入（历史对话 + 知识库）
+     ├── 自我验证重试（质量检查 + 自动重试）
+     ├── 空回复兜底（确保友好提示）
+     └── 自动学习（写入长期记忆）
 ```
 
 ---
 
 ## 🤖 子智能体说明
 
-### 1. data-agent（数据采集子智能体）
+### 1. intent-agent（意图识别子智能体）
+**文件**：`app/deepagents/subagents/__init__.py`
+**职责**：识别用户意图，分类为查询、诊断、执行等类型
+**输出**：intent_type, confidence, suggested_workflow
+
+### 2. data-agent（数据采集子智能体）
+**文件**：`app/deepagents/subagents/data_agent.py`
 **职责**：执行数据采集命令，调用 K8s/Prometheus/Loki 工具
-**工具**：k8s_tools, prometheus_tools, loki_tools
+**工具**：
+- k8s_tools - K8s 资源查询（SDK → CLI 降级）
+  - 19 个读工具：get_pods, get_pod, get_pod_logs, get_pod_events, get_deployments, get_services, get_nodes, get_namespaces, get_events, get_config_maps, get_secrets, get_ingress, get_daemon_sets, get_stateful_sets, get_p_vs, get_p_v_cs, get_resource_quotas 等
+  - 3 个写工具：restart_deployment, scale_deployment, update_deployment_image
+- prometheus_tools - 指标查询（SDK → CLI 降级）
+- loki_tools - 日志查询（SDK → CLI 降级）
 
-### 2. analyze-agent（分析决策子智能体）
+### 3. analyze-agent（分析决策子智能体）
+**文件**：`app/deepagents/subagents/analyze_agent.py`
 **职责**：分析采集的数据，诊断问题根因，规划修复方案
-**输出**：root_cause, severity, remediation_plan
+**输出**：
+- `root_cause`: 根本原因
+- `severity`: 严重程度
+- `remediation_plan`: 修复方案
 
-### 3. execute-agent（执行操作子智能体）
+### 4. execute-agent（执行操作子智能体）
+**文件**：`app/deepagents/subagents/execute_agent.py`
 **职责**：执行修复命令，监控执行结果
 **工具**：command_executor_tools, k8s_tools
+
+### 5. report-agent（报告生成子智能体）
+**职责**：生成结构化报告，包含诊断结果和建议
+
+### 6. format-agent（格式化子智能体）
+**职责**：格式化输出，适配不同渠道（飞书卡片、Web UI、纯文本）
 
 ---
 
@@ -233,13 +303,21 @@ exit
 
 ### 1. ErrorFilteringMiddleware（错误消息过滤中间件）
 **文件**：`app/middleware/error_filtering_middleware.py`
-**职责**：过滤工具调用错误消息，防止 LLM 响应错误消息
-**错误标记**：`"Error:"`, `"is not a valid tool"`, `"Tool execution failed"`
+**职责**：过滤工具调用失败的错误消息，防止 LLM 在下一轮对话中对错误做出响应
+**错误标记**：
+- `"Error:"`
+- `"is not a valid tool"`
+- `"Tool execution failed"`
+- `"tool not found"`
 
 ### 2. ContextCompressionMiddleware（上下文压缩中间件）
 **文件**：`app/middleware/context_compression_middleware.py`
 **职责**：压缩早期历史消息为摘要，保留最近完整消息
 **触发条件**：消息数 >= 30 条时触发
+**策略**：
+- 保留最近 20 条完整消息
+- 对更早的消息生成压缩摘要
+- 摘要包含：用户需求、关键结论
 
 ### 3. MessageTrimmingMiddleware（消息截断中间件）
 **文件**：`app/middleware/message_trimming_middleware.py`
@@ -247,32 +325,82 @@ exit
 **配置**：
 - `MAX_MESSAGES_TO_KEEP = 40` - 保留最近 40 条消息
 - `MIN_MESSAGES_TO_KEEP = 10` - 最少保留 10 条消息
+**策略**：优先保留完整的对话轮次
 
 ### 4. LoggingMiddleware（日志中间件）
 **文件**：`app/middleware/logging_middleware.py`
 **职责**：记录模型调用、工具执行和耗时
+**功能**：
+- 记录 LLM 调用开始/结束
+- 记录工具调用参数和结果
+- 支持请求追踪（session_id, request_id）
 
 ### 5. MemoryEnhancedAgent（记忆增强中间件）
 **文件**：`app/middleware/memory_middleware.py`
-**职责**：从 ChromaDB 向量存储检索相关历史知识，注入到系统提示词
+**职责**：为 Agent 注入长期记忆上下文，增强跨会话知识检索
+**功能**：
+- 从向量存储（ChromaDB）检索相关历史知识
+- 将记忆上下文注入到系统提示词
+- 支持自动学习（将新对话写入记忆）
 
 ---
 
 ## 📨 多渠道消息架构
 
-`app/integrations/messaging/` 是渠道抽象层，将飞书特定逻辑与通用业务逻辑解耦。
+### 架构概述
+
+`app/integrations/messaging/` 是新的渠道抽象层，将飞书特定逻辑与通用业务逻辑解耦，支持多渠道接入。
+
+```
+app/integrations/messaging/
+├── base_channel.py          # 抽象基类 + 数据结构
+├── registry.py              # 渠道适配器注册表
+├── message_processor.py     # 通用消息处理编排器
+├── adapters/
+│   └── feishu_adapter.py    # 飞书渠道适配器
+└── handlers/
+    ├── user_binding_handler.py   # 用户绑定验证
+    ├── session_handler.py        # 会话管理
+    ├── command_handler.py        # 特殊命令（/new, /end, /help）
+    ├── approval_handler.py       # 审批流程
+    └── agent_invoker.py          # Agent 调用（增强版）
+```
 
 ### 消息处理流程
 
 ```
-飞书/Slack/钉钉 → ChannelAdapter → IncomingMessage
+飞书消息 → FeishuChannelAdapter → IncomingMessage
   ↓
-MessageProcessor
-  1. 用户绑定验证
-  2. 会话获取/创建
-  3. 特殊命令处理（/new, /end, /help）
-  4. 审批状态检查
-  5. Agent 调用
+MessageProcessor.process_message()
+  1. UserBindingHandler: 验证用户绑定
+  2. SessionHandler: 获取/创建会话
+  3. CommandHandler: 处理特殊命令
+  4. ApprovalHandler: 检查审批状态
+  5. AgentInvoker: 调用 Agent 处理
+```
+
+### 关键数据结构
+
+```python
+# 统一入站消息格式
+IncomingMessage(
+    channel_type="feishu",
+    message_id="om_xxx",
+    sender_id="ou_xxx",
+    chat_id="oc_xxx",
+    text="用户消息",
+    raw_content={...}
+)
+
+# 渠道上下文（贯穿整个处理流程）
+ChannelContext(
+    channel_type="feishu",
+    chat_id="oc_xxx",
+    session_id="feishu_abc123",
+    user_id=1,
+    user_permissions={"k8s:read", "k8s:write"},
+    message_id="om_xxx"  # 用于添加表情回复
+)
 ```
 
 ### API 端点
@@ -280,7 +408,24 @@ MessageProcessor
 | 端点 | 说明 |
 |------|------|
 | `POST /api/v2/messaging/webhook/{channel_type}` | 统一 Webhook 入口 |
-| `POST /api/v1/feishu/callback` | 飞书旧端点（兼容层） |
+| `GET /api/v1/feishu/status` | 飞书集成状态查询 |
+| `POST /api/v1/feishu/callback` | 飞书旧端点（兼容层，重定向到新架构） |
+
+### 添加新渠道
+
+```python
+# 1. 实现适配器
+class SlackChannelAdapter(BaseChannelAdapter):
+    channel_type = "slack"
+    async def verify_request(self, headers, body) -> bool: ...
+    async def send_message(self, message: OutgoingMessage) -> Dict: ...
+
+# 2. 注册（在 registry.py 的 initialize_channels() 中）
+ChannelRegistry.register(SlackChannelAdapter(config))
+
+# 3. 访问端点
+# POST /api/v2/messaging/webhook/slack
+```
 
 ---
 
@@ -293,6 +438,8 @@ MessageProcessor
 - **数据库**: SQLAlchemy 2.0 + SQLite
 - **认证**: JWT + Passlib
 - **LLM**: OpenAI / Claude / 智谱 AI / Ollama
+- **向量存储**: ChromaDB（轻量级、纯 Python）
+- **日志**: Loguru（自动异常捕获、日志轮转）
 
 ### 前端
 
@@ -339,7 +486,7 @@ ZHIPU_MODEL=glm-4
 FEISHU_ENABLED=true
 FEISHU_APP_ID=cli_xxxxxxxxxxxxx
 FEISHU_APP_SECRET=xxxxxxxxxxxxxxxxxxxxx
-FEISHU_CONNECTION_MODE=auto  # webhook | longconn | auto
+FEISHU_LONG_CONNECTION_ENABLED=true  # 启用长连接模式
 ```
 
 #### 中间件配置
@@ -354,6 +501,16 @@ COMPRESSION_THRESHOLD=30  # 超过 30 条消息触发压缩
 MAX_FULL_MESSAGES=20      # 保留最近 20 条完整消息
 ```
 
+#### AgentInvoker 配置
+
+```bash
+# 超时配置
+AGENT_TIMEOUT=300  # 5 分钟超时
+
+# 重试配置
+MAX_RETRY=1  # 最多重试 1 次
+```
+
 ---
 
 ## 🛠️ 开发指南
@@ -366,6 +523,7 @@ ops-agent-langgraph/
 │   ├── main.py                  # FastAPI 应用入口
 │   ├── deepagents/              # DeepAgents 主智能体和子智能体
 │   │   ├── main_agent.py        # 主智能体
+│   │   ├── factory.py           # Agent 工厂（FinalReportEnrichedAgent）
 │   │   └── subagents/           # 子智能体
 │   │       ├── data_agent.py    # 数据采集
 │   │       ├── analyze_agent.py # 分析决策
@@ -374,15 +532,47 @@ ops-agent-langgraph/
 │   │   ├── error_filtering_middleware.py  # 错误消息过滤
 │   │   ├── context_compression_middleware.py  # 上下文压缩
 │   │   ├── message_trimming_middleware.py     # 消息截断
-│   │   └── logging_middleware.py              # 日志记录
+│   │   ├── logging_middleware.py              # 日志记录
+│   │   └── memory_middleware.py               # 记忆增强
 │   ├── tools/                   # Agent 工具集
-│   │   └── k8s/
-│   │       └── read_tools.py    # K8s 读工具（包含 get_config_maps）
+│   │   ├── k8s/
+│   │   │   ├── read_tools.py    # K8s 读工具（19 个）
+│   │   │   ├── write_tools.py   # K8s 写工具（3 个）
+│   │   │   └── delete_tools.py  # K8s 删除工具
+│   │   ├── prometheus/
+│   │   │   └── read_tools.py    # Prometheus 查询工具
+│   │   ├── loki/
+│   │   │   └── read_tools.py    # Loki 日志查询工具
+│   │   └── command_executor/
+│   │       └── read_tools.py    # 命令执行工具
 │   ├── integrations/            # 外部服务集成
+│   │   ├── messaging/           # 多渠道消息架构（v3.3）
+│   │   │   ├── base_channel.py
+│   │   │   ├── registry.py
+│   │   │   ├── message_processor.py
+│   │   │   ├── adapters/
+│   │   │   │   └── feishu_adapter.py
+│   │   │   └── handlers/
+│   │   │       ├── user_binding_handler.py
+│   │   │       ├── session_handler.py
+│   │   │       ├── command_handler.py
+│   │   │       ├── approval_handler.py
+│   │   │       └── agent_invoker.py  # 增强版
+│   │   ├── feishu/              # 飞书集成
+│   │   ├── kubernetes/          # K8s 集成
+│   │   ├── prometheus/          # Prometheus 集成
+│   │   └── loki/                # Loki 集成
 │   ├── api/                     # API 路由层
+│   │   ├── v1/                  # API v1
+│   │   └── v2/                  # API v2
 │   ├── core/                    # 核心模块
 │   ├── models/                  # 数据库模型
-│   └── services/                # 业务服务层
+│   ├── services/                # 业务服务层
+│   ├── memory/                  # 记忆系统
+│   │   ├── chroma_store.py      # ChromaDB 向量存储
+│   │   └── memory_manager.py    # 记忆管理器
+│   └── utils/                   # 工具函数
+│       └── loguru_config.py     # Loguru 日志配置
 ├── frontend/                    # React 前端
 ├── config/                      # 配置文件
 ├── scripts/                     # 脚本工具
@@ -444,15 +634,26 @@ grep "ErrorFilteringMiddleware" logs/app.log
 
 #### 4. 用户收不到任何回复
 
-**原因**：所有 AI 消息被 should_skip_message 过滤
-**解决**：后备回复机制确保至少有一条友好回复
+**原因**：所有 AI 消息被过滤
+**解决**：AgentInvoker 空回复兜底机制确保至少有一条友好回复
 
 ```bash
-# 检查后备回复日志
-grep "后备回复" logs/app.log
+# 检查兜底回复日志
+grep "所有尝试均未产生有效回复" logs/app.log
 ```
 
-#### 5. 数据库初始化失败
+#### 5. HTTP 访问日志不显示
+
+**原因**：uvicorn.access 日志级别设置为 WARNING
+**解决**：修改 `app/utils/loguru_config.py` 中的日志级别为 INFO
+
+```python
+LOGGING_LEVELS = {
+    "uvicorn.access": "INFO",  # 改为 INFO
+}
+```
+
+#### 6. 数据库初始化失败
 
 ```bash
 # 删除旧数据库
@@ -502,12 +703,14 @@ uv run python scripts/init_auth_db.py
 - [FastAPI](https://github.com/tiangolo/fastapi)
 - [React](https://github.com/facebook/react)
 - [Ant Design](https://github.com/ant-design/ant-design)
+- [ChromaDB](https://github.com/chroma-core/chroma)
+- [Loguru](https://github.com/Delgan/loguru)
 
 ---
 
 <div align="center">
 
-**最后更新**: 2026-03-25 | **版本**: v3.2.1
+**最后更新**: 2026-03-27 | **版本**: v3.3
 
 Made with ❤️ by Ops Team
 

@@ -21,6 +21,42 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/feishu", tags=["feishu"])
 
 
+@router.get("/status")
+async def get_feishu_status():
+    """
+    获取飞书集成状态
+
+    返回飞书渠道的配置和连接状态
+    """
+    try:
+        settings = get_settings()
+        adapter = get_channel_adapter("feishu")
+
+        if not adapter:
+            return {
+                "enabled": False,
+                "connection_mode": "unknown",
+                "healthy": False,
+                "message": "飞书适配器未初始化"
+            }
+
+        return {
+            "enabled": adapter.enabled,
+            "connection_mode": "long_connection" if settings.FEISHU_LONG_CONNECTION_ENABLED else "webhook",
+            "healthy": adapter.enabled,
+            "app_id": settings.FEISHU_APP_ID[:10] + "..." if settings.FEISHU_APP_ID else None,
+            "message": "飞书集成正常运行" if adapter.enabled else "飞书集成未启用"
+        }
+    except Exception as e:
+        logger.exception(f"❌ 获取飞书状态失败: {e}")
+        return {
+            "enabled": False,
+            "connection_mode": "unknown",
+            "healthy": False,
+            "message": f"获取状态失败: {str(e)}"
+        }
+
+
 @router.post("/callback")
 async def feishu_callback_legacy(
     request: Request,
