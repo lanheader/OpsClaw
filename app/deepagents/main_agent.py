@@ -22,13 +22,14 @@ from sqlalchemy.orm import Session
 from app.core.llm_factory import LLMFactory
 from app.core.checkpointer import get_checkpointer
 from app.core.constants import is_incident_handling
+from app.models.role import Role
+from app.models.user_role import UserRole
 from app.prompts.main_agent import MAIN_AGENT_SYSTEM_PROMPT
 from app.deepagents.subagents import get_all_subagents
 from app.middleware.logging_middleware import LoggingMiddleware
 from app.middleware.message_trimming_middleware import MessageTrimmingMiddleware
 from app.middleware.context_compression_middleware import ContextCompressionMiddleware
 from app.middleware.error_filtering_middleware import ErrorFilteringMiddleware
-from app.middleware.memory_middleware import MemoryEnhancedAgent
 from app.tools.registry import get_tool_registry
 from app.tools.base import RiskLevel
 from app.utils.logger import get_logger
@@ -36,7 +37,6 @@ from app.services.enhanced_main_agent_service import get_enhanced_main_agent_ser
 from app.services.approval_config_service import ApprovalConfigService
 from app.models.database import SessionLocal
 from app.models.user import User
-from app.memory.memory_manager import get_memory_manager
 
 logger = get_logger(__name__)
 
@@ -123,13 +123,11 @@ async def get_ops_agent(
     logger.info("✅ 消息截断中间件已启用（保留最近 40 条消息）")
     logger.info("✅ 日志中间件已启用")
 
-    # 不再使用 interrupt_on 机制
-    # 改为在系统提示词中告诉 Agent 哪些工具需要审批
-    # Agent 会在调用这些工具前先征得用户同意
+    # 构建需要审批的工具字典（用于 interrupt_on）
+    # 格式: {tool_name: True}
     interrupt_on = None
-
-    # 获取需要审批的工具列表（用于在系统提示词中告知 Agent）
     tools_need_approval = set()
+
     if enable_approval:
         config_db = SessionLocal()
         try:
@@ -137,10 +135,15 @@ async def get_ops_agent(
             user_role = None
             if user_id is not None:
                 # 使用 config_db 查询用户角色，避免外部传入的 db 会话管理问题
-                user = config_db.query(User).filter(User.id == user_id).first()
-                if user:
-                    user_role = user.role
-                    logger.info(f"🔐 获取到用户角色: {user_role}")
+                # 用户角色存储在 user_roles 和 roles 表中
+                user_roles = config_db.query(Role.name).join(
+                    UserRole, Role.id == UserRole.role_id
+                ).filter(UserRole.user_id == user_id).all()
+
+                if user_roles:
+                    # 获取第一个角色（或可以根据业务逻辑选择）
+                    user_role = user_roles[0][0]
+                    logger.info(f"🔐 获取到用户角色: {user_role} (共 {len(user_roles)} 个角色)")
 
             # 从审批配置获取需要审批的工具
             tools_need_approval = ApprovalConfigService.get_tools_require_approval(
@@ -152,6 +155,8 @@ async def get_ops_agent(
         except Exception as e:
             # 如果数据库查询失败，回退到基于风险等级的判断
             logger.warning(f"⚠️ 无法从数据库获取审批配置，使用风险等级判断: {e}")
+            import traceback
+            logger.warning(traceback.format_exc())
             registry = get_tool_registry()
             for tool_class in registry.list_tools():
                 metadata = tool_class.get_metadata()
@@ -198,14 +203,29 @@ async def get_ops_agent(
 
     checkpointer = await get_checkpointer()
 
+    # 获取 ChromaDB Store 适配器（用于 DeepAgents 原生记忆集成）
+    from app.memory import get_langgraph_store
+    store = get_langgraph_store()
+    logger.info("🧠 ChromaDB Store 适配器已加载")
+
+    # 如果有需要审批的工具，构建 interrupt_on 配置
+    if tools_need_approval:
+        interrupt_on = {name: True for name in tools_need_approval}
+        logger.info(f"🔒 审批工具配置: {len(interrupt_on)} 个工具需要审批")
+    else:
+        interrupt_on = None
+
+
     agent = create_deep_agent(
+        name="OpsAgent",  # 添加智能体名称，便于调试
         model=llm,
-        system_prompt=system_prompt,  # 使用包含审批工具列表的系统提示词
+        system_prompt=system_prompt,
         tools=tools,
         subagents=subagents,
         middleware=middleware,
         checkpointer=checkpointer,
-        interrupt_on=interrupt_on,
+        interrupt_on=interrupt_on,  # 重新启用审批机制
+        store=store,
     )
 
     # 不再缓存 agent，每次都动态创建
@@ -234,11 +254,8 @@ MAIN_AGENT_ENHANCED_CONFIG = {
     "enable_reasoning_log": True,  # 启用推理链日志
     "max_reasoning_depth": 5,  # 最大推理深度
     "plan_evaluation_threshold": 0.7,  # 计划评估通过阈值
-    "enable_memory": True,  # 启用向量记忆
-    "enable_memory_middleware": True,  # 启用记忆中间件
     "enable_reflection": True,  # 启用 Self-Reflection
-    "enable_auto_learn": True,  # 启用自动学习
-    "memory_similarity_threshold": 0.7,  # 记忆检索相似度阈值
+    # 记忆功能已通过 LangGraph 原生 store 参数处理，无需额外配置
 }
 
 async def enhanced_main_agent_process(
@@ -303,126 +320,5 @@ __all__ = [
     "get_thread_config",
     "MAIN_AGENT_ENHANCED_CONFIG",
     "enhanced_main_agent_process",
-    "get_ops_agent_enhanced",  # 新增：带记忆增强的 agent
-    "execute_with_memory",  # 新增：带记忆的执行函数
 ]
-
-
-# ==================== 记忆增强功能 ====================
-
-async def get_ops_agent_enhanced(
-    llm=None,
-    enable_approval: bool = True,
-    user_permissions: Optional[Set[str]] = None,
-    user_id: Optional[int] = None,
-    db: Optional[Session] = None,
-    enable_memory: bool = True,
-    enable_reflection: bool = True,
-    enable_auto_learn: bool = True
-) -> Any:
-    """
-    获取增强版 Ops Agent（带记忆和反思）
-
-    新增参数：
-        enable_memory: 启用向量记忆
-        enable_reflection: 启用自检机制
-        enable_auto_learn: 启用自动学习
-    """
-    # 获取基础 agent
-    agent = await get_ops_agent(
-        llm=llm,
-        enable_approval=enable_approval,
-        user_permissions=user_permissions,
-        user_id=user_id,
-        db=db
-    )
-
-    # 如果启用记忆增强，包装 agent
-    if enable_memory:
-        agent = MemoryEnhancedAgent(
-            agent=agent,
-            enable_memory=True,
-            enable_auto_learn=enable_auto_learn
-        )
-        logger.info("🧠 [MemoryEnhancedAgent] 已启用记忆增强")
-
-    return agent
-
-
-async def execute_with_memory(
-    agent,
-    user_input: str,
-    session_id: str,
-    user_id: int = None
-) -> Any:
-    """
-    带记忆增强的执行
-
-    Args:
-        agent: Agent 实例
-        user_input: 用户输入
-        session_id: 会话 ID
-        user_id: 用户 ID
-
-    Returns:
-        执行结果
-    """
-    memory_manager = get_memory_manager(user_id=str(user_id))
-
-    # 1. 构建上下文（检索相关记忆 - 包含 Mem0）
-    context = await memory_manager.build_context(
-        user_query=user_input,
-        session_id=session_id,
-        include_incidents=True,
-        include_knowledge=True,
-        include_session=True,
-        include_mem0=True  # 启用 Mem0 通用对话记忆
-    )
-
-    # 2. 如果有相关记忆，增强输入
-    enhanced_input = user_input
-    if context:
-        enhanced_input = f"""{user_input}
-
----
-**参考资料**（来自历史对话和知识库）：
-{context}
----
-"""
-        logger.info("🧠 [execute_with_memory] 输入已增强")
-
-    # 3. 执行 Agent
-    config = {"configurable": {"thread_id": session_id}}
-    result = await agent.ainvoke(
-        {"messages": [("user", enhanced_input)]},
-        config=config
-    )
-
-    # 4. 自动学习（包含 Mem0 和 MemoryManager）
-    try:
-        # 构建对话消息列表
-        messages = result.get("messages", [])
-        conversation_messages = [
-            {"role": "user", "content": user_input}
-        ]
-
-        # 添加 AI 响应消息
-        for msg in messages:
-            if hasattr(msg, "content"):
-                conversation_messages.append({"role": "assistant", "content": msg.content})
-            elif isinstance(msg, dict) and "content" in msg:
-                conversation_messages.append({"role": "assistant", "content": msg["content"]})
-
-        await memory_manager.auto_learn_from_result(
-            user_query=user_input,
-            result={"messages": messages},
-            session_id=session_id,
-            messages=conversation_messages  # 传递完整对话给 Mem0
-        )
-
-        logger.info("🤖 [execute_with_memory] 已自动学习处理经验")
-    except Exception as e:
-        logger.warning(f"⚠️ 自动学习失败: {e}")
-
-    return result
 

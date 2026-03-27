@@ -171,7 +171,7 @@ class AgentInvoker:
                             interrupt_obj = interrupt_data[0]
                             if hasattr(interrupt_obj, 'value'):
                                 approval_info = interrupt_obj.value
-                                logger.info(f"📋 审批信息: {approval_info}")
+                                logger.info(f"📋 审批信息 (HITLRequest): {approval_info}")
 
                                 # 保存审批状态到数据库
                                 from app.services.session_state_manager import SessionStateManager
@@ -183,15 +183,54 @@ class AgentInvoker:
                                 # 发送审批请求消息给用户
                                 from app.integrations.feishu.message_formatter import format_approval_request
 
-                                # 提取命令列表和其他信息
+                                # 从 DeepAgents HITLRequest 格式转换为显示格式
+                                # HITLRequest: {"action_requests": [...], "review_configs": [...]}
                                 action_requests = approval_info.get('action_requests', [])
-                                risk_level = approval_info.get('risk_level', '未知')
-                                user_input = approval_info.get('user_input', '')
+
+                                # 转换 action_requests 为命令格式
+                                commands = []
+                                for req in action_requests:
+                                    # DeepAgents 格式: {name, args, description}
+                                    # 转换为: {type, action, params, reason}
+                                    tool_name = req.get('name', 'unknown')
+                                    tool_args = req.get('args', {})
+                                    description = req.get('description', '')
+
+                                    # 从工具名推断类型
+                                    if tool_name.startswith('delete_') or tool_name.startswith('restart_') or tool_name.startswith('scale_'):
+                                        tool_type = 'k8s'
+                                    elif tool_name.startswith('query_') or tool_name.startswith('get_'):
+                                        if 'prometheus' in tool_name.lower() or 'cpu' in tool_name.lower() or 'memory' in tool_name.lower():
+                                            tool_type = 'prometheus'
+                                        elif 'log' in tool_name.lower():
+                                            tool_type = 'logs'
+                                        else:
+                                            tool_type = 'k8s'
+                                    else:
+                                        tool_type = 'k8s'
+
+                                    commands.append({
+                                        'type': tool_type,
+                                        'action': tool_name,
+                                        'params': tool_args,
+                                        'reason': description
+                                    })
+
+                                # 从 review_configs 推断风险等级
+                                review_configs = approval_info.get('review_configs', [])
+                                risk_level = '中等风险'
+                                if review_configs:
+                                    # 如果需要审批，说明有一定风险
+                                    allowed_decisions = review_configs[0].get('allowed_decisions', [])
+                                    if 'reject' in allowed_decisions:
+                                        risk_level = '高风险操作'
+                                    elif 'edit' in allowed_decisions:
+                                        risk_level = '中等风险'
 
                                 approval_msg = format_approval_request(
-                                    commands=action_requests,
+                                    commands=commands,
                                     risk_level=risk_level,
-                                    user_input=user_input
+                                    user_input=''  # 用户输入需要从上下文获取，暂时留空
                                 )
 
                                 outgoing = OutgoingMessage(
