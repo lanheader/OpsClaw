@@ -27,7 +27,7 @@ class FinalReportEnrichedAgent:
         async for event in self._agent.astream(input_data, config=config, **kwargs):
             if (
                 isinstance(event, dict)
-                and event.get("event") == "complete"
+                and event.get("type") == "complete"  # 修复：使用 "type" 而不是 "event"
                 and isinstance(event.get("state"), dict)
             ):
                 yield {

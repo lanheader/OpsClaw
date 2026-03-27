@@ -79,6 +79,7 @@ class AgentInvoker:
         # 4. 流式处理（带重试）
         replies: List[str] = []
         all_reply_hashes: List[int] = []
+        event_count = 0  # 🔍 诊断：统计事件数量
 
         try:
             done = False
@@ -87,8 +88,24 @@ class AgentInvoker:
                     break
 
                 start_time = time.time()
+                logger.info(f"🔍 开始流式处理: attempt={attempt}, MAX_RETRY={MAX_RETRY}")
 
+                # LangGraph 默认使用 stream_mode="values"，返回每个节点执行后的完整 state
+                # 最后一个事件就是最终的 state
+                last_event = None
                 async for event in agent.astream(input_state, config=config):
+                    event_count += 1
+                    last_event = event  # 保存最后一个事件
+
+                    # 🔍 详细诊断：打印事件的完整结构
+                    if isinstance(event, dict):
+                        event_keys = list(event.keys())
+                        logger.info(
+                            f"🔍 收到事件 #{event_count}: keys={event_keys}"
+                        )
+                    else:
+                        logger.info(f"🔍 收到事件 #{event_count}: 不是字典类型，type={type(event)}")
+
                     # 超时检查
                     elapsed = time.time() - start_time
                     if elapsed > AGENT_TIMEOUT:
@@ -100,68 +117,94 @@ class AgentInvoker:
                         )
                         return []
 
-                    event_type = event.get("type")
+                # 流式处理完成后，从所有事件中找到包含有效 state 的事件
+                # 注意：某些中间件节点可能返回 None，我们需要找到包含 messages 的 state
+                final_state = {}
+                if last_event and isinstance(last_event, dict):
+                    # 🔍 诊断：打印最后一个事件的完整内容
+                    logger.info(f"🔍 最后一个事件的完整内容: {str(last_event)[:500]}")
 
-                    if event_type == "complete":
-                        final_state = ensure_final_report_in_state(event.get("state", {}))
-                        final_report = (
-                            final_state.get("formatted_response", "") or
-                            final_state.get("final_report", "")
+                    # 尝试从最后一个事件中提取 state
+                    last_state = list(last_event.values())[0] if last_event else None
+                    if last_state and isinstance(last_state, dict) and "messages" in last_state:
+                        final_state = last_state
+                        logger.info(f"🔍 从最后一个事件中找到有效 state")
+                    else:
+                        # 如果最后一个事件的 state 无效（None 或空字典），
+                        # 我们需要使用 ainvoke 来获取最终的 state
+                        logger.warning(f"⚠️ 最后一个事件的 state 无效，使用 ainvoke 获取最终 state")
+                        try:
+                            final_result = await agent.ainvoke(input_state, config=config)
+                            if isinstance(final_result, dict):
+                                final_state = final_result
+                                logger.info(f"✅ 通过 ainvoke 获取到最终 state: keys={list(final_state.keys())}")
+                        except Exception as e:
+                            logger.error(f"❌ ainvoke 失败: {e}")
+
+                    # 🔍 诊断：打印提取的 state
+                    logger.info(f"🔍 提取的 final_state 类型: {type(final_state)}, keys={list(final_state.keys()) if isinstance(final_state, dict) else 'not-dict'}")
+
+                    final_state = ensure_final_report_in_state(final_state)
+                    final_report = (
+                        final_state.get("formatted_response", "") or
+                        final_state.get("final_report", "")
+                    )
+
+                    # 🔍 诊断日志：记录最终事件的详细信息
+                    logger.info(
+                        f"🔍 处理最后一个事件（工作流完成）: "
+                        f"final_report={'有内容' if final_report else '空'}, "
+                        f"长度={len(final_report) if final_report else 0}, "
+                        f"attempt={attempt}, "
+                        f"state_keys={list(final_state.keys())}"
+                    )
+
+                    # 质量检查：不合格且还有重试机会
+                    if attempt < MAX_RETRY and self._is_poor_response(final_report):
+                        logger.warning(
+                            f"⚠️ 回复质量不足，触发重试 (attempt={attempt}): "
+                            f"report={repr(final_report[:60])}"
                         )
+                        input_state = {
+                            "messages": [
+                                HumanMessage(content=text),
+                                AIMessage(content=final_report or "（无回复）"),
+                                HumanMessage(content=self._build_retry_prompt(text, final_report)),
+                            ]
+                        }
+                        continue  # 继续下一次 attempt
 
-                        # 质量检查：不合格且还有重试机会
-                        if attempt < MAX_RETRY and self._is_poor_response(final_report):
-                            logger.warning(
-                                f"⚠️ 回复质量不足，触发重试 (attempt={attempt}): "
-                                f"report={repr(final_report[:60])}"
-                            )
-                            input_state = {
-                                "messages": [
-                                    HumanMessage(content=text),
-                                    AIMessage(content=final_report or "（无回复）"),
-                                    HumanMessage(content=self._build_retry_prompt(text, final_report)),
-                                ]
-                            }
-                            break  # 跳出内层 for，进入下一次 attempt
+                    # 质量合格（或已是最后一次），发送回复
+                    if final_report:
+                        content_hash = hash(final_report)
+                        if content_hash not in all_reply_hashes:
+                            try:
+                                await self._send_reply(context.chat_id, final_report)
+                                self._save_to_db(context.session_id, MessageRole.ASSISTANT, final_report)
+                                replies.append(final_report)
+                                all_reply_hashes.append(content_hash)
+                                logger.info(f"✅ 已添加回复到 replies 列表: 长度={len(final_report)}")
+                            except Exception as send_err:
+                                logger.error(f"❌ 发送回复失败，跳过保存: {send_err}")
+                        else:
+                            logger.warning(f"⚠️ 回复内容重复，已跳过: hash={content_hash}")
+                    else:
+                        logger.warning(f"⚠️ final_report 为空，未添加到 replies")
+                    done = True
+                    break
 
-                        # 质量合格（或已是最后一次），发送回复
-                        if final_report:
-                            content_hash = hash(final_report)
-                            if content_hash not in all_reply_hashes:
-                                try:
-                                    await self._send_reply(context.chat_id, final_report)
-                                    self._save_to_db(context.session_id, MessageRole.ASSISTANT, final_report)
-                                    replies.append(final_report)
-                                    all_reply_hashes.append(content_hash)
-                                except Exception as send_err:
-                                    logger.error(f"❌ 发送回复失败，跳过保存: {send_err}")
-                        done = True
-                        break
-
-                    elif event_type == "interrupt":
-                        interrupt_data = event.get("data", {})
-                        approval_message = interrupt_data.get("message", "需要您的批准才能继续执行")
-                        await self._send_reply(
-                            context.chat_id, f"⏸️ 需要您的批准：\n\n{approval_message}"
-                        )
-                        replies.append(approval_message)
-                        all_reply_hashes.append(hash(approval_message))
-                        logger.info(f"⏸️ 工作流暂停等待审批: session={context.session_id}")
-                        done = True
-                        break
-
-                    elif event_type == "node":
-                        logger.info(f"📍 节点执行: {event.get('node', '')}")
-
-                    elif event_type == "error":
-                        error_msg = event.get("error", "未知错误")
-                        logger.error(f"❌ 工作流执行失败: {error_msg}")
-                        await self._send_error_message(context.chat_id, error_msg)
-                        done = True
-                        break
+                # 注意：LangGraph v1 格式不支持 interrupt/error 事件
+                # 这些事件在 v1 中通过其他机制处理（如 interrupt_on 配置）
 
             # 5. 空回复兜底
             if not replies:
+                logger.warning(
+                    f"⚠️ 所有尝试均未产生有效回复: "
+                    f"session={context.session_id}, "
+                    f"event_count={event_count}, "
+                    f"done={done}, "
+                    f"all_reply_hashes={all_reply_hashes}"
+                )
                 fallback = (
                     "⚠️ 本次未能生成回复，可能原因：\n"
                     "- 对话上下文过长，模型处理超限\n"
@@ -173,7 +216,6 @@ class AgentInvoker:
                     self._save_to_db(context.session_id, MessageRole.ASSISTANT, fallback)
                 except Exception as send_err:
                     logger.error(f"❌ 发送兜底回复失败，跳过保存: {send_err}")
-                logger.warning(f"⚠️ 所有尝试均未产生有效回复: session={context.session_id}")
 
             logger.info(f"✅ Agent 调用完成: session={context.session_id}, replies={len(replies)}")
 
