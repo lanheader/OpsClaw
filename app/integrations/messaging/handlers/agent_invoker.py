@@ -126,10 +126,13 @@ class AgentInvoker:
                         if final_report:
                             content_hash = hash(final_report)
                             if content_hash not in all_reply_hashes:
-                                await self._send_reply(context.chat_id, final_report)
-                                self._save_to_db(context.session_id, MessageRole.ASSISTANT, final_report)
-                                replies.append(final_report)
-                                all_reply_hashes.append(content_hash)
+                                try:
+                                    await self._send_reply(context.chat_id, final_report)
+                                    self._save_to_db(context.session_id, MessageRole.ASSISTANT, final_report)
+                                    replies.append(final_report)
+                                    all_reply_hashes.append(content_hash)
+                                except Exception as send_err:
+                                    logger.error(f"❌ 发送回复失败，跳过保存: {send_err}")
                         done = True
                         break
 
@@ -163,8 +166,11 @@ class AgentInvoker:
                     "- 模型暂时无响应\n\n"
                     "建议：发送 /new 开启新会话后重试。"
                 )
-                await self._send_reply(context.chat_id, fallback)
-                self._save_to_db(context.session_id, MessageRole.ASSISTANT, fallback)
+                try:
+                    await self._send_reply(context.chat_id, fallback)
+                    self._save_to_db(context.session_id, MessageRole.ASSISTANT, fallback)
+                except Exception as send_err:
+                    logger.error(f"❌ 发送兜底回复失败，跳过保存: {send_err}")
                 logger.warning(f"⚠️ 所有尝试均未产生有效回复: session={context.session_id}")
 
             logger.info(f"✅ Agent 调用完成: session={context.session_id}, replies={len(replies)}")
@@ -221,17 +227,14 @@ class AgentInvoker:
 
     async def _send_reply(self, chat_id: str, content: str) -> None:
         """发送回复消息（卡片格式，支持 Markdown 渲染）"""
-        try:
-            cleaned = clean_xml_tags(content)
-            card = build_formatted_reply_card(content=cleaned)
-            outgoing = OutgoingMessage(
-                chat_id=chat_id,
-                message_type=MessageType.CARD,
-                content=card,
-            )
-            await self.channel.send_message(outgoing)
-        except Exception as e:
-            logger.error(f"发送回复失败: {e}")
+        cleaned = clean_xml_tags(content)
+        card = build_formatted_reply_card(content=cleaned)
+        outgoing = OutgoingMessage(
+            chat_id=chat_id,
+            message_type=MessageType.CARD,
+            content=card,
+        )
+        await self.channel.send_message(outgoing)
 
     async def _send_error_message(self, chat_id: str, error_msg: str) -> None:
         """发送错误消息"""
