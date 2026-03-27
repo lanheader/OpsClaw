@@ -436,6 +436,7 @@ def build_formatted_reply_card(
     color: str = "blue",
     status: Optional[str] = None,
     metadata: Optional[Dict[str, Any]] = None,
+    mention_user_id: Optional[str] = None,  # 新增参数：@用户
 ) -> Dict[str, Any]:
     """
     构建格式化的回复卡片，支持完整的 Markdown 语法和元数据展示。
@@ -456,6 +457,7 @@ def build_formatted_reply_card(
         color: 卡片颜色（blue、green、red、orange、grey）
         status: 可选的状态标识（success、warning、error、info、processing）
         metadata: 可选的元数据（如任务ID、耗时等）
+        mention_user_id: 可选的用户ID，用于 @用户
 
     返回：
         飞书卡片 JSON（2.0 格式）
@@ -466,9 +468,14 @@ def build_formatted_reply_card(
             title="任务状态",
             color="blue",
             status="success",
-            metadata={"task_id": "task-123", "duration": "2.5s"}
+            metadata={"task_id": "task-123", "duration": "2.5s"},
+            mention_user_id="ou_xxx"  # @用户
         )
     """
+    # 如果需要 @用户，在内容前添加 @
+    if mention_user_id:
+        content = f"<at user_id=\"{mention_user_id}\"></at> {content}"
+
     # 如果没有提供标题，使用默认标题
     if not title:
         title = "🤖 Ops Agent"

@@ -21,8 +21,35 @@ from app.integrations.messaging.registry import get_channel_adapter
 from app.integrations.messaging.base_channel import IncomingMessage
 from app.integrations.messaging.message_processor import MessageProcessor
 from app.integrations.feishu.approval_helpers import handle_approval_response
+from app.core.config import get_settings
 
 logger = get_logger(__name__)
+
+
+# ========== 辅助函数 ==========
+
+def _is_bot_mentioned(message: Dict[str, Any], bot_id: str) -> bool:
+    """
+    检查消息是否 @ 了机器人
+
+    Args:
+        message: 飞书消息对象
+        bot_id: 机器人的 app_id 或 open_id
+
+    Returns:
+        是否 @ 了机器人
+    """
+    try:
+        mentions = message.get("mentions", [])
+        for mention in mentions:
+            mention_id = mention.get("id", {})
+            # 检查 open_id 或 app_id
+            if mention_id.get("open_id") == bot_id or mention_id.get("app_id") == bot_id:
+                return True
+        return False
+    except Exception as e:
+        logger.warning(f"检查 @机器人 失败: {e}")
+        return False
 
 
 # ========== 新架构适配器函数 ==========
@@ -34,6 +61,17 @@ async def handle_message_receive(message: Dict[str, Any]) -> None:
     此函数保留用于向后兼容，内部调用新架构的 MessageProcessor。
     """
     try:
+        settings = get_settings()
+
+        # Webhook 模式下检查是否需要 @机器人
+        if (settings.FEISHU_CONNECTION_MODE == "webhook" and
+            settings.FEISHU_WEBHOOK_REQUIRE_MENTION):
+
+            bot_id = settings.FEISHU_APP_ID
+            if not _is_bot_mentioned(message, bot_id):
+                logger.info("⏭️  消息未 @ 机器人，跳过处理")
+                return
+
         # 获取飞书适配器
         adapter = get_channel_adapter("feishu")
 

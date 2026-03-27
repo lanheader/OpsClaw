@@ -40,12 +40,41 @@ async def get_feishu_status():
                 "message": "飞书适配器未初始化"
             }
 
+        # 判断连接模式
+        connection_mode = "unknown"
+        if settings.FEISHU_CONNECTION_MODE == "longconn":
+            connection_mode = "long_connection"
+        elif settings.FEISHU_CONNECTION_MODE == "webhook":
+            connection_mode = "webhook"
+        elif settings.FEISHU_CONNECTION_MODE == "auto":
+            # auto 模式下，检查长连接是否启用
+            if settings.FEISHU_LONG_CONNECTION_ENABLED:
+                connection_mode = "long_connection"
+            else:
+                connection_mode = "webhook"
+
+        # 检查长连接健康状态
+        longconn_healthy = False
+        if connection_mode == "long_connection":
+            try:
+                from app.integrations.feishu.lark_longconn import get_feishu_longconn_client
+                client = get_feishu_longconn_client()
+                longconn_healthy = client is not None and hasattr(client, 'ws_client') and client.ws_client is not None
+            except Exception as e:
+                logger.warning(f"⚠️ 检查长连接状态失败: {e}")
+                longconn_healthy = False
+
         return {
-            "enabled": adapter.enabled,
-            "connection_mode": "long_connection" if settings.FEISHU_LONG_CONNECTION_ENABLED else "webhook",
-            "healthy": adapter.enabled,
+            "enabled": adapter.enabled and settings.FEISHU_ENABLED,
+            "connection_mode": connection_mode,
+            "healthy": adapter.enabled and (
+                connection_mode == "webhook" or longconn_healthy
+            ),
+            "longconn_healthy": longconn_healthy if connection_mode == "long_connection" else None,
             "app_id": settings.FEISHU_APP_ID[:10] + "..." if settings.FEISHU_APP_ID else None,
-            "message": "飞书集成正常运行" if adapter.enabled else "飞书集成未启用"
+            "webhook_require_mention": settings.FEISHU_WEBHOOK_REQUIRE_MENTION,
+            "reply_with_mention": settings.FEISHU_REPLY_WITH_MENTION,
+            "message": _get_status_message(adapter.enabled, connection_mode, longconn_healthy)
         }
     except Exception as e:
         logger.exception(f"❌ 获取飞书状态失败: {e}")
@@ -55,6 +84,77 @@ async def get_feishu_status():
             "healthy": False,
             "message": f"获取状态失败: {str(e)}"
         }
+
+
+def _get_status_message(enabled: bool, mode: str, longconn_healthy: bool) -> str:
+    """生成状态消息"""
+    if not enabled:
+        return "飞书集成未启用"
+    if mode == "long_connection":
+        if longconn_healthy:
+            return "飞书长连接正常运行"
+        else:
+            return "飞书长连接未连接或已断开"
+    elif mode == "webhook":
+        return "飞书 Webhook 模式已启用"
+    else:
+        return "飞书集成状态未知"
+
+
+@router.post("/test-message")
+async def send_test_message(text: str):
+    """
+    发送测试消息到飞书
+
+    用于测试飞书集成是否正常工作
+    """
+    try:
+        settings = get_settings()
+        adapter = get_channel_adapter("feishu")
+
+        if not adapter or not adapter.enabled:
+            raise HTTPException(
+                status_code=503,
+                detail="飞书渠道未启用或配置错误"
+            )
+
+        # 获取测试用的 chat_id（从环境变量或配置中获取）
+        test_chat_id = settings.FEISHU_TEST_CHAT_ID if hasattr(settings, 'FEISHU_TEST_CHAT_ID') else None
+
+        if not test_chat_id:
+            raise HTTPException(
+                status_code=400,
+                detail="未配置测试 chat_id，请在 .env 中设置 FEISHU_TEST_CHAT_ID"
+            )
+
+        # 构造测试消息
+        from app.integrations.messaging.base_channel import OutgoingMessage, MessageType
+        from app.integrations.feishu.message import build_formatted_reply_card
+
+        card = build_formatted_reply_card(content=text)
+        outgoing = OutgoingMessage(
+            chat_id=test_chat_id,
+            message_type=MessageType.CARD,
+            content=card,
+        )
+
+        # 发送消息
+        result = await adapter.send_message(outgoing)
+
+        return {
+            "success": True,
+            "message": "测试消息已发送",
+            "result": result
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"❌ 发送测试消息失败: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"发送测试消息失败: {str(e)}"
+        )
 
 
 @router.post("/callback")

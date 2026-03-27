@@ -52,29 +52,58 @@ async def handle_approval_response(
             enable_security=True,
         )
 
-        # 构建恢复状态
-        resume_state: Dict[str, Any] = {
-            "session_id": session_id,
-            "workflow_status": "running",
-            "approval_status": decision,
-            "approval_decision": decision,
-            "is_approval_response": True,
-            "waiting_for_approval": False,
-            "approval_required": False,
-        }
+        # 获取线程配置
+        from app.deepagents.main_agent import get_thread_config
+        from langchain_core.messages import HumanMessage
+        config = get_thread_config(session_id)
 
-        # 执行工作流
+        # 根据决策构建恢复消息
+        if decision == "approved":
+            logger.info(f"✅ 用户同意，准备继续执行")
+            # 用户同意，发送一个确认消息来继续执行
+            resume_message = HumanMessage(content="[APPROVAL_GRANTED] 用户已批准执行操作")
+        else:
+            logger.info(f"❌ 用户拒绝，准备中止执行")
+            # 用户拒绝，发送一个拒绝消息
+            resume_message = HumanMessage(content="[APPROVAL_REJECTED] 用户已拒绝执行操作")
+
+        # 继续执行工作流
         all_replies = []
-        async for event in agent.astream(resume_state):
-            # 处理事件并收集回复
-            if "__end__" in event:
-                final_state = event.get("__end__", {})
-                response = final_state.get("formatted_response", "") or \
-                          final_state.get("final_report", "") or \
-                          final_state.get("response", "")
+        event_count = 0
+        logger.info(f"🔄 开始从中断点恢复工作流: session_id={session_id}")
+
+        try:
+            # 使用 ainvoke 继续执行
+            result = await agent.ainvoke(
+                {"messages": [resume_message]},
+                config=config
+            )
+
+            logger.info(f"🔍 ainvoke 返回结果: keys={list(result.keys()) if isinstance(result, dict) else type(result)}")
+
+            # 从结果中提取回复
+            if isinstance(result, dict):
+                response = result.get("formatted_response", "") or \
+                          result.get("final_report", "") or \
+                          result.get("response", "")
+
+                # 如果没有找到，尝试从 messages 中提取最后一条 AI 消息
+                if not response and "messages" in result:
+                    messages = result["messages"]
+                    if messages and len(messages) > 0:
+                        last_message = messages[-1]
+                        if hasattr(last_message, 'content'):
+                            response = last_message.content
 
                 if response:
+                    logger.info(f"✅ 提取到回复: {response[:100]}...")
                     all_replies.append(response)
+                else:
+                    logger.warning(f"⚠️ 结果中没有找到回复内容")
+
+            logger.info(f"🔍 工作流恢复完成: 提取到 {len(all_replies)} 条回复")
+        except Exception as stream_exc:
+            logger.error(f"❌ ainvoke 执行失败: {stream_exc}", exc_info=True)
 
         # 发送回复
         if channel_adapter and all_replies:

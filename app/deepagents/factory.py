@@ -9,6 +9,9 @@ from typing import Any, Optional, Set
 from langchain_core.language_models import BaseChatModel
 from app.deepagents.main_agent import get_ops_agent
 from app.utils.llm_helper import ensure_final_report_in_state
+from app.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class FinalReportEnrichedAgent:
@@ -48,6 +51,7 @@ async def create_agent_for_session(
     enable_approval: bool = True,
     enable_security: bool = True,
     user_permissions: Optional[Set[str]] = None,
+    user_id: Optional[int] = None,
 ):
     """
     为会话创建 Agent（兼容接口，异步）
@@ -61,15 +65,18 @@ async def create_agent_for_session(
         enable_approval: 是否启用批准流程
         enable_security: 已废弃，保留参数是为了兼容调用方，不再生效
         user_permissions: 用户权限代码集合，用于过滤可用工具
+        user_id: 用户 ID（用于动态获取审批配置）
 
     Returns:
         Agent 实例（单例）
     """
     # 直接返回单例 agent
     # session_id 不再用于创建不同的 agent，而是在调用时通过 config 传递
+    logger.info(f"🔍 factory.create_agent_for_session: enable_approval={enable_approval}, user_id={user_id}")
     agent = await get_ops_agent(
         llm=llm,
         enable_approval=enable_approval,
         user_permissions=user_permissions,
+        user_id=user_id,
     )
     return FinalReportEnrichedAgent(agent)

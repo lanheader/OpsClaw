@@ -79,7 +79,23 @@ class Settings(BaseSettings):
     FEISHU_VERIFICATION_TOKEN: Optional[str] = None
     FEISHU_CHAT_ID: Optional[str] = None
     FEISHU_ENCRYPT_KEY: Optional[str] = None
+    FEISHU_TEST_CHAT_ID: Optional[str] = Field(
+        default=None,
+        description="测试消息发送的目标 chat_id"
+    )
     FEISHU_CONNECTION_MODE: str = "auto"
+    FEISHU_LONG_CONNECTION_ENABLED: bool = Field(
+        default=True,
+        description="是否启用飞书长连接模式"
+    )
+    FEISHU_WEBHOOK_REQUIRE_MENTION: bool = Field(
+        default=True,
+        description="Webhook 模式下是否需要 @机器人才触发"
+    )
+    FEISHU_REPLY_WITH_MENTION: bool = Field(
+        default=True,
+        description="回复消息时是否 @用户"
+    )
     FEISHU_LONGCONN_HEARTBEAT_INTERVAL: int = 30
     FEISHU_LONGCONN_RECONNECT_INTERVAL: int = 5
     FEISHU_LONGCONN_MAX_RECONNECT_ATTEMPTS: int = 10

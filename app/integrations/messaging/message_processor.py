@@ -79,7 +79,9 @@ class MessageProcessor:
         try:
             logger.info(
                 f"📨 处理消息: channel={message.channel_type}, "
-                f"sender={message.sender_id}, text={message.text[:50]}..."
+                f"sender={message.sender_id}, "
+                f"message_id={message.message_id}, "
+                f"text={message.text[:50]}..."
             )
 
             # 1. 用户绑定验证
@@ -100,6 +102,13 @@ class MessageProcessor:
                 sender_name=message.sender_name,
                 channel_type=message.channel_type,
                 user_id=user.id
+            )
+
+            # 增强日志：添加 session_id 追踪
+            logger.info(
+                f"📋 会话信息: session_id={context.session_id}, "
+                f"user_id={context.user_id}, "
+                f"channel={context.channel_type}"
             )
 
             # 设置原始消息ID（用于添加表情回复）

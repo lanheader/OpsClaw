@@ -40,9 +40,6 @@ from app.memory.memory_manager import get_memory_manager
 
 logger = get_logger(__name__)
 
-# 单例 agent（所有会话共享同一个编译图，通过 thread_id 区分会话）
-_agent: Optional[Any] = None
-
 
 async def get_ops_agent(
     llm: Optional[BaseChatModel] = None,
@@ -52,10 +49,10 @@ async def get_ops_agent(
     db: Optional[Session] = None,
 ) -> Any:
     """
-    获取 Ops Agent 单例（懒加载，异步）
+    获取 Ops Agent（动态创建，每次请求都从数据库读取最新审批配置）
 
-    所有会话共享同一个编译图，通过 checkpointer + thread_id 区分会话状态。
-    checkpointer 由 CheckpointerFactory 管理，默认使用 SQLite 持久化。
+    每次调用都会重新创建 Agent，确保使用最新的审批配置。
+    所有会话通过 checkpointer + thread_id 区分会话状态。
 
     Args:
         llm: 语言模型实例 (默认使用 LLMFactory)
@@ -67,12 +64,10 @@ async def get_ops_agent(
     Returns:
         编译后的 DeepAgents 图
     """
-    global _agent
-
-    # 注意：如果传入了 user_permissions 或 user_id，不使用缓存的 agent
-    # 因为不同用户的权限不同，需要动态创建 agent
-    if _agent is not None and user_permissions is None and user_id is None:
-        return _agent
+    # 禁用全局缓存，每次都重新创建 Agent
+    # 这样可以确保每次都从数据库读取最新的审批配置
+    logger.info("🔄 动态创建 Agent（每次请求都读取最新审批配置）")
+    logger.info(f"🔍 调试参数: enable_approval={enable_approval}, user_id={user_id}, user_permissions={user_permissions}")
 
     if llm is None:
         # 使用默认 LLM provider（不再使用 profile）
@@ -128,19 +123,24 @@ async def get_ops_agent(
     logger.info("✅ 消息截断中间件已启用（保留最近 40 条消息）")
     logger.info("✅ 日志中间件已启用")
 
-    # 动态构建需要审批的工具列表（从数据库配置获取）
+    # 不再使用 interrupt_on 机制
+    # 改为在系统提示词中告诉 Agent 哪些工具需要审批
+    # Agent 会在调用这些工具前先征得用户同意
     interrupt_on = None
+
+    # 获取需要审批的工具列表（用于在系统提示词中告知 Agent）
+    tools_need_approval = set()
     if enable_approval:
-        # 尝试从数据库获取审批配置
-        tools_need_approval = set()
         config_db = SessionLocal()
         try:
             # 获取用户角色（如果有）
             user_role = None
-            if user_id is not None and db is not None:
-                user = db.query(User).filter(User.id == user_id).first()
+            if user_id is not None:
+                # 使用 config_db 查询用户角色，避免外部传入的 db 会话管理问题
+                user = config_db.query(User).filter(User.id == user_id).first()
                 if user:
                     user_role = user.role
+                    logger.info(f"🔐 获取到用户角色: {user_role}")
 
             # 从审批配置获取需要审批的工具
             tools_need_approval = ApprovalConfigService.get_tools_require_approval(
@@ -161,10 +161,11 @@ async def get_ops_agent(
         finally:
             config_db.close()
 
-        if tools_need_approval:
-            interrupt_on = {name: True for name in tools_need_approval}
-        else:
-            interrupt_on = None
+    # 在系统提示词中添加审批工具列表
+    system_prompt = MAIN_AGENT_SYSTEM_PROMPT
+    if tools_need_approval:
+        approval_list = "\n".join([f"  - {tool}" for tool in sorted(tools_need_approval)])
+        system_prompt += f"\n\n⚠️ **重要提示：以下工具需要用户审批才能执行**\n\n{approval_list}\n\n在调用这些工具之前，你必须先向用户说明你要执行的操作，并明确询问用户是否同意。只有在用户明确同意后，才能调用这些工具。"
 
     # ========== 输出可用工具列表 ==========
     logger.info("=" * 60)
@@ -199,7 +200,7 @@ async def get_ops_agent(
 
     agent = create_deep_agent(
         model=llm,
-        system_prompt=MAIN_AGENT_SYSTEM_PROMPT,
+        system_prompt=system_prompt,  # 使用包含审批工具列表的系统提示词
         tools=tools,
         subagents=subagents,
         middleware=middleware,
@@ -207,9 +208,9 @@ async def get_ops_agent(
         interrupt_on=interrupt_on,
     )
 
-    # 只有在没有指定用户权限和 user_id 时才缓存 agent（全局默认 agent）
-    if user_permissions is None and user_id is None:
-        _agent = agent
+    # 不再缓存 agent，每次都动态创建
+    # 这样可以确保每次都从数据库读取最新的审批配置
+    logger.info("✅ Agent 创建完成（动态模式，无缓存）")
 
     return agent
 

@@ -123,10 +123,9 @@ class ApprovalHandler:
             user_response: 用户响应
         """
         logger.info(f"{'✅' if decision == 'approved' else '❌'} 用户 {decision} 执行操作")
-        SessionStateManager.set_processing(context.session_id)
 
         try:
-            # 调用审批响应处理
+            # 先调用审批响应处理（它会检查 awaiting_approval 状态）
             resume_status = await handle_approval_response(
                 session_id=context.session_id,
                 decision=decision,
@@ -135,8 +134,10 @@ class ApprovalHandler:
                 channel_adapter=self.channel
             )
 
-            if resume_status == "success":
+            if resume_status == "completed":
                 logger.info(f"✅ 工作流已恢复: decision={decision}")
+                # 处理完成后清理会话状态
+                SessionStateManager.reset_to_normal(context.session_id)
             elif resume_status == "not_awaiting":
                 logger.warning(f"⚠️ 会话 {context.session_id} 不在等待批准状态")
             else:
