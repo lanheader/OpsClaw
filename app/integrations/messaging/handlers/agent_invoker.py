@@ -27,7 +27,7 @@ from app.models.chat_message import MessageRole
 logger = get_logger(__name__)
 
 AGENT_TIMEOUT = 300  # 5 分钟，与 chat.py 一致
-MAX_RETRY = 1        # 质量不足时最多重试 1 次
+MAX_RETRY = 0        # 不重试，直接返回结果
 
 _FAILURE_MARKERS = ["工具调用失败", "执行失败", "无法完成", "❌ 任务失败"]
 
@@ -60,7 +60,9 @@ class AgentInvoker:
                 include_incidents=True,
                 include_knowledge=True,
                 include_session=True,
+                include_summary=True,
                 include_mem0=True,
+                max_tokens=4500,
             )
             if context_str:
                 enhanced_text = (

@@ -19,6 +19,9 @@ logger = get_logger(__name__)
 
 from app.memory.chroma_store import get_chroma_store
 
+# 触发摘要生成的会话消息数阈值
+SUMMARY_TRIGGER_THRESHOLD = 20
+
 
 class MemoryManager:
     """记忆管理器 - 基于 ChromaDB"""
@@ -127,6 +130,108 @@ class MemoryManager:
             filters={"session_id": session_id},
         )
 
+    async def summarize_session(
+        self,
+        session_id: str,
+        messages: List[Dict],
+        existing_summary: str = None,
+    ) -> str:
+        """
+        为会话生成（增量）摘要，并存储到向量库。
+
+        Args:
+            session_id: 会话 ID
+            messages: 消息列表，每条为 {"role": ..., "content": ...}
+            existing_summary: 上次已有的摘要（实现增量摘要）
+
+        Returns:
+            生成的摘要文本
+        """
+        if not messages:
+            return existing_summary or ""
+
+        try:
+            from app.core.llm_factory import LLMFactory
+            from langchain_core.messages import HumanMessage, SystemMessage
+
+            llm = LLMFactory.create_llm()
+
+            # 拼接消息文本
+            dialogue_text = ""
+            for msg in messages:
+                role_label = "用户" if msg.get("role") == "user" else "助手"
+                content = str(msg.get("content", ""))[:500]
+                dialogue_text += f"{role_label}: {content}\n"
+
+            if existing_summary:
+                prompt = (
+                    f"以下是之前对话的摘要：\n{existing_summary}\n\n"
+                    f"以下是新增的对话内容：\n{dialogue_text}\n\n"
+                    "请在原有摘要基础上，将新增内容合并，生成一份简洁的增量摘要（不超过500字），"
+                    "重点保留关键决策、故障信息和操作结果。"
+                )
+            else:
+                prompt = (
+                    f"请为以下对话生成简洁摘要（不超过500字），"
+                    f"重点保留关键决策、故障信息和操作结果：\n\n{dialogue_text}"
+                )
+
+            response = await llm.ainvoke([
+                SystemMessage(content="你是一个运维助手，负责生成对话摘要。"),
+                HumanMessage(content=prompt),
+            ])
+            summary = response.content.strip()
+
+            # 存储摘要到向量库（type=summary 用于检索区分）
+            doc_id = f"summary_{session_id}_{datetime.now().timestamp()}"
+            self.vector_store.collection_sessions.add(
+                documents=[summary],
+                metadatas=[{
+                    "session_id": session_id,
+                    "role": "summary",
+                    "type": "summary",
+                    "importance": 1.0,
+                    "created_at": datetime.now().isoformat(),
+                }],
+                ids=[doc_id],
+            )
+            logger.info(f"🧠 会话摘要已生成并存储: session={session_id}, len={len(summary)}")
+            return summary
+
+        except Exception as e:
+            logger.warning(f"⚠️ 会话摘要生成失败: {e}")
+            return existing_summary or ""
+
+    async def recall_session_summary(
+        self,
+        session_id: str,
+        top_k: int = 1,
+    ) -> str:
+        """
+        检索最近的会话摘要。
+
+        Args:
+            session_id: 会话 ID
+            top_k: 返回摘要数量
+
+        Returns:
+            摘要文本（合并多条时用换行分隔）
+        """
+        try:
+            results = self.vector_store.collection_sessions.get(
+                where={"$and": [{"session_id": {"$eq": session_id}}, {"type": {"$eq": "summary"}}]},
+                include=["documents", "metadatas"],
+                limit=top_k,
+            )
+            docs = results.get("documents", [])
+            if not docs:
+                return ""
+            # 取最后一条（最新摘要）
+            return docs[-1] if isinstance(docs[-1], str) else ""
+        except Exception as e:
+            logger.warning(f"⚠️ 会话摘要检索失败: {e}")
+            return ""
+
     # ==================== 上下文构建 ====================
 
     async def build_context(
@@ -136,13 +241,27 @@ class MemoryManager:
         include_incidents: bool = True,
         include_knowledge: bool = True,
         include_session: bool = False,
+        include_summary: bool = True,
         include_mem0: bool = True,  # 保留参数兼容调用方，忽略
-        max_tokens: int = 3000,
+        max_tokens: int = 4500,
         enable_truncation: bool = True,
     ) -> str:
         """构建记忆上下文字符串，注入到用户 prompt"""
         context_parts = []
         current_tokens = 0
+
+        # 优先注入会话摘要（若有），作为长期记忆补充
+        if include_summary and session_id:
+            try:
+                summary = await self.recall_session_summary(session_id)
+                if summary:
+                    text = self._format_summary(summary)
+                    tokens = self._estimate_tokens(text)
+                    if current_tokens + tokens <= max_tokens:
+                        context_parts.append(text)
+                        current_tokens += tokens
+            except Exception as e:
+                logger.warning(f"⚠️ 会话摘要检索失败: {e}")
 
         if include_incidents:
             try:
@@ -223,6 +342,9 @@ class MemoryManager:
         return {"vector_store": stats, "timestamp": datetime.now().isoformat()}
 
     # ==================== 内部工具 ====================
+
+    def _format_summary(self, summary: str) -> str:
+        return f"## 本次会话摘要\n{summary}"
 
     def _estimate_tokens(self, text: str) -> int:
         if not text:
