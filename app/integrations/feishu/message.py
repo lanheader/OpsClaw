@@ -458,7 +458,7 @@ def build_formatted_reply_card(
         metadata: 可选的元数据（如任务ID、耗时等）
 
     返回：
-        飞书卡片 JSON
+        飞书卡片 JSON（2.0 格式）
 
     示例：
         card = build_formatted_reply_card(
@@ -498,22 +498,26 @@ def build_formatted_reply_card(
 
         if metadata_items:
             elements.append(
-                {"tag": "div", "text": {"tag": "lark_md", "content": " | ".join(metadata_items)}}
+                {"tag": "markdown", "content": " | ".join(metadata_items)}
             )
             elements.append({"tag": "hr"})
 
-    # 添加主要内容
-    elements.append({"tag": "div", "text": {"tag": "lark_md", "content": content}})
+    # 添加主要内容（使用 markdown 标签，支持表格等更丰富的格式）
+    elements.append({"tag": "markdown", "content": content})
 
     # 添加时间戳
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     elements.append({"tag": "hr"})
-    elements.append({"tag": "div", "text": {"tag": "plain_text", "content": f"⏰ {timestamp}"}})
+    elements.append({"tag": "markdown", "content": f"⏰ {timestamp}"})
 
+    # 使用飞书卡片 2.0 格式
     card = {
+        "schema": "2.0",  # 关键：指定使用 2.0 版本
         "config": {"wide_screen_mode": True},
         "header": {"title": {"tag": "plain_text", "content": title}, "template": color},
-        "elements": elements,
+        "body": {  # 关键：elements 包裹在 body 中
+            "elements": elements
+        },
     }
 
     return card

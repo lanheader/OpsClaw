@@ -83,8 +83,8 @@ class InterceptHandler(logging.Handler):
 
 # 配置第三方库的日志级别
 LOGGING_LEVELS = {
-    "uvicorn": "WARNING",
-    "uvicorn.access": "WARNING",
+    "uvicorn": "INFO",
+    "uvicorn.access": "INFO",
     "uvicorn.error": "INFO",
     "fastapi": "INFO",
     "langchain": "WARNING",

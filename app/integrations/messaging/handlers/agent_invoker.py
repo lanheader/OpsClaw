@@ -27,7 +27,7 @@ from app.models.chat_message import MessageRole
 logger = get_logger(__name__)
 
 AGENT_TIMEOUT = 300  # 5 分钟，与 chat.py 一致
-MAX_RETRY = 0        # 不重试，直接返回结果
+MAX_RETRY = 1        # 最多重试 1 次，避免无限循环
 
 _FAILURE_MARKERS = ["工具调用失败", "执行失败", "无法完成", "❌ 任务失败"]
 
@@ -271,8 +271,19 @@ class AgentInvoker:
 
     async def _send_reply(self, chat_id: str, content: str) -> None:
         """发送回复消息（卡片格式，支持 Markdown 渲染）"""
+        # 🔍 诊断：记录原始内容
+        logger.info(f"🔍 [卡片转换] 原始内容: {content[:200]}...")
+
         cleaned = clean_xml_tags(content)
+        # 🔍 诊断：记录清理后的内容
+        logger.info(f"🔍 [卡片转换] 清理后内容: {cleaned[:200]}...")
+
         card = build_formatted_reply_card(content=cleaned)
+        # 🔍 诊断：记录卡片 JSON 格式
+        import json
+        card_json = json.dumps(card, ensure_ascii=False, indent=2)
+        logger.info(f"🔍 [卡片转换] 卡片 JSON 格式:\n{card_json[:1000]}...")
+
         outgoing = OutgoingMessage(
             chat_id=chat_id,
             message_type=MessageType.CARD,
