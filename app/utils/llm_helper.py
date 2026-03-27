@@ -52,41 +52,52 @@ def _normalize_message_content(content: Any) -> str:
     return str(content).strip()
 
 
-def extract_final_report_from_messages(messages: Iterable[Any]) -> str:
-    """从消息列表中提取最后一个有意义的 AI 回复。"""
-    meaningful_messages: list[Any] = list(messages)
-    current_turn_messages: list[Any] = []
-
-    for message in reversed(meaningful_messages):
-        if isinstance(message, HumanMessage):
-            break
-
-        if isinstance(message, dict) and message.get("type") == "human":
-            break
-
-        current_turn_messages.append(message)
-
-    search_messages = list(reversed(current_turn_messages)) if current_turn_messages else []
-
+def _extract_best_ai_reply(search_messages: list[Any]) -> str:
+    """从消息列表（逆序搜索）中找到最后一个有内容的非工具调用 AI 消息。"""
     for message in reversed(search_messages):
         if isinstance(message, AIMessage):
             if getattr(message, "tool_calls", None):
                 continue
-
             text = _normalize_message_content(getattr(message, "content", None))
             if text:
                 return text
-            continue
 
-        if isinstance(message, dict) and message.get("type") in {"ai", "assistant"}:
+        elif isinstance(message, dict) and message.get("type") in {"ai", "assistant"}:
             if message.get("tool_calls"):
                 continue
-
             text = _normalize_message_content(message.get("content"))
             if text:
                 return text
 
     return ""
+
+
+def extract_final_report_from_messages(messages: Iterable[Any]) -> str:
+    """从消息列表中提取最后一个有意义的 AI 回复。
+
+    先搜索当前轮次（最后一条 HumanMessage 之后），若无有效结果
+    则回退到搜索全部消息，避免因框架二次 LLM 调用返回空内容
+    而丢失上一轮已生成的有效回复。
+    """
+    all_messages: list[Any] = list(messages)
+
+    # 1. 优先从当前轮次（最后一条 HumanMessage 之后）搜索
+    current_turn: list[Any] = []
+    for message in reversed(all_messages):
+        is_human = isinstance(message, HumanMessage) or (
+            isinstance(message, dict) and message.get("type") == "human"
+        )
+        if is_human:
+            break
+        current_turn.append(message)
+
+    result = _extract_best_ai_reply(current_turn)
+    if result:
+        return result
+
+    # 2. 当前轮次无有效回复时，搜索全部消息（处理框架二次空调用场景）
+    logger.debug("当前轮次无有效 AI 回复，回退到全量消息搜索")
+    return _extract_best_ai_reply(all_messages)
 
 
 def _ensure_list(value: Any) -> list[Any]:

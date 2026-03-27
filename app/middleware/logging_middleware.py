@@ -113,10 +113,12 @@ class LoggingMiddleware(AgentMiddleware):
                 f"✅ [{session_id}] [{agent_name}] LLM 完成 | 耗时={elapsed:.2f}s | 工具调用: {tools_info}"
             )
         elif not content_text:
-            logger.error(
-                f"❌ [{session_id}] [{agent_name}] LLM 返回了空内容！ | 耗时={elapsed:.2f}s | "
+            # 空响应可能是正常的（DeepAgents 内部调用），降级为 WARNING
+            # 框架会从消息历史中提取最终结果，不一定是错误
+            logger.warning(
+                f"⚠️ [{session_id}] [{agent_name}] LLM 返回空内容 | 耗时={elapsed:.2f}s | "
                 f"provider={provider} | model={model_name} | 消息数={msg_count} | "
-                f"可能原因: 上下文过长或模型超时"
+                f"说明: 可能是框架内部调用，最终结果会从消息历史提取"
             )
         else:
             logger.info(

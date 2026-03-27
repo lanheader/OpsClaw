@@ -116,15 +116,15 @@ async def get_ops_agent(
 
     logger.info(f"📊 加载工具数量: {len(tools)} 个")
 
-    # 配置中间件（执行顺序：ErrorFiltering → Compression → Trimming → Logging）
+    # 配置中间件（执行顺序：ErrorFiltering → Trimming → Logging）
+    # 注意：不使用 ContextCompressionMiddleware，因为它与 DeepAgents 内置的
+    # SummarizationMiddleware 冲突，会导致第二次 LLM 调用使用压缩后的上下文返回空内容
     middleware = [
         ErrorFilteringMiddleware(),  # 过滤工具调用错误消息
-        ContextCompressionMiddleware(max_full_messages=20),  # 压缩早期消息为摘要
         MessageTrimmingMiddleware(max_messages=40),  # 保留最近 40 条消息
         LoggingMiddleware(),
     ]
     logger.info("✅ 错误消息过滤中间件已启用（过滤工具调用错误）")
-    logger.info("✅ 上下文压缩中间件已启用（早期消息压缩为摘要）")
     logger.info("✅ 消息截断中间件已启用（保留最近 40 条消息）")
     logger.info("✅ 日志中间件已启用")
 
