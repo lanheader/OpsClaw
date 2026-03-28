@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+
+# Virtual env
+.venv/
+venv/
+
+# Environment
+.env
+
+# Data & logs
+data/
+*.log
+*.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Backup files
+*.bak.*
+
+# Debug scripts
+debug_agent_invocation.py
+analyze_agent_issue.py
+MESSAGE_PROCESSING_BUG_FIX.py

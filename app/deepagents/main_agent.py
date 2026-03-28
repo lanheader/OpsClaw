@@ -28,7 +28,7 @@ from app.prompts.main_agent import MAIN_AGENT_SYSTEM_PROMPT
 from app.deepagents.subagents import get_all_subagents
 from app.middleware.logging_middleware import LoggingMiddleware
 from app.middleware.message_trimming_middleware import MessageTrimmingMiddleware
-from app.middleware.context_compression_middleware import ContextCompressionMiddleware
+
 from app.middleware.error_filtering_middleware import ErrorFilteringMiddleware
 from app.tools.registry import get_tool_registry
 from app.tools.base import RiskLevel

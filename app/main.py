@@ -184,6 +184,10 @@ async def lifespan(app: FastAPI):
             client.stop()
             logger.info("✅ Feishu long connection stopped")
 
+    # Close checkpointer connection
+    from app.core.checkpointer import shutdown_checkpointer
+    await shutdown_checkpointer()
+
 
 # Create FastAPI application
 app = FastAPI(
