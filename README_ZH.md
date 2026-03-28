@@ -52,12 +52,14 @@ Ops Agent 是一个基于 **DeepAgents 框架**的智能运维自动化平台，
 - **ContextCompressionMiddleware**：压缩早期历史消息为摘要（≥30 条触发）
 - **MessageTrimmingMiddleware**：智能截断消息（保留最近 40 条）
 - **LoggingMiddleware**：记录模型调用、工具执行和耗时
-- **MemoryEnhancedAgent**：从 ChromaDB 检索相关历史知识，增强上下文
+- **MemoryEnhancedAgent**：从 SQLite FTS5 检索相关历史知识，增强上下文
 
-#### 🧠 记忆系统
-- **ChromaDB 向量存储**：轻量级、易使用、纯 Python 实现
-- **跨会话长期记忆**：自动学习和知识积累
-- **消息索引持久化**：解决服务重启后重复发送历史消息问题
+#### 🧠 记忆系统（v3.5 SQLite FTS5）
+- **零外部依赖**：无需 embedding 模型，可部署到任何服务器
+- **FTS5 全文搜索**：BM25 排序，unicode61 分词器支持中英文
+- **LLM 查询扩展**：自动扩展关键词，弥补语义搜索不足
+- **LangGraph Store 集成**：DeepAgents 可原生访问记忆
+- **智能自动学习**：过滤无意义消息，只存储有价值的知识
 
 ### 🎯 三大核心场景
 
@@ -339,9 +341,133 @@ MessageProcessor (统一消息处理编排器)
 **文件**：`app/middleware/memory_middleware.py`
 **职责**：为 Agent 注入长期记忆上下文，增强跨会话知识检索
 **功能**：
-- 从向量存储（ChromaDB）检索相关历史知识
+- 从 SQLite FTS5 检索相关历史知识
 - 将记忆上下文注入到系统提示词
 - 支持自动学习（将新对话写入记忆）
+
+---
+
+## 🧠 记忆系统
+
+### 架构图
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           应用层调用入口                                     │
+│                                                                             │
+│   AgentInvoker.invoke_agent()                                               │
+│       │                                                                     │
+│       ├── 1️⃣ 记忆注入 (build_context)                                       │
+│       │    └── 检索相关记忆 → 增强用户查询                                    │
+│       │                                                                     │
+│       ├── 2️⃣ Agent 执行 (带 store 参数)                                     │
+│       │    └── DeepAgents 可通过 store 原生访问记忆                          │
+│       │                                                                     │
+│       └── 3️⃣ 自动学习 (auto_learn_from_result)                              │
+│            └── 故障处理完成 → 自动存储记忆                                    │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           MemoryManager                                     │
+│                         (统一记忆管理入口)                                    │
+│                                                                             │
+│   功能:                                                                      │
+│   ├── remember_incident()     - 存储故障记忆                                 │
+│   ├── recall_similar_incidents() - 检索相似故障                              │
+│   ├── learn_knowledge()       - 存储知识                                     │
+│   ├── query_knowledge()       - 检索知识                                     │
+│   ├── summarize_session()     - 生成会话摘要                                 │
+│   ├── build_context()         - 构建上下文 (注入到 prompt)                   │
+│   └── auto_learn_from_result() - 自动学习                                    │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                    ┌───────────────┴───────────────┐
+                    ▼                               ▼
+┌───────────────────────────────┐   ┌───────────────────────────────┐
+│     SQLiteMemoryStore         │   │     SQLiteFTSStore            │
+│     (业务层存储)               │   │     (LangGraph Store 适配器)   │
+│                               │   │                               │
+│   数据库: ./data/memory.db    │   │   数据库: ./data/memory_fts.db│
+│                               │   │                               │
+│   表结构:                      │   │   实现 LangGraph BaseStore:   │
+│   ├── incidents_fts           │   │   ├── aput/aput               │
+│   │   └── incidents_meta      │   │   ├── aget/aget               │
+│   ├── knowledge_fts           │   │   ├── adelete/adelete         │
+│   │   └── knowledge_meta      │   │   ├── asearch/asearch (FTS5)  │
+│   └── session_summaries       │   │   └── abatch/abatch           │
+│                               │   │                               │
+└───────────────────────────────┘   └───────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           QueryExpander                                     │
+│                         (查询关键词扩展)                                      │
+│                                                                             │
+│   功能: 弥补关键词搜索的语义不足                                              │
+│                                                                             │
+│   示例:                                                                      │
+│   "pod crash" → "pod crash OOMKilled CrashLoopBackOff RestartCount"        │
+│   "数据库连不上" → "数据库 连接 超时 connection timeout mysql max_connections"│
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 文件说明
+
+| 文件 | 职责 |
+|------|------|
+| `memory_manager.py` | 统一入口，协调记忆注入、检索、学习 |
+| `sqlite_memory_store.py` | 业务层存储（故障/知识/摘要） |
+| `sqlite_fts_store.py` | LangGraph BaseStore 适配器 |
+| `query_expander.py` | LLM 查询关键词扩展（带缓存） |
+
+### 数据流
+
+```
+用户消息 → AgentInvoker
+              │
+              ├── 记忆注入流程 ─────────────────────────────────┐
+              │   │                                              │
+              │   ├── 1. 获取 MemoryManager                      │
+              │   ├── 2. 调用 build_context()                    │
+              │   │    ├── QueryExpander 扩展关键词               │
+              │   │    ├── FTS5 搜索故障记忆 (BM25)               │
+              │   │    ├── FTS5 搜索知识库 (BM25)                 │
+              │   │    └── 检索会话摘要                           │
+              │   ├── 3. 拼接上下文到用户查询                     │
+              │   └── 4. 返回 enhanced_text                      │
+              │                                                  │
+              ├── Agent 执行 (store 参数 → SQLiteFTSStore)       │
+              │                                                  │
+              └── 自动学习流程 ←──────────────────────────────────┘
+                   │
+                   ├── 1. 判断是否为故障处理
+                   ├── 2. 提取解决方案/根因
+                   └── 3. 存储到 FTS5 (自动去重)
+```
+
+### 核心特性
+
+| 特性 | 说明 |
+|------|------|
+| **零外部依赖** | 无需 embedding 模型，可部署到任何服务器 |
+| **FTS5 全文搜索** | BM25 排序，unicode61 分词器支持中英文 |
+| **查询扩展** | LLM 自动扩展关键词，弥补语义搜索不足 |
+| **LangGraph 集成** | 原生 store 参数支持，DeepAgents 可直接访问 |
+| **智能自动学习** | 过滤无意义消息，只存储有价值的内容 |
+
+### 自动学习
+
+系统自动从运维对话中学习，但有智能过滤：
+- ✅ **学习**: 故障诊断、修复操作、知识问答（长度 ≥ 10 字符）
+- ❌ **跳过**: "/new"、"/help"、"你好"、"谢谢" 等无意义消息
+
+### 会话摘要
+
+会话摘要采用覆盖更新策略（固定 doc_id），避免存储膨胀。
 
 ---
 
@@ -438,7 +564,7 @@ ChannelRegistry.register(SlackChannelAdapter(config))
 - **数据库**: SQLAlchemy 2.0 + SQLite
 - **认证**: JWT + Passlib
 - **LLM**: OpenAI / Claude / 智谱 AI / Ollama
-- **向量存储**: ChromaDB（轻量级、纯 Python）
+- **记忆存储**: SQLite FTS5（零外部依赖，支持中英文全文搜索）
 - **日志**: Loguru（自动异常捕获、日志轮转）
 
 ### 前端
@@ -568,9 +694,10 @@ ops-agent-langgraph/
 │   ├── core/                    # 核心模块
 │   ├── models/                  # 数据库模型
 │   ├── services/                # 业务服务层
-│   ├── memory/                  # 记忆系统
-│   │   ├── chroma_store.py      # ChromaDB 向量存储
-│   │   └── memory_manager.py    # 记忆管理器
+│   ├── memory/                  # 记忆系统 (SQLite FTS5)
+│   │   ├── memory_manager.py    # 统一管理器
+│   │   ├── sqlite_memory_store.py # 业务层存储
+│   │   └── sqlite_fts_store.py  # LangGraph BaseStore 适配
 │   └── utils/                   # 工具函数
 │       └── loguru_config.py     # Loguru 日志配置
 ├── frontend/                    # React 前端
@@ -703,7 +830,7 @@ uv run python scripts/init_auth_db.py
 - [FastAPI](https://github.com/tiangolo/fastapi)
 - [React](https://github.com/facebook/react)
 - [Ant Design](https://github.com/ant-design/ant-design)
-- [ChromaDB](https://github.com/chroma-core/chroma)
+- [SQLite FTS5](https://www.sqlite.org/fts5.html)
 - [Loguru](https://github.com/Delgan/loguru)
 
 ---

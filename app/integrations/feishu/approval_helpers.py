@@ -38,32 +38,32 @@ async def _send_card_message(channel_adapter, chat_id: str, content: str) -> Non
     await channel_adapter.send_message(outgoing)
 
 
-def _build_resume_value(decision: str, message: str = "") -> Dict[str, Any]:
+def _build_resume_value(decision: str, message: str = "", num_decisions: int = 1) -> Dict[str, Any]:
     """
     构建 DeepAgents HITLResponse 格式的恢复值
 
     Args:
         decision: 决策类型 (approved/rejected)
         message: 拒绝原因（可选）
+        num_decisions: 需要的决策数量（对应挂起的工具调用数量）
 
     Returns:
         HITLResponse 格式的字典
     """
     if decision == "approved":
-        return {
-            "decisions": [
-                {"type": "approve"}
-            ]
-        }
+        # 为每个挂起的工具调用创建一个批准决策
+        decisions = [{"type": "approve"} for _ in range(num_decisions)]
+        return {"decisions": decisions}
     else:
-        return {
-            "decisions": [
-                {
-                    "type": "reject",
-                    "message": message or "用户拒绝了此操作"
-                }
-            ]
-        }
+        # 为每个挂起的工具调用创建一个拒绝决策
+        decisions = [
+            {
+                "type": "reject",
+                "message": message or "用户拒绝了此操作"
+            }
+            for _ in range(num_decisions)
+        ]
+        return {"decisions": decisions}
 
 
 def _extract_response_from_state(state: Dict[str, Any]) -> str:
@@ -82,14 +82,25 @@ def _extract_response_from_state(state: Dict[str, Any]) -> str:
     # 确保 final_report 存在
     state = ensure_final_report_in_state(state)
 
-    # 尝试多种字段名
+    # 尝试多种字段名（按优先级）
     response = (
         state.get("formatted_response", "") or
         state.get("final_report", "") or
-        state.get("response", "")
+        state.get("final_answer", "") or  # DeepAgents 可能使用这个字段
+        state.get("response", "") or
+        state.get("answer", "")
     )
 
-    return response
+    if response:
+        return response
+
+    # 如果上述字段都为空，尝试从 messages 中提取
+    messages = state.get("messages", [])
+    if messages:
+        from app.utils.llm_helper import extract_final_report_from_messages
+        return extract_final_report_from_messages(messages)
+
+    return ""
 
 
 async def handle_approval_response(
@@ -134,17 +145,21 @@ async def handle_approval_response(
         config = get_thread_config(session_id)
 
         # 根据决策构建恢复命令（使用正确的 HITLResponse 格式）
-        resume_value = _build_resume_value(decision, user_response)
+        # 获取需要决策的工具调用数量
+        action_requests = approval_data.get('action_requests', [])
+        num_decisions = len(action_requests) if action_requests else 1
+        resume_value = _build_resume_value(decision, user_response, num_decisions)
 
         if decision == "approved":
-            logger.info(f"✅ 用户同意，准备继续执行: resume_value={resume_value}")
+            logger.info(f"✅ 用户同意，准备继续执行: num_decisions={num_decisions}, resume_value={resume_value}")
         else:
-            logger.info(f"❌ 用户拒绝，准备中止执行: resume_value={resume_value}")
+            logger.info(f"❌ 用户拒绝，准备中止执行: num_decisions={num_decisions}, resume_value={resume_value}")
 
         all_replies = []
         event_count = 0
         last_state = None
         new_interrupt_detected = False
+        collected_messages = []  # 收集所有消息，用于最终回复
 
         try:
             # 使用 astream + Command 恢复执行
@@ -157,7 +172,7 @@ async def handle_approval_response(
                 # 🔍 诊断：打印事件结构
                 if isinstance(event, dict):
                     event_keys = list(event.keys())
-                    logger.debug(f"🔍 收到事件 #{event_count}: keys={event_keys}")
+                    logger.info(f"🔍 收到事件 #{event_count}: keys={event_keys}")
 
                     # 检查是否又触发了新的审批中断
                     if "__interrupt__" in event:
@@ -181,20 +196,61 @@ async def handle_approval_response(
                     for key, value in event.items():
                         if key == "__interrupt__":
                             continue
-                        if isinstance(value, dict) and "messages" in value:
-                            last_state = value
-                            logger.debug(f"🔍 更新 last_state from node: {key}")
+                        if isinstance(value, dict):
+                            # 打印状态的键，帮助调试
+                            state_keys = list(value.keys()) if isinstance(value, dict) else []
+                            logger.info(f"🔍 节点 '{key}' 状态键: {state_keys}")
 
-            logger.info(f"🔍 工作流恢复完成: 收到 {event_count} 个事件")
+                            if "messages" in value:
+                                last_state = value
+                                msg_count = len(value.get("messages", []))
+                                logger.info(f"🔍 更新 last_state from node: {key}, messages 数量: {msg_count}")
+
+                                # 收集新增的消息（用于最终提取回复）
+                                messages = value.get("messages", [])
+                                if messages:
+                                    collected_messages.extend(messages)
+
+            logger.info(f"🔍 工作流恢复完成: 收到 {event_count} 个事件, 收集 {len(collected_messages)} 条消息")
 
             # 从最后一个状态提取回复
             if last_state:
-                response = _extract_response_from_state(last_state)
-                if response:
-                    logger.info(f"✅ 提取到回复 (长度: {len(response)})")
-                    all_replies.append(response)
+                # 🔍 调试：打印 last_state 的所有键
+                logger.info(f"🔍 last_state 键: {list(last_state.keys())}")
+
+                # 优先从 collected_messages 提取（更完整）
+                if collected_messages:
+                    logger.info(f"🔍 从 collected_messages 提取回复 ({len(collected_messages)} 条)")
+                    from app.utils.llm_helper import extract_final_report_from_messages
+                    response = extract_final_report_from_messages(collected_messages)
+                    if response:
+                        logger.info(f"✅ 从 collected_messages 提取到回复 (长度: {len(response)})")
+                        logger.debug(f"📝 回复预览: {response[:200]}...")
+                        all_replies.append(response)
+                    else:
+                        # 回退到从 last_state 提取
+                        response = _extract_response_from_state(last_state)
+                        if response:
+                            logger.info(f"✅ 从 last_state 提取到回复 (长度: {len(response)})")
+                            all_replies.append(response)
                 else:
-                    logger.warning("⚠️ 未能从 last_state 提取到回复")
+                    # 没有 collected_messages，直接从 last_state 提取
+                    response = _extract_response_from_state(last_state)
+                    if response:
+                        logger.info(f"✅ 提取到回复 (长度: {len(response)})")
+                        logger.debug(f"📝 回复预览: {response[:200]}...")
+                        all_replies.append(response)
+                    else:
+                        logger.warning("⚠️ 未能从 last_state 提取到回复")
+                        # 尝试从 messages 中提取
+                        messages = last_state.get("messages", [])
+                        if messages:
+                            logger.info(f"🔍 尝试从 messages 提取回复 ({len(messages)} 条消息)")
+                            from app.utils.llm_helper import extract_final_report_from_messages
+                            response = extract_final_report_from_messages(messages)
+                            if response:
+                                logger.info(f"✅ 从 messages 提取到回复 (长度: {len(response)})")
+                                all_replies.append(response)
 
             # 如果检测到新的中断，返回 interrupted 状态
             if new_interrupt_detected:

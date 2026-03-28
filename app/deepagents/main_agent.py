@@ -206,10 +206,10 @@ async def get_ops_agent(
 
     checkpointer = await get_checkpointer()
 
-    # 获取 ChromaDB Store 适配器（用于 DeepAgents 原生记忆集成）
+    # 获取 Store 适配器（SQLite FTS5 全文搜索，零外部依赖）
     from app.memory import get_langgraph_store
     store = get_langgraph_store()
-    logger.info("🧠 ChromaDB Store 适配器已加载")
+    logger.info("🧠 SQLite FTS5 Store 适配器已加载（全文搜索，零外部依赖）")
 
     # 如果有需要审批的工具，构建 interrupt_on 配置
     if tools_need_approval:

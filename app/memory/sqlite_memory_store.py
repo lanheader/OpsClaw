@@ -73,12 +73,29 @@ class SQLiteMemoryStore:
 
     @staticmethod
     def _escape_fts_query(query: str) -> str:
-        """转义 FTS5 特殊字符，将词转为 OR 查询"""
-        # 转义双引号和特殊运算符
-        escaped = query.replace('"', '""')
+        """
+        转义 FTS5 特殊字符，将词转为 OR 查询
+
+        FTS5 特殊字符: " * ( ) ^ # : - |
+        空查询返回空字符串，调用方需要特殊处理
+        """
+        if not query or not query.strip():
+            return ""
+
+        # 移除 FTS5 特殊运算符字符（保留字母数字和中文）
+        # 这些字符在 FTS5 中有特殊含义，可能导致语法错误
+        cleaned = re.sub(r'[*()^#:|\-]', ' ', query)
+
+        # 转义双引号
+        cleaned = cleaned.replace('"', '""')
+
         # 把空格/逗号分隔的词转为 OR 查询
-        terms = [f'"{t.strip()}"' for t in re.split(r'[\s,;，；]+', escaped) if t.strip()]
-        return " OR ".join(terms) if terms else escaped
+        terms = [f'"{t.strip()}"' for t in re.split(r'[\s,;，；]+', cleaned) if t.strip()]
+
+        if not terms:
+            return ""
+
+        return " OR ".join(terms)
 
     # ===== 故障记忆 =====
 
@@ -108,6 +125,11 @@ class SQLiteMemoryStore:
         self, query: str, top_k: int = 5, incident_type: str = None
     ) -> List[Dict[str, Any]]:
         terms = self._escape_fts_query(query)
+
+        # 空查询时返回空列表（或可根据需求返回最新记录）
+        if not terms:
+            return []
+
         try:
             with sqlite3.connect(self.db_path) as conn:
                 if incident_type:
@@ -173,6 +195,11 @@ class SQLiteMemoryStore:
         self, query: str, top_k: int = 5, category: str = None
     ) -> List[Dict[str, Any]]:
         terms = self._escape_fts_query(query)
+
+        # 空查询时返回空列表
+        if not terms:
+            return []
+
         try:
             with sqlite3.connect(self.db_path) as conn:
                 if category:

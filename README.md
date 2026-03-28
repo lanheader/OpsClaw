@@ -51,11 +51,11 @@ Ops Agent is an intelligent operations automation platform built on the **DeepAg
 - **MessageTrimmingMiddleware**: Intelligently trim messages (keep last 40)
 - **LoggingMiddleware**: Record model calls, tool execution, and latency
 
-#### 🧠 Dual-Engine Memory System (v3.4 New)
-- **Vector Mode (ChromaDB)**: Semantic search with cosine distance, requires embedding model
-- **Keyword Mode (SQLite FTS5)**: Zero-dependency keyword search with BM25 ranking, no embedding needed
+#### 🧠 Memory System (v3.5 SQLite FTS5)
+- **Zero Dependencies**: No external embedding model required
+- **FTS5 Full-Text Search**: BM25 ranking, unicode61 tokenizer for Chinese/English
 - **LLM Query Expander**: Expands natural language to related keywords for better recall
-- **Auto Mode Switch**: Controlled by `ENABLE_VECTOR_MEMORY` config
+- **LangGraph Store Integration**: Native memory access for DeepAgents
 - **Smart Auto-Learning**: Filters out meaningless messages before storing
 
 ---
@@ -96,9 +96,6 @@ ZHIPU_API_KEY=your_key_here
 # Database (required)
 DATABASE_URL=sqlite:///./data/ops_agent_v2.db
 CHECKPOINT_DB_URL=sqlite:///./data/ops_checkpoints.db
-
-# Memory (optional, default: vector mode)
-ENABLE_VECTOR_MEMORY=true  # Set false for production without embedding model
 
 # JWT Secret (required, change in production)
 JWT_SECRET_KEY=your-secret-key-here-change-in-production
@@ -163,13 +160,14 @@ uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
-│              Memory System (Dual Engine)                         │
-│  ┌──────────────────────┐  ┌──────────────────────┐           │
-│  │  ChromaDB (Vector)   │  │  SQLite FTS5 (Keyword)│          │
-│  │  • Semantic search   │  │  • BM25 ranking      │          │
-│  │  • Cosine distance   │  │  • Zero dependencies  │          │
-│  │  • Needs embedding   │  │  • LLM query expand  │          │
-│  └──────────────────────┘  └──────────────────────┘           │
+│              Memory System (SQLite FTS5)                         │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │  SQLiteMemoryStore + SQLiteFTSStore                       │  │
+│  │  • Zero dependencies (no embedding model)                 │  │
+│  │  • FTS5 full-text search + BM25 ranking                   │  │
+│  │  • LLM query expander for better recall                   │  │
+│  │  • LangGraph BaseStore integration                        │  │
+│  └──────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
@@ -205,37 +203,103 @@ uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 ## 🧠 Memory System
 
-### Dual-Engine Architecture
+### Architecture
 
-| 特性 | Vector Mode (ChromaDB) | Keyword Mode (SQLite FTS5) |
-|------|----------------------|--------------------------|
-| **依赖** | 需要 embedding 模型 | 零外部依赖 |
-| **搜索方式** | 语义相似度 (cosine) | 关键词匹配 (BM25) |
-| **适用场景** | 开发环境 (有 Ollama) | 生产环境 (无 embedding) |
-| **配置** | `ENABLE_VECTOR_MEMORY=true` | `ENABLE_VECTOR_MEMORY=false` |
-| **查询扩展** | 不需要 | LLM 自动扩展关键词 |
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           Application Layer                                  │
+│                                                                             │
+│   AgentInvoker.invoke_agent()                                               │
+│       │                                                                     │
+│       ├── 1️⃣ Memory Injection (build_context)                               │
+│       │    └── Retrieve relevant memories → Enhance user query              │
+│       │                                                                     │
+│       ├── 2️⃣ Agent Execution (with store parameter)                         │
+│       │    └── DeepAgents can access memory via store natively              │
+│       │                                                                     │
+│       └── 3️⃣ Auto-Learning (auto_learn_from_result)                         │
+│            └── Incident resolved → Auto-store memory                        │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           MemoryManager                                     │
+│                         (Unified Memory Entry)                               │
+│                                                                             │
+│   Functions:                                                                 │
+│   ├── remember_incident()     - Store incident memory                       │
+│   ├── recall_similar_incidents() - Retrieve similar incidents               │
+│   ├── learn_knowledge()       - Store knowledge                             │
+│   ├── query_knowledge()       - Query knowledge                             │
+│   ├── summarize_session()     - Generate session summary                    │
+│   ├── build_context()         - Build context for prompt injection          │
+│   └── auto_learn_from_result() - Auto-learn from results                    │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                    ┌───────────────┴───────────────┐
+                    ▼                               ▼
+┌───────────────────────────────┐   ┌───────────────────────────────┐
+│     SQLiteMemoryStore         │   │     SQLiteFTSStore            │
+│     (Business Layer)          │   │     (LangGraph Store Adapter)  │
+│                               │   │                               │
+│   Database: ./data/memory.db  │   │   Database: ./data/memory_fts.db│
+│                               │   │                               │
+│   Tables:                     │   │   Implements BaseStore:        │
+│   ├── incidents_fts           │   │   ├── aput/aput               │
+│   │   └── incidents_meta      │   │   ├── aget/aget               │
+│   ├── knowledge_fts           │   │   ├── adelete/adelete         │
+│   │   └── knowledge_meta      │   │   ├── asearch/asearch (FTS5)  │
+│   └── session_summaries       │   │   └── abatch/abatch           │
+│                               │   │                               │
+└───────────────────────────────┘   └───────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           QueryExpander                                     │
+│                         (Keyword Expansion)                                  │
+│                                                                             │
+│   Purpose: Bridge the semantic gap in keyword search                        │
+│                                                                             │
+│   Examples:                                                                  │
+│   "pod crash" → "pod crash OOMKilled CrashLoopBackOff RestartCount"        │
+│   "db connection failed" → "db connection timeout mysql max_connections"   │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
 
 ### Memory Components
 
 ```
 app/memory/
-├── memory_manager.py        # 统一记忆管理器 (双模式切换)
-├── chroma_store.py          # ChromaDB 向量存储 (vector 模式)
-├── sqlite_memory_store.py   # SQLite FTS5 存储 (keyword 模式)
-├── query_expander.py        # LLM 查询扩展 (keyword 模式)
-├── langgraph_store.py       # LangGraph BaseStore 适配器
-└── vector_store.py          # 向量存储工具函数
+├── __init__.py               # Module exports, get_langgraph_store()
+├── memory_manager.py         # Unified memory manager
+├── sqlite_memory_store.py    # Business layer storage (incidents/knowledge/summary)
+├── sqlite_fts_store.py       # LangGraph BaseStore adapter
+└── query_expander.py         # LLM query expansion (with cache)
 ```
+
+### Features
+
+| Feature | Description |
+|---------|-------------|
+| **Zero Dependencies** | No embedding model required |
+| **FTS5 Full-Text Search** | BM25 ranking, unicode61 tokenizer |
+| **Chinese/English Support** | Built-in unicode61 tokenizer |
+| **Query Expansion** | LLM expands keywords for better recall |
+| **LangGraph Integration** | Native store parameter support |
+| **Auto-Learning** | Smart filtering of meaningless messages |
 
 ### Auto-Learning
 
-系统自动从运维对话中学习，但有智能过滤：
-- ✅ **学习**: 故障诊断、修复操作、知识问答（长度 ≥ 10 字符）
-- ❌ **跳过**: "/new"、"/help"、"你好"、"谢谢" 等无意义消息
+System automatically learns from operations conversations with smart filtering:
+- ✅ **Learn**: Incident diagnosis, fix operations, knowledge Q&A (length ≥ 10 chars)
+- ❌ **Skip**: "/new", "/help", "你好", "谢谢" and other meaningless messages
 
 ### Session Summary
 
-会话摘要采用覆盖更新策略（固定 doc_id），避免存储膨胀。
+Session summaries use overwrite strategy (fixed doc_id) to avoid storage bloat.
 
 ---
 
@@ -268,7 +332,7 @@ app/memory/
 | **Database** | SQLAlchemy 2.0 + SQLite (分离: 业务 + Checkpointer) |
 | **Auth** | JWT + Passlib |
 | **LLM** | OpenAI / Claude / Zhipu AI / Ollama |
-| **Vector Store** | ChromaDB (可选) |
+| **Memory Store** | SQLite FTS5 (内置) |
 | **Keyword Store** | SQLite FTS5 (内置) |
 | **Logging** | Loguru |
 | **Frontend** | React 18 + TypeScript + Ant Design 5 + Vite |
@@ -287,12 +351,12 @@ app/memory/
 # LLM
 DEFAULT_LLM_PROVIDER=zhipu  # openai, claude, zhipu, ollama
 
-# Database (分离存储)
+# Database (separated storage)
 DATABASE_URL=sqlite:///./data/ops_agent_v2.db
 CHECKPOINT_DB_URL=sqlite:///./data/ops_checkpoints.db
 
-# Memory System
-ENABLE_VECTOR_MEMORY=true  # true=ChromaDB, false=SQLite FTS5
+# Memory System (SQLite FTS5, zero dependencies)
+MEMORY_DB_PATH=./data/memory.db
 
 # Feishu
 FEISHU_ENABLED=true
@@ -327,13 +391,11 @@ OpsClaw/
 │   │   ├── error_filtering_middleware.py
 │   │   ├── message_trimming_middleware.py
 │   │   └── logging_middleware.py
-│   ├── memory/                      # 记忆系统 (双引擎)
+│   ├── memory/                      # 记忆系统 (SQLite FTS5)
 │   │   ├── memory_manager.py        # 统一管理器
-│   │   ├── chroma_store.py          # ChromaDB 向量存储
-│   │   ├── sqlite_memory_store.py   # SQLite FTS5 关键词存储
-│   │   ├── query_expander.py        # LLM 查询扩展
-│   │   ├── langgraph_store.py       # LangGraph BaseStore 适配
-│   │   └── vector_store.py          # 向量工具
+│   │   ├── sqlite_memory_store.py   # 业务层存储
+│   │   ├── sqlite_fts_store.py      # LangGraph BaseStore 适配
+│   │   └── query_expander.py        # LLM 查询扩展
 │   ├── tools/                       # 工具层 (SDK → CLI 降级)
 │   │   ├── k8s/                     # K8s 工具 (19 read + 3 write + 6 delete)
 │   │   ├── prometheus/              # Prometheus 工具
