@@ -23,7 +23,9 @@ from app.integrations.feishu.message_formatter import (
     format_pending_approval_warning,
     format_error_message,
     format_approval_confirmed,
+    clean_xml_tags,
 )
+from app.integrations.feishu.message import build_formatted_reply_card
 
 from app.integrations.messaging.base_channel import ChannelContext, MessageType, OutgoingMessage
 
@@ -41,6 +43,17 @@ class ApprovalHandler:
             channel_adapter: 渠道适配器
         """
         self.channel = channel_adapter
+
+    async def _send_card_message(self, chat_id: str, content: str) -> None:
+        """发送卡片消息（支持 Markdown 渲染）"""
+        cleaned = clean_xml_tags(content)
+        card = build_formatted_reply_card(content=cleaned)
+        outgoing = OutgoingMessage(
+            chat_id=chat_id,
+            message_type=MessageType.CARD,
+            content=card,
+        )
+        await self.channel.send_message(outgoing)
 
     async def handle_pending_approval(
         self,
@@ -159,14 +172,61 @@ class ApprovalHandler:
                 logger.info(f"🔒 工作流恢复后有新的审批请求，等待用户审批")
                 # 审批信息已经在 handle_approval_response 中保存
                 # 发送确认消息
-                from app.integrations.feishu.message_formatter import format_approval_confirmed
+                from app.integrations.feishu.message_formatter import format_approval_confirmed, format_approval_request
                 confirm_msg = format_approval_confirmed(decision)
-                outgoing = OutgoingMessage(
-                    chat_id=context.chat_id,
-                    message_type=MessageType.TEXT,
-                    content={"text": confirm_msg}
-                )
-                await self.channel.send_message(outgoing)
+                await self._send_card_message(context.chat_id, confirm_msg)
+
+                # 🔥 重要：发送新的审批请求消息给用户
+                # 从 SessionStateManager 获取新的审批信息
+                new_approval_data = SessionStateManager.check_awaiting_approval(context.session_id)
+                if new_approval_data:
+                    logger.info(f"📋 发送新的审批请求消息给用户")
+                    # 从 HITLRequest 格式转换为显示格式
+                    action_requests = new_approval_data.get('action_requests', [])
+                    commands = []
+                    for req in action_requests:
+                        tool_name = req.get('name', 'unknown')
+                        tool_args = req.get('args', {})
+                        description = req.get('description', '')
+
+                        # 从工具名推断类型
+                        if tool_name.startswith('delete_') or tool_name.startswith('restart_') or tool_name.startswith('scale_'):
+                            tool_type = 'k8s'
+                        elif tool_name.startswith('query_') or tool_name.startswith('get_'):
+                            if 'prometheus' in tool_name.lower() or 'cpu' in tool_name.lower() or 'memory' in tool_name.lower():
+                                tool_type = 'prometheus'
+                            elif 'log' in tool_name.lower():
+                                tool_type = 'logs'
+                            else:
+                                tool_type = 'k8s'
+                        else:
+                            tool_type = 'k8s'
+
+                        commands.append({
+                            'type': tool_type,
+                            'action': tool_name,
+                            'params': tool_args,
+                            'reason': description
+                        })
+
+                    # 从 review_configs 推断风险等级
+                    review_configs = new_approval_data.get('review_configs', [])
+                    risk_level = '中等风险'
+                    if review_configs:
+                        allowed_decisions = review_configs[0].get('allowed_decisions', [])
+                        if 'reject' in allowed_decisions:
+                            risk_level = '高风险操作'
+                        elif 'edit' in allowed_decisions:
+                            risk_level = '中等风险'
+
+                    approval_msg = format_approval_request(
+                        commands=commands,
+                        risk_level=risk_level,
+                        user_input=''
+                    )
+                    await self._send_card_message(context.chat_id, approval_msg)
+                else:
+                    logger.warning(f"⚠️ 无法获取新的审批信息，session_id={context.session_id}")
             elif resume_status == "not_awaiting":
                 logger.warning(f"⚠️ 会话 {context.session_id} 不在等待批准状态")
             else:
@@ -186,14 +246,7 @@ class ApprovalHandler:
             commands_summary=approval_data.get("commands_summary", "未知操作"),
             risk_level=approval_data.get("risk_level", "未知"),
         )
-
-        outgoing = OutgoingMessage(
-            chat_id=context.chat_id,
-            message_type=MessageType.TEXT,
-            content={"text": clarification_msg}
-        )
-
-        await self.channel.send_message(outgoing)
+        await self._send_card_message(context.chat_id, clarification_msg)
 
     async def _send_insufficient_confidence_message(
         self,
@@ -203,14 +256,7 @@ class ApprovalHandler:
     ) -> None:
         """发送置信度不足消息"""
         msg = format_insufficient_confidence(confidence, approval_data)
-
-        outgoing = OutgoingMessage(
-            chat_id=context.chat_id,
-            message_type=MessageType.TEXT,
-            content={"text": msg}
-        )
-
-        await self.channel.send_message(outgoing)
+        await self._send_card_message(context.chat_id, msg)
 
     async def _send_pending_approval_warning(
         self,
@@ -219,26 +265,12 @@ class ApprovalHandler:
     ) -> None:
         """发送待审批警告消息"""
         msg = format_pending_approval_warning(approval_data)
-
-        outgoing = OutgoingMessage(
-            chat_id=context.chat_id,
-            message_type=MessageType.TEXT,
-            content={"text": msg}
-        )
-
-        await self.channel.send_message(outgoing)
+        await self._send_card_message(context.chat_id, msg)
 
     async def _send_error_message(self, chat_id: str, error_msg: str) -> None:
         """发送错误消息"""
         msg = format_error_message(error_msg)
-
-        outgoing = OutgoingMessage(
-            chat_id=chat_id,
-            message_type=MessageType.TEXT,
-            content={"text": msg}
-        )
-
         try:
-            await self.channel.send_message(outgoing)
+            await self._send_card_message(chat_id, msg)
         except Exception as e:
             logger.error(f"发送错误消息失败: {e}")

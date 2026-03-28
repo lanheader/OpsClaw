@@ -19,9 +19,23 @@ from app.utils.logger import get_logger
 from app.deepagents.factory import create_agent_for_session
 from app.services.session_state_manager import SessionStateManager
 from app.integrations.messaging.base_channel import OutgoingMessage, MessageType
+from app.integrations.feishu.message import build_formatted_reply_card
+from app.integrations.feishu.message_formatter import clean_xml_tags
 from app.utils.llm_helper import ensure_final_report_in_state
 
 logger = get_logger(__name__)
+
+
+async def _send_card_message(channel_adapter, chat_id: str, content: str) -> None:
+    """发送卡片消息（支持 Markdown 渲染）"""
+    cleaned = clean_xml_tags(content)
+    card = build_formatted_reply_card(content=cleaned)
+    outgoing = OutgoingMessage(
+        chat_id=chat_id,
+        message_type=MessageType.CARD,
+        content=card,
+    )
+    await channel_adapter.send_message(outgoing)
 
 
 def _build_resume_value(decision: str, message: str = "") -> Dict[str, Any]:
@@ -209,12 +223,7 @@ async def handle_approval_response(
         # 发送回复
         if channel_adapter and all_replies:
             for reply in all_replies:
-                outgoing = OutgoingMessage(
-                    chat_id=chat_id,
-                    message_type=MessageType.TEXT,
-                    content={"text": reply}
-                )
-                await channel_adapter.send_message(outgoing)
+                await _send_card_message(channel_adapter, chat_id, reply)
 
         # 清除审批状态
         SessionStateManager.reset_to_normal(session_id)
@@ -226,11 +235,9 @@ async def handle_approval_response(
         # 发送错误消息
         if channel_adapter:
             error_msg = f"❌ 处理批准响应失败: {str(exc)}"
-            outgoing = OutgoingMessage(
-                chat_id=chat_id,
-                message_type=MessageType.TEXT,
-                content={"text": error_msg}
-            )
-            await channel_adapter.send_message(outgoing)
+            try:
+                await _send_card_message(channel_adapter, chat_id, error_msg)
+            except Exception as send_err:
+                logger.error(f"发送错误消息失败: {send_err}")
 
         raise

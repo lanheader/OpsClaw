@@ -233,10 +233,13 @@ class AgentInvoker:
                                     user_input=''  # 用户输入需要从上下文获取，暂时留空
                                 )
 
+                                # 使用卡片格式发送审批请求
+                                cleaned_approval = clean_xml_tags(approval_msg)
+                                approval_card = build_formatted_reply_card(content=cleaned_approval)
                                 outgoing = OutgoingMessage(
                                     chat_id=context.chat_id,
-                                    message_type=MessageType.TEXT,
-                                    content={"text": approval_msg}
+                                    message_type=MessageType.CARD,
+                                    content=approval_card
                                 )
                                 await self.channel.send_message(outgoing)
 
