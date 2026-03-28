@@ -462,7 +462,7 @@ ChannelRegistry.register(SlackChannelAdapter(config))
 ### 核心文档
 
 - **[📖 项目完整文档](./PROJECT_DOCUMENTATION.md)** - 包含所有功能、架构、API、部署等详细说明
-- **[🤖 Claude 指南](./CLAUDE.md)** - Claude Code 项目指南
+- **[🤖 Claude 指南](CLAUDE_bak.md)** - Claude Code 项目指南
 - **[🔧 工具降级机制](./docs/TOOL_FALLBACK_SUMMARY.md)** - SDK 优先，自动降级到命令行
 - **[🔗 飞书集成](./docs/FEISHU_INTEGRATION.md)** - 飞书长连接和卡片交互
 

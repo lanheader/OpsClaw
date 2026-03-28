@@ -36,3 +36,6 @@ Thumbs.db
 debug_agent_invocation.py
 analyze_agent_issue.py
 MESSAGE_PROCESSING_BUG_FIX.py
+MEMORY_SYSTEM_FIX_SUMMARY.md
+MEMORY_SYSTEM_IMPROVEMENT_SUMMARY.md
+CLAUDE.md
