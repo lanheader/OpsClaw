@@ -11,13 +11,18 @@ from typing import Optional, Dict, Any
 from app.utils.logger import get_logger
 from app.services.session_state_manager import SessionStateManager
 from app.core.llm_factory import LLMFactory
-from app.services.approval_intent_service import classify_approval_intent
+from app.services.approval_intent_service import (
+    classify_approval_intent,
+    is_approval_keyword,
+    is_rejection_keyword,
+)
 from app.integrations.feishu.approval_helpers import handle_approval_response
 from app.integrations.feishu.message_formatter import (
     format_clarification_request,
     format_insufficient_confidence,
     format_pending_approval_warning,
     format_error_message,
+    format_approval_confirmed,
 )
 
 from app.integrations.messaging.base_channel import ChannelContext, MessageType, OutgoingMessage
@@ -62,6 +67,17 @@ class ApprovalHandler:
         logger.info(f"📋 批准数据: {approval_data}")
 
         try:
+            # 先尝试快速关键词匹配（无需 LLM，作为备选方案）
+            if is_approval_keyword(text):
+                logger.info(f"🚀 快速匹配: 检测到批准关键词")
+                await self.resume_flow(context, "approved", text)
+                return True
+
+            if is_rejection_keyword(text):
+                logger.info(f"🚀 快速匹配: 检测到拒绝关键词")
+                await self.resume_flow(context, "rejected", text)
+                return True
+
             # 使用 LLM 进行意图识别
             llm = LLMFactory.create_llm()
             intent_result = await classify_approval_intent(
@@ -138,6 +154,19 @@ class ApprovalHandler:
                 logger.info(f"✅ 工作流已恢复: decision={decision}")
                 # 处理完成后清理会话状态
                 SessionStateManager.reset_to_normal(context.session_id)
+            elif resume_status == "interrupted":
+                # 有新的审批请求，这是正常状态，不需要清理会话状态
+                logger.info(f"🔒 工作流恢复后有新的审批请求，等待用户审批")
+                # 审批信息已经在 handle_approval_response 中保存
+                # 发送确认消息
+                from app.integrations.feishu.message_formatter import format_approval_confirmed
+                confirm_msg = format_approval_confirmed(decision)
+                outgoing = OutgoingMessage(
+                    chat_id=context.chat_id,
+                    message_type=MessageType.TEXT,
+                    content={"text": confirm_msg}
+                )
+                await self.channel.send_message(outgoing)
             elif resume_status == "not_awaiting":
                 logger.warning(f"⚠️ 会话 {context.session_id} 不在等待批准状态")
             else:

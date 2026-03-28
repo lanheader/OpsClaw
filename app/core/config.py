@@ -71,6 +71,12 @@ class Settings(BaseSettings):
     OLLAMA_MODEL: str = "mistral"
     OLLAMA_TEMPERATURE: float = 0.0
 
+    # LLM 连接测试
+    LLM_SKIP_CONNECTION_TEST: bool = Field(
+        default=False,
+        description="跳过 LLM 连接测试（只测试地址和端口，不发送消息）"
+    )
+
     # ========== Feishu Integration ==========
     FEISHU_ENABLED: bool = False
     FEISHU_APP_ID: Optional[str] = None

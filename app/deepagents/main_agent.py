@@ -167,10 +167,11 @@ async def get_ops_agent(
             config_db.close()
 
     # 在系统提示词中添加审批工具列表
+    # 注意：不告诉 LLM 要手动询问用户，因为 interrupt_on 会自动处理审批流程
     system_prompt = MAIN_AGENT_SYSTEM_PROMPT
     if tools_need_approval:
         approval_list = "\n".join([f"  - {tool}" for tool in sorted(tools_need_approval)])
-        system_prompt += f"\n\n⚠️ **重要提示：以下工具需要用户审批才能执行**\n\n{approval_list}\n\n在调用这些工具之前，你必须先向用户说明你要执行的操作，并明确询问用户是否同意。只有在用户明确同意后，才能调用这些工具。"
+        system_prompt += f"\n\n⚠️ **注意：以下工具属于高风险操作**\n\n{approval_list}\n\n当你需要使用这些工具时，直接调用即可，系统会自动处理审批流程。"
 
     # ========== 输出可用工具列表 ==========
     logger.info("=" * 60)
