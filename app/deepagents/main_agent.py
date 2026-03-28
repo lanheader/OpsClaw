@@ -14,7 +14,9 @@ DeepAgents 主智能体配置
 """
 
 from collections import defaultdict
+import os
 from deepagents import create_deep_agent
+from deepagents.backends.filesystem import FilesystemBackend
 from langchain_core.language_models import BaseChatModel
 from typing import Any, Optional, Set
 from sqlalchemy.orm import Session
@@ -217,6 +219,11 @@ async def get_ops_agent(
         interrupt_on = None
 
 
+    # Skills 目录（支持安装第三方 skills）
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+    skills_dir = os.path.join(project_root, "skills")
+    has_skills = os.path.isdir(skills_dir)
+
     agent = create_deep_agent(
         name="OpsAgent",  # 添加智能体名称，便于调试
         model=llm,
@@ -227,7 +234,11 @@ async def get_ops_agent(
         checkpointer=checkpointer,
         interrupt_on=interrupt_on,  # 重新启用审批机制
         store=store,
+        backend=FilesystemBackend(root_dir=project_root, virtual_mode=False) if has_skills else None,
+        skills=["skills/"] if has_skills else None,
     )
+    if has_skills:
+        logger.info(f"📋 Skills 目录: {skills_dir}")
 
     # 不再缓存 agent，每次都动态创建
     # 这样可以确保每次都从数据库读取最新的审批配置
