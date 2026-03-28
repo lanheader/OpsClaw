@@ -11,6 +11,7 @@ from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from typing import Any, Dict, Optional, List, cast
 import logging
 import httpx
+import socket
 
 from app.core.config import Settings, get_settings
 
@@ -36,6 +37,102 @@ class LLMFactory:
     """
 
     _client_cache: Dict[str, Any] = {}
+    _connection_tested: Dict[str, bool] = {}  # 缓存连接测试结果
+
+    @staticmethod
+    def quick_test_connection(provider: str, settings: Optional[Settings] = None) -> bool:
+        """
+        快速测试 LLM 连接（只测试地址和端口，不发送消息）
+
+        Args:
+            provider: LLM 提供商
+            settings: 配置对象
+
+        Returns:
+            True: 连接正常
+            False: 连接失败
+        """
+        if settings is None:
+            settings = get_settings()
+
+        # 检查缓存
+        cache_key = f"{provider}_connection"
+        if cache_key in LLMFactory._connection_tested:
+            return LLMFactory._connection_tested[cache_key]
+
+        try:
+            if provider == "ollama":
+                # 测试 Ollama 地址和端口
+                base_url = settings.OLLAMA_BASE_URL
+                # 解析 host 和 port
+                if "://" in base_url:
+                    host_port = base_url.split("://")[1].split("/")[0]
+                else:
+                    host_port = base_url.split("/")[0]
+
+                if ":" in host_port:
+                    host, port = host_port.split(":")
+                    port = int(port)
+                else:
+                    host = host_port
+                    port = 11434  # Ollama 默认端口
+
+                # 快速 socket 连接测试（超时 2 秒）
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(2)
+                result = sock.connect_ex((host, port))
+                sock.close()
+
+                if result == 0:
+                    logger.info(f"✅ Ollama 连接测试通过: {host}:{port}")
+                    LLMFactory._connection_tested[cache_key] = True
+                    return True
+                else:
+                    logger.warning(f"⚠️ Ollama 连接测试失败: {host}:{port} (错误码: {result})")
+                    LLMFactory._connection_tested[cache_key] = False
+                    return False
+
+            elif provider == "openai":
+                # OpenAI 使用 HTTPS，测试 api.openai.com:443
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(5)
+                result = sock.connect_ex(("api.openai.com", 443))
+                sock.close()
+
+                if result == 0:
+                    logger.info("✅ OpenAI 连接测试通过")
+                    LLMFactory._connection_tested[cache_key] = True
+                    return True
+                else:
+                    logger.warning(f"⚠️ OpenAI 连接测试失败 (错误码: {result})")
+                    LLMFactory._connection_tested[cache_key] = False
+                    return False
+
+            elif provider == "openrouter":
+                # OpenRouter 使用 HTTPS
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(5)
+                result = sock.connect_ex(("openrouter.ai", 443))
+                sock.close()
+
+                if result == 0:
+                    logger.info("✅ OpenRouter 连接测试通过")
+                    LLMFactory._connection_tested[cache_key] = True
+                    return True
+                else:
+                    logger.warning(f"⚠️ OpenRouter 连接测试失败 (错误码: {result})")
+                    LLMFactory._connection_tested[cache_key] = False
+                    return False
+
+            else:
+                # 其他 provider 默认返回 True
+                logger.info(f"⏭️ 跳过连接测试: {provider}")
+                return True
+
+        except Exception as e:
+            logger.warning(f"⚠️ 连接测试异常 ({provider}): {e}")
+            LLMFactory._connection_tested[cache_key] = False
+            return False
 
     @staticmethod
     def _annotate_llm_client(client: BaseChatModel, provider: str, model_name: str) -> BaseChatModel:
@@ -403,6 +500,7 @@ _llm_instance: Optional[Any] = None
 def get_llm(
     provider: Optional[str] = None,
     force_new: bool = False,
+    skip_connection_test: bool = False,
 ) -> Any:
     """
     获取 LLM 客户端单例。
@@ -410,6 +508,7 @@ def get_llm(
     参数：
         provider: LLM 提供商（可选）
         force_new: 强制创建新实例（默认使用单例）
+        skip_connection_test: 跳过连接测试（默认 False）
     """
     global _llm_instance
 
@@ -421,6 +520,20 @@ def get_llm(
                 f"LLM configuration is invalid for provider: {settings.DEFAULT_LLM_PROVIDER}. "
                 f"Please check your .env file."
             )
+
+        # 快速连接测试（只测试地址和端口，不发送消息）
+        target_provider = provider or settings.DEFAULT_LLM_PROVIDER
+        should_test = not skip_connection_test and not getattr(settings, 'LLM_SKIP_CONNECTION_TEST', False)
+        if should_test:
+            logger.info(f"🔍 开始快速连接测试: provider={target_provider}")
+            test_result = LLMFactory.quick_test_connection(target_provider, settings)
+            if not test_result:
+                logger.warning(
+                    f"⚠️ LLM 连接测试失败（provider={target_provider}），"
+                    f"但仍会尝试创建客户端（可能连接会在实际调用时恢复）"
+                )
+            else:
+                logger.info(f"✅ LLM 连接测试通过: provider={target_provider}")
 
         _llm_instance = LLMFactory.create_llm(provider=provider, settings=settings)
         logger.info("LLM client initialized successfully")

@@ -20,23 +20,22 @@ English | [简体中文](README_ZH.md)
 
 Ops Agent is an intelligent operations automation platform built on the **DeepAgents Framework**. It achieves full-process automation from monitoring, diagnosis to self-healing through the collaboration of a main agent and specialized sub-agents.
 
-**Current Version**: v3.3 | **Subagents**: 6 | **Middleware**: 5 | **K8s Tools**: 19
+**Current Version**: v3.4 | **Subagents**: 3 | **Middleware**: 3 | **K8s Tools**: 28
 
 ### ✨ Key Features
 
 #### 🤖 DeepAgents Architecture
-- **Main Agent + 6 Specialized Subagents** working together
+- **Main Agent + 3 Specialized Subagents** working together
 - **Intelligent Task Planning**: Automatic decomposition of complex tasks using `write_todos`
 - **Subagent Delegation**: Delegate professional tasks via `task()` tool
 - **Intelligent Routing**: Automatically decide workflow based on intent and context
 
 #### 🛡️ Tools & Integrations
 - **Tool Fallback Mechanism**: SDK first, auto fallback to CLI (kubectl/prometheus/loki)
-- **19 K8s Read Tools**: Covering Pod, Deployment, Service, ConfigMap, etc.
-- **3 K8s Write Tools**: Restart, scale, update image
+- **28 K8s Tools**: 19 read + 3 write + 6 delete tools
 - **Prometheus/Loki Integration**: Metrics query and log retrieval
 
-#### 📨 Multi-Channel Messaging Architecture (v3.3 New)
+#### 📨 Multi-Channel Messaging Architecture
 - **Channel Abstraction Layer**: Unified message processing framework
 - **Feishu Long Connection Mode**: Real-time message push with card interaction
 - **Extensible Design**: Easily integrate new channels like Slack, DingTalk
@@ -47,99 +46,73 @@ Ops Agent is an intelligent operations automation platform built on the **DeepAg
   - 💾 Fallback Reply (ensure friendly response)
   - 📚 Auto Learning (write to long-term memory)
 
-#### 🔧 Middleware Layer (5 Middlewares)
+#### 🔧 Middleware Layer (3 Middlewares)
 - **ErrorFilteringMiddleware**: Filter tool call errors to prevent LLM from responding to errors
-- **ContextCompressionMiddleware**: Compress early history messages into summaries (≥30 messages)
 - **MessageTrimmingMiddleware**: Intelligently trim messages (keep last 40)
 - **LoggingMiddleware**: Record model calls, tool execution, and latency
-- **MemoryEnhancedAgent**: Retrieve relevant historical knowledge from ChromaDB
 
-#### 🧠 Memory System
-- **ChromaDB Vector Store**: Lightweight, easy-to-use, pure Python implementation
-- **Cross-Session Long-Term Memory**: Automatic learning and knowledge accumulation
-- **Message Index Persistence**: Solves duplicate historical messages after service restart
-
-### 🎯 Three Core Scenarios
-
-1. **Interactive Cluster Status Query** 🔍 - Query K8s cluster real-time status via natural language
-2. **Scheduled Inspection Reports** 📅 - Automatically execute cluster inspections and generate health reports
-3. **Alert Automatic Diagnosis and Handling** 🚨 - Receive monitoring alerts, diagnose and provide remediation plans
+#### 🧠 Dual-Engine Memory System (v3.4 New)
+- **Vector Mode (ChromaDB)**: Semantic search with cosine distance, requires embedding model
+- **Keyword Mode (SQLite FTS5)**: Zero-dependency keyword search with BM25 ranking, no embedding needed
+- **LLM Query Expander**: Expands natural language to related keywords for better recall
+- **Auto Mode Switch**: Controlled by `ENABLE_VECTOR_MEMORY` config
+- **Smart Auto-Learning**: Filters out meaningless messages before storing
 
 ---
 
 ## 🚀 Quick Start
 
-### Method 1: Local Development Environment
-
-#### 1. Prerequisites
+### Prerequisites
 
 - Python 3.11+
 - Node.js 18+
-- UV (Python package manager)
 
-#### 2. Clone Project
-
-```bash
-git clone https://github.com/your-org/ops-agent-langgraph.git
-cd ops-agent-langgraph
-```
-
-#### 3. Install Dependencies
+### Clone & Install
 
 ```bash
-# Install Python dependencies using UV (recommended)
+git clone https://github.com/lanheader/OpsClaw.git
+cd OpsClaw
+
+# Install dependencies (UV recommended)
 uv sync
 
 # Or use pip
 pip install -e .
 ```
 
-#### 4. Configure Environment Variables
+### Configure
 
 ```bash
-# Copy environment variable example
 cp .env.example .env
-
-# Edit .env to configure necessary parameters
 vim .env
 ```
 
 **Minimum Configuration**:
 ```bash
-# LLM Configuration (required)
+# LLM (required)
 DEFAULT_LLM_PROVIDER=zhipu
 ZHIPU_API_KEY=your_key_here
 
 # Database (required)
 DATABASE_URL=sqlite:///./data/ops_agent_v2.db
+CHECKPOINT_DB_URL=sqlite:///./data/ops_checkpoints.db
+
+# Memory (optional, default: vector mode)
+ENABLE_VECTOR_MEMORY=true  # Set false for production without embedding model
 
 # JWT Secret (required, change in production)
 JWT_SECRET_KEY=your-secret-key-here-change-in-production
 ```
 
-#### 5. Initialize Database
+### Initialize & Start
 
 ```bash
-# Create data directory
 mkdir -p data
-
-# Initialize database (includes RBAC tables and initial admin account)
 uv run python scripts/init_auth_db.py
-```
-
-#### 6. Start Services
-
-```bash
-# Start backend service
 uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-
-# Start frontend service (new terminal)
-cd frontend
-npm install
-npm run dev
 ```
 
-#### 7. Access Application
+### Access
 
 - **Web UI**: http://localhost:5173
 - **API Docs**: http://localhost:8000/docs
@@ -147,48 +120,9 @@ npm run dev
 
 ---
 
-### Method 2: Docker Deployment (Recommended for Production)
-
-#### 1. Build and Start
-
-```bash
-# Build image
-docker-compose build
-
-# Start service
-docker-compose up -d
-
-# View logs
-docker-compose logs -f
-
-# Stop service
-docker-compose down
-```
-
-#### 2. Initialize Database (First Start)
-
-```bash
-# Enter container
-docker-compose exec ops-agent bash
-
-# Initialize database
-uv run python scripts/init_auth_db.py
-
-# Exit container
-exit
-```
-
-#### 3. Access Application
-
-- **Web UI**: http://localhost:8000
-- **API Docs**: http://localhost:8000/docs (set `ENABLE_DOCS=true` in .env)
-- **Default Account**: `admin` / `admin123`
-
----
-
 ## 🏗️ System Architecture
 
-### DeepAgents Architecture Diagram
+### Architecture Diagram
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -204,513 +138,252 @@ exit
 │  │  • task(subagent, task): Delegate tasks to subagents    │    │
 │  │  • request_approval(action): Request user approval      │    │
 │  │  • Intelligent routing: Decide workflow by intent       │    │
-│  │  • 37 tools: K8s(22) + Prometheus(3) + Loki(3) + More   │    │
+│  │  • Tools: K8s(28) + Prometheus(3) + Loki(3) + More     │    │
 │  └────────────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
-│                Middleware Layer (5 Middlewares)                  │
+│              Middleware Layer (3 Middlewares)                    │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐         │
-│  │  Error       │  │  Context     │  │  Message     │         │
-│  │  Filtering   │  │  Compression │  │  Trimming    │         │
+│  │  Error       │  │  Message     │  │  Logging     │         │
+│  │  Filtering   │  │  Trimming    │  │              │         │
 │  └──────────────┘  └──────────────┘  └──────────────┘         │
-│  ┌──────────────┐  ┌──────────────┐                            │
-│  │  Logging     │  │  Memory      │                            │
-│  │              │  │  Enhanced    │                            │
-│  └──────────────┘  └──────────────┘                            │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
-│              Subagents Layer (6 Subagents)                       │
+│              Subagents Layer (3 Subagents)                       │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐         │
 │  │intent-agent  │  │  data-agent  │  │analyze-agent │         │
 │  │  (Intent)    │  │  (Data)      │  │  (Analysis)  │         │
 │  └──────────────┘  └──────────────┘  └──────────────┘         │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐         │
-│  │execute-agent │  │ report-agent │  │ format-agent │         │
-│  │  (Execute)   │  │  (Report)    │  │  (Format)    │         │
-│  └──────────────┘  └──────────────┘  └──────────────┘         │
+│  ┌──────────────┐                                              │
+│  │execute-agent │                                              │
+│  │  (Execute)   │                                              │
+│  └──────────────┘                                              │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│              Memory System (Dual Engine)                         │
+│  ┌──────────────────────┐  ┌──────────────────────┐           │
+│  │  ChromaDB (Vector)   │  │  SQLite FTS5 (Keyword)│          │
+│  │  • Semantic search   │  │  • BM25 ranking      │          │
+│  │  • Cosine distance   │  │  • Zero dependencies  │          │
+│  │  • Needs embedding   │  │  • LLM query expand  │          │
+│  └──────────────────────┘  └──────────────────────┘           │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
 │                    Tools Layer                                   │
-│  K8s Tools (22) / Prometheus Tools (3) / Loki Tools (3)         │
+│  K8s Tools (28) / Prometheus Tools (3) / Loki Tools (3)         │
 │  Command Executor / Alert Tools / Chat History Tools            │
-│  (All tools support SDK first, auto fallback to CLI)            │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### Multi-Channel Messaging Architecture (v3.3)
+### Checkpointer Architecture
 
 ```
-Feishu/Slack/DingTalk → ChannelAdapter → IncomingMessage
-  ↓
-MessageProcessor (Unified Message Processing Orchestrator)
-  1. UserBindingHandler: Verify user binding
-  2. SessionHandler: Get/create session
-  3. CommandHandler: Handle special commands (/new, /end, /help)
-  4. ApprovalHandler: Check approval status
-  5. AgentInvoker: Invoke Agent (Enhanced)
-     ├── Timeout Protection (300s)
-     ├── Memory Injection (history + knowledge base)
-     ├── Self-Verification Retry (quality check + auto retry)
-     ├── Fallback Reply (ensure friendly response)
-     └── Auto Learning (write to long-term memory)
+┌─────────────────────────────────────────┐
+│  LangGraph Checkpointer (独立数据库)      │
+│  • 数据库: ops_checkpoints.db           │
+│  • 后端: AsyncSqliteSaver               │
+│  • thread_id = session_id              │
+│  • 会话状态持久化，重启不丢失             │
+└─────────────────────────────────────────┘
+
+┌─────────────────────────────────────────┐
+│  业务数据库 (独立)                       │
+│  • 数据库: ops_agent_v2.db             │
+│  • 表: chat_sessions, chat_messages    │
+│  • RBAC: users, roles, permissions     │
+│  • 审批: approval_config               │
+└─────────────────────────────────────────┘
 ```
+
+> **设计决策**: Checkpointer 和业务表使用独立的 SQLite 文件，避免并发写入锁竞争。
 
 ---
 
-## 🤖 Subagents Description
+## 🧠 Memory System
 
-### 1. intent-agent (Intent Recognition Subagent)
-**File**: `app/deepagents/subagents/__init__.py`
-**Responsibility**: Recognize user intent, classify as query, diagnosis, execution, etc.
-**Output**: intent_type, confidence, suggested_workflow
+### Dual-Engine Architecture
 
-### 2. data-agent (Data Collection Subagent)
-**File**: `app/deepagents/subagents/data_agent.py`
-**Responsibility**: Execute data collection commands, call K8s/Prometheus/Loki tools
-**Tools**:
-- k8s_tools - K8s resource query (SDK → CLI fallback)
-  - 19 read tools: get_pods, get_pod, get_pod_logs, get_pod_events, get_deployments, get_services, get_nodes, get_namespaces, get_events, get_config_maps, get_secrets, get_ingress, get_daemon_sets, get_stateful_sets, get_p_vs, get_p_v_cs, get_resource_quotas, etc.
-  - 3 write tools: restart_deployment, scale_deployment, update_deployment_image
-- prometheus_tools - Metrics query (SDK → CLI fallback)
-- loki_tools - Log query (SDK → CLI fallback)
+| 特性 | Vector Mode (ChromaDB) | Keyword Mode (SQLite FTS5) |
+|------|----------------------|--------------------------|
+| **依赖** | 需要 embedding 模型 | 零外部依赖 |
+| **搜索方式** | 语义相似度 (cosine) | 关键词匹配 (BM25) |
+| **适用场景** | 开发环境 (有 Ollama) | 生产环境 (无 embedding) |
+| **配置** | `ENABLE_VECTOR_MEMORY=true` | `ENABLE_VECTOR_MEMORY=false` |
+| **查询扩展** | 不需要 | LLM 自动扩展关键词 |
 
-### 3. analyze-agent (Analysis Subagent)
-**File**: `app/deepagents/subagents/analyze_agent.py`
-**Responsibility**: Analyze collected data, diagnose root cause, plan remediation
-**Output**:
-- `root_cause`: Root cause
-- `severity`: Severity level
-- `remediation_plan`: Remediation plan
+### Memory Components
 
-### 4. execute-agent (Execution Subagent)
-**File**: `app/deepagents/subagents/execute_agent.py`
-**Responsibility**: Execute remediation commands, monitor execution results
-**Tools**: command_executor_tools, k8s_tools
+```
+app/memory/
+├── memory_manager.py        # 统一记忆管理器 (双模式切换)
+├── chroma_store.py          # ChromaDB 向量存储 (vector 模式)
+├── sqlite_memory_store.py   # SQLite FTS5 存储 (keyword 模式)
+├── query_expander.py        # LLM 查询扩展 (keyword 模式)
+├── langgraph_store.py       # LangGraph BaseStore 适配器
+└── vector_store.py          # 向量存储工具函数
+```
 
-### 5. report-agent (Report Generation Subagent)
-**Responsibility**: Generate structured reports with diagnosis results and recommendations
+### Auto-Learning
 
-### 6. format-agent (Formatting Subagent)
-**Responsibility**: Format output for different channels (Feishu cards, Web UI, plain text)
+系统自动从运维对话中学习，但有智能过滤：
+- ✅ **学习**: 故障诊断、修复操作、知识问答（长度 ≥ 10 字符）
+- ❌ **跳过**: "/new"、"/help"、"你好"、"谢谢" 等无意义消息
+
+### Session Summary
+
+会话摘要采用覆盖更新策略（固定 doc_id），避免存储膨胀。
 
 ---
 
-## 🔧 Middleware Layer
+## 🤖 Subagents
 
-### 1. ErrorFilteringMiddleware (Error Message Filtering)
-**File**: `app/middleware/error_filtering_middleware.py`
-**Responsibility**: Filter tool call errors to prevent LLM from responding to errors
-**Error Markers**:
-- `"Error:"`
-- `"is not a valid tool"`
-- `"Tool execution failed"`
-- `"tool not found"`
-
-### 2. ContextCompressionMiddleware (Context Compression)
-**File**: `app/middleware/context_compression_middleware.py`
-**Responsibility**: Compress early history messages into summaries, preserve recent full messages
-**Trigger**: Activated when message count >= 30
-**Strategy**:
-- Keep last 20 full messages
-- Compress earlier messages into summaries
-- Summary includes: user requirements, key conclusions
-
-### 3. MessageTrimmingMiddleware (Message Trimming)
-**File**: `app/middleware/message_trimming_middleware.py`
-**Responsibility**: Intelligently trim messages to avoid token explosion
-**Config**:
-- `MAX_MESSAGES_TO_KEEP = 40` - Keep last 40 messages
-- `MIN_MESSAGES_TO_KEEP = 10` - Minimum 10 messages
-**Strategy**: Prioritize keeping complete conversation turns
-
-### 4. LoggingMiddleware (Logging)
-**File**: `app/middleware/logging_middleware.py`
-**Responsibility**: Record model calls, tool execution, and latency
-**Features**:
-- Record LLM call start/end
-- Record tool call parameters and results
-- Support request tracing (session_id, request_id)
-
-### 5. MemoryEnhancedAgent (Memory Enhancement)
-**File**: `app/middleware/memory_middleware.py`
-**Responsibility**: Inject long-term memory context for Agent, enhance cross-session knowledge retrieval
-**Features**:
-- Retrieve relevant historical knowledge from vector store (ChromaDB)
-- Inject memory context into system prompt
-- Support auto learning (write new conversations to memory)
+| Subagent | 文件 | 职责 | 工具 |
+|----------|------|------|------|
+| **data-agent** | `subagents/data_agent.py` | 数据采集 | k8s_tools, prometheus_tools, loki_tools |
+| **analyze-agent** | `subagents/analyze_agent.py` | 分析决策 | 无（纯推理） |
+| **execute-agent** | `subagents/execute_agent.py` | 执行操作 | command_executor, k8s_tools |
 
 ---
 
-## 📨 Multi-Channel Messaging Architecture
+## 🔧 Middleware
 
-### Architecture Overview
-
-`app/integrations/messaging/` is the new channel abstraction layer that decouples Feishu-specific logic from general business logic, supporting multi-channel access.
-
-```
-app/integrations/messaging/
-├── base_channel.py          # Abstract base class + data structures
-├── registry.py              # Channel adapter registry
-├── message_processor.py     # Unified message processing orchestrator
-├── adapters/
-│   └── feishu_adapter.py    # Feishu channel adapter
-└── handlers/
-    ├── user_binding_handler.py   # User binding verification
-    ├── session_handler.py        # Session management
-    ├── command_handler.py        # Special commands (/new, /end, /help)
-    ├── approval_handler.py       # Approval process
-    └── agent_invoker.py          # Agent invocation (Enhanced)
-```
-
-### Message Processing Flow
-
-```
-Feishu Message → FeishuChannelAdapter → IncomingMessage
-  ↓
-MessageProcessor.process_message()
-  1. UserBindingHandler: Verify user binding
-  2. SessionHandler: Get/create session
-  3. CommandHandler: Handle special commands
-  4. ApprovalHandler: Check approval status
-  5. AgentInvoker: Invoke Agent
-```
-
-### Key Data Structures
-
-```python
-# Unified incoming message format
-IncomingMessage(
-    channel_type="feishu",
-    message_id="om_xxx",
-    sender_id="ou_xxx",
-    chat_id="oc_xxx",
-    text="User message",
-    raw_content={...}
-)
-
-# Channel context (throughout the processing flow)
-ChannelContext(
-    channel_type="feishu",
-    chat_id="oc_xxx",
-    session_id="feishu_abc123",
-    user_id=1,
-    user_permissions={"k8s:read", "k8s:write"},
-    message_id="om_xxx"  # For adding emoji reactions
-)
-```
-
-### API Endpoints
-
-| Endpoint | Description |
-|----------|-------------|
-| `POST /api/v2/messaging/webhook/{channel_type}` | Unified Webhook entry |
-| `GET /api/v1/feishu/status` | Feishu integration status query |
-| `POST /api/v1/feishu/callback` | Feishu legacy endpoint (compatibility layer) |
-
-### Adding New Channels
-
-```python
-# 1. Implement adapter
-class SlackChannelAdapter(BaseChannelAdapter):
-    channel_type = "slack"
-    async def verify_request(self, headers, body) -> bool: ...
-    async def send_message(self, message: OutgoingMessage) -> Dict: ...
-
-# 2. Register (in registry.py's initialize_channels())
-ChannelRegistry.register(SlackChannelAdapter(config))
-
-# 3. Access endpoint
-# POST /api/v2/messaging/webhook/slack
-```
+| 中间件 | 文件 | 职责 |
+|--------|------|------|
+| **ErrorFilteringMiddleware** | `error_filtering_middleware.py` | 过滤工具错误消息，防止 LLM 响应错误 |
+| **MessageTrimmingMiddleware** | `message_trimming_middleware.py` | 智能截断消息（保留最近 40 条，优先完整轮次） |
+| **LoggingMiddleware** | `logging_middleware.py` | 记录 LLM 调用、工具执行、耗时 |
 
 ---
 
 ## 📦 Tech Stack
 
-### Backend
-
-- **Framework**: FastAPI 0.115+
-- **AI Framework**: DeepAgents + LangGraph + LangChain
-- **Database**: SQLAlchemy 2.0 + SQLite
-- **Authentication**: JWT + Passlib
-- **LLM**: OpenAI / Claude / Zhipu AI / Ollama
-- **Vector Store**: ChromaDB (lightweight, pure Python)
-- **Logging**: Loguru (auto exception capture, log rotation)
-
-### Frontend
-
-- **Framework**: React 18 + TypeScript
-- **UI Library**: Ant Design 5
-- **State Management**: React Query
-- **Build Tool**: Vite
-
-### Integrations
-
-- **Feishu**: lark-oapi SDK (long connection mode)
-- **Kubernetes**: kubernetes Python SDK
-- **Prometheus**: prometheus-api-client
-- **Loki**: HTTP API
-
----
-
-## 📚 Documentation
-
-### Core Documentation
-
-- **[📖 Complete Project Documentation](./PROJECT_DOCUMENTATION.md)** - Complete details on all features, architecture, API, deployment
-- **[🤖 Claude Guide](./CLAUDE.md)** - Claude Code project guide
-- **[🔧 Tool Fallback Mechanism](./docs/TOOL_FALLBACK_SUMMARY.md)** - SDK first, auto fallback to CLI
-- **[🔗 Feishu Integration](./docs/FEISHU_INTEGRATION.md)** - Feishu long connection and card interaction
+| 类别 | 技术 |
+|------|------|
+| **Framework** | FastAPI 0.115+ |
+| **AI** | DeepAgents + LangGraph + LangChain |
+| **Database** | SQLAlchemy 2.0 + SQLite (分离: 业务 + Checkpointer) |
+| **Auth** | JWT + Passlib |
+| **LLM** | OpenAI / Claude / Zhipu AI / Ollama |
+| **Vector Store** | ChromaDB (可选) |
+| **Keyword Store** | SQLite FTS5 (内置) |
+| **Logging** | Loguru |
+| **Frontend** | React 18 + TypeScript + Ant Design 5 + Vite |
+| **Feishu** | lark-oapi SDK (long connection) |
+| **K8s** | kubernetes Python SDK |
+| **Prometheus** | prometheus-api-client |
+| **Loki** | HTTP API |
 
 ---
 
 ## 🔧 Configuration
 
-### Key Configuration Items
-
-#### LLM Configuration
+### Key Config Items
 
 ```bash
+# LLM
 DEFAULT_LLM_PROVIDER=zhipu  # openai, claude, zhipu, ollama
-ZHIPU_API_KEY=your_key_here
-ZHIPU_MODEL=glm-4
-```
 
-#### Feishu Configuration
+# Database (分离存储)
+DATABASE_URL=sqlite:///./data/ops_agent_v2.db
+CHECKPOINT_DB_URL=sqlite:///./data/ops_checkpoints.db
 
-```bash
+# Memory System
+ENABLE_VECTOR_MEMORY=true  # true=ChromaDB, false=SQLite FTS5
+
+# Feishu
 FEISHU_ENABLED=true
-FEISHU_APP_ID=cli_xxxxxxxxxxxxx
-FEISHU_APP_SECRET=xxxxxxxxxxxxxxxxxxxxx
-FEISHU_LONG_CONNECTION_ENABLED=true  # Enable long connection mode
-```
+FEISHU_LONG_CONNECTION_ENABLED=true
 
-#### Middleware Configuration
-
-```bash
-# Message trimming configuration
-MAX_MESSAGES_TO_KEEP=40  # Keep last 40 messages
-MIN_MESSAGES_TO_KEEP=10  # Minimum 10 messages
-
-# Context compression configuration
-COMPRESSION_THRESHOLD=30  # Trigger compression when > 30 messages
-MAX_FULL_MESSAGES=20      # Keep last 20 full messages
-```
-
-#### AgentInvoker Configuration
-
-```bash
-# Timeout configuration
-AGENT_TIMEOUT=300  # 5 minutes timeout
-
-# Retry configuration
-MAX_RETRY=1  # Maximum 1 retry
+# Middleware
+# MessageTrimming: MAX_MESSAGES_TO_KEEP=40, MIN_MESSAGES_TO_KEEP=10
 ```
 
 ---
 
-## 🛠️ Development Guide
-
-### Project Structure
+## 📁 Project Structure
 
 ```
-ops-agent-langgraph/
-├── app/                         # Application main directory
-│   ├── main.py                  # FastAPI application entry
-│   ├── deepagents/              # DeepAgents main agent and subagents
-│   │   ├── main_agent.py        # Main agent
-│   │   ├── factory.py           # Agent factory (FinalReportEnrichedAgent)
-│   │   └── subagents/           # Subagents
-│   │       ├── data_agent.py    # Data collection
-│   │       ├── analyze_agent.py # Analysis
-│   │       └── execute_agent.py # Execution
-│   ├── middleware/              # Middleware layer
-│   │   ├── error_filtering_middleware.py  # Error filtering
-│   │   ├── context_compression_middleware.py  # Context compression
-│   │   ├── message_trimming_middleware.py     # Message trimming
-│   │   ├── logging_middleware.py              # Logging
-│   │   └── memory_middleware.py               # Memory enhancement
-│   ├── tools/                   # Agent tools
-│   │   ├── k8s/
-│   │   │   ├── read_tools.py    # K8s read tools (19)
-│   │   │   ├── write_tools.py   # K8s write tools (3)
-│   │   │   └── delete_tools.py  # K8s delete tools
-│   │   ├── prometheus/
-│   │   │   └── read_tools.py    # Prometheus query tools
-│   │   ├── loki/
-│   │   │   └── read_tools.py    # Loki log query tools
-│   │   └── command_executor/
-│   │       └── read_tools.py    # Command execution tools
-│   ├── integrations/            # External service integrations
-│   │   ├── messaging/           # Multi-channel messaging (v3.3)
+OpsClaw/
+├── app/
+│   ├── main.py                      # FastAPI 入口
+│   ├── core/
+│   │   ├── checkpointer.py          # LangGraph Checkpointer (独立 DB)
+│   │   ├── config.py                # 配置管理
+│   │   ├── state.py                 # OpsState 状态定义
+│   │   ├── llm_factory.py           # LLM 工厂
+│   │   └── permissions.py           # 权限系统
+│   ├── deepagents/
+│   │   ├── main_agent.py            # 主智能体 (单例 + Checkpointer)
+│   │   ├── factory.py               # Agent 工厂
+│   │   └── subagents/               # 子智能体
+│   │       ├── data_agent.py
+│   │       ├── analyze_agent.py
+│   │       └── execute_agent.py
+│   ├── middleware/                   # 中间件 (3 个)
+│   │   ├── error_filtering_middleware.py
+│   │   ├── message_trimming_middleware.py
+│   │   └── logging_middleware.py
+│   ├── memory/                      # 记忆系统 (双引擎)
+│   │   ├── memory_manager.py        # 统一管理器
+│   │   ├── chroma_store.py          # ChromaDB 向量存储
+│   │   ├── sqlite_memory_store.py   # SQLite FTS5 关键词存储
+│   │   ├── query_expander.py        # LLM 查询扩展
+│   │   ├── langgraph_store.py       # LangGraph BaseStore 适配
+│   │   └── vector_store.py          # 向量工具
+│   ├── tools/                       # 工具层 (SDK → CLI 降级)
+│   │   ├── k8s/                     # K8s 工具 (19 read + 3 write + 6 delete)
+│   │   ├── prometheus/              # Prometheus 工具
+│   │   ├── loki/                    # Loki 工具
+│   │   └── command_executor/        # 命令执行
+│   ├── integrations/
+│   │   ├── messaging/               # 多渠道消息架构
 │   │   │   ├── base_channel.py
-│   │   │   ├── registry.py
 │   │   │   ├── message_processor.py
 │   │   │   ├── adapters/
-│   │   │   │   └── feishu_adapter.py
 │   │   │   └── handlers/
-│   │   │       ├── user_binding_handler.py
-│   │   │       ├── session_handler.py
-│   │   │       ├── command_handler.py
-│   │   │       ├── approval_handler.py
-│   │   │       └── agent_invoker.py  # Enhanced
-│   │   ├── feishu/              # Feishu integration
-│   │   ├── kubernetes/          # K8s integration
-│   │   ├── prometheus/          # Prometheus integration
-│   │   └── loki/                # Loki integration
-│   ├── api/                     # API route layer
-│   │   ├── v1/                  # API v1
-│   │   └── v2/                  # API v2
-│   ├── core/                    # Core modules
-│   ├── models/                  # Database models
-│   ├── services/                # Business service layer
-│   ├── memory/                  # Memory system
-│   │   ├── chroma_store.py      # ChromaDB vector store
-│   │   └── memory_manager.py    # Memory manager
-│   └── utils/                   # Utility functions
-│       └── loguru_config.py     # Loguru logging config
-├── frontend/                    # React frontend
-├── config/                      # Configuration files
-├── scripts/                     # Script tools
-├── tests/                       # Test suite
-└── docs/                        # Documentation
-```
-
-### Running Tests
-
-```bash
-# All tests
-pytest tests/ -v
-
-# Unit tests
-pytest tests/unit/ -v
-
-# Integration tests
-pytest tests/integration/ -v
-
-# With coverage
-pytest --cov=app --cov-report=html
-```
-
----
-
-## 🐛 Troubleshooting
-
-### Common Issues
-
-#### 1. Historical Messages Re-sent After Service Restart
-
-**Cause**: Message index not persisted
-**Solution**: Ensure `chat_sessions.last_processed_message_index` column exists in database
-
-```bash
-# Check if column exists
-sqlite3 data/ops_agent_v2.db "PRAGMA table_info(chat_sessions);" | grep last_processed
-```
-
-#### 2. Model Response Irrelevant to Current Question
-
-**Cause**: Too many historical messages, context lost
-**Solution**: Check if middleware is working properly
-
-```bash
-# View compression records in logs
-grep "上下文压缩" logs/app.log
-```
-
-#### 3. AI Responds to Tool Error Messages
-
-**Cause**: Tool call errors polluting conversation context
-**Solution**: ErrorFilteringMiddleware automatically filters error messages
-
-```bash
-# Check if middleware is loaded
-grep "ErrorFilteringMiddleware" logs/app.log
-```
-
-#### 4. No Reply Sent to User
-
-**Cause**: All AI messages filtered
-**Solution**: AgentInvoker fallback reply mechanism ensures at least one friendly response
-
-```bash
-# Check fallback reply logs
-grep "所有尝试均未产生有效回复" logs/app.log
-```
-
-#### 5. HTTP Access Logs Not Showing
-
-**Cause**: uvicorn.access log level set to WARNING
-**Solution**: Modify log level to INFO in `app/utils/loguru_config.py`
-
-```python
-LOGGING_LEVELS = {
-    "uvicorn.access": "INFO",  # Change to INFO
-}
-```
-
-#### 6. Database Initialization Failed
-
-```bash
-# Remove old database
-rm -rf data/ops_agent_v2.db
-
-# Re-initialize
-uv run python scripts/init_auth_db.py
+│   │   │       ├── agent_invoker.py # Agent 调用 (含记忆注入)
+│   │   │       └── approval_handler.py
+│   │   ├── feishu/                  # 飞书集成
+│   │   ├── kubernetes/              # K8s 集成
+│   │   ├── prometheus/              # Prometheus 集成
+│   │   └── loki/                    # Loki 集成
+│   ├── models/                      # 数据库模型
+│   ├── services/                    # 业务服务
+│   ├── prompts/                     # 提示词管理
+│   ├── api/v1/ & v2/               # API 路由
+│   ├── schemas/                     # Pydantic schemas
+│   └── utils/                       # 工具函数
+├── frontend/                        # React 前端
+├── config/                          # 配置文件
+├── scripts/                         # 脚本工具
+├── tests/                           # 测试
+└── docs/                            # 文档
 ```
 
 ---
 
 ## 🤝 Contributing
 
-Contributions are welcome! Feel free to submit issues, fork the repository, and create pull requests.
-
-### Contribution Flow
-
-1. Fork this repository
-2. Create feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to branch (`git push origin feature/AmazingFeature`)
-5. Open Pull Request
+1. Fork
+2. Create branch (`git checkout -b feature/xxx`)
+3. Commit (`git commit -m 'Add xxx'`)
+4. Push (`git push origin feature/xxx`)
+5. Open PR
 
 ---
 
 ## 📄 License
 
-This project is licensed under the MIT License. See [LICENSE](LICENSE) file for details.
-
----
-
-## 📞 Contact
-
-- **Maintainer**: lanjiaxuan
-- **Project URL**: https://github.com/your-org/ops-agent-langgraph
-- **Issue Tracker**: https://github.com/your-org/ops-agent-langgraph/issues
-
----
-
-## 🙏 Acknowledgments
-
-Thanks to the following open source projects:
-
-- [LangChain](https://github.com/langchain-ai/langchain)
-- [LangGraph](https://github.com/langchain-ai/langgraph)
-- [DeepAgents](https://github.com/langchain-ai/deepagents)
-- [FastAPI](https://github.com/tiangolo/fastapi)
-- [React](https://github.com/facebook/react)
-- [Ant Design](https://github.com/ant-design/ant-design)
-- [ChromaDB](https://github.com/chroma-core/chroma)
-- [Loguru](https://github.com/Delgan/loguru)
+MIT License
 
 ---
 
 <div align="center">
 
-**Last Updated**: 2026-03-27 | **Version**: v3.3
-
-Made with ❤️ by Ops Team
+**Last Updated**: 2026-03-28 | **Version**: v3.4 | **Maintainer**: lanjiaxuan
 
 </div>

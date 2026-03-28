@@ -59,11 +59,13 @@ class ChromaVectorStore:
             )
         )
 
-        # 获取或创建集合
-        self._init_collections()
-
-        # 获取 embedding 函数
+        # 重要：先初始化 embedding 函数，再初始化集合
+        # 这样可以确保集合创建时使用正确的 embedding 函数
         self._embedding_function = None
+        _ = self.embedding_function  # 触发 embedding 函数初始化
+
+        # 获取或创建集合（此时 embedding_function 已初始化）
+        self._init_collections()
 
         logger.info(f"✅ ChromaDB 向量存储初始化完成 | 目录: {persist_directory}")
 
@@ -83,19 +85,33 @@ class ChromaVectorStore:
         )
 
     def _get_or_create_collection(self, name: str, metadata: Dict[str, str] = None):
-        """获取或创建集合"""
+        """获取或创建集合（使用统一的 embedding 函数和 cosine 距离）"""
         try:
-            # 尝试获取现有集合
+            # 尝试获取现有集合（不传 embedding_function 以避免冲突）
             collection = self.client.get_collection(name=name)
             logger.debug(f"📦 获取现有集合: {name}")
             return collection
-        except Exception:
-            # 集合不存在，创建新集合
+        except Exception as e:
+            # 集合不存在或其他错误，尝试创建
+            logger.debug(f"📦 获取集合失败，尝试创建: {name}, error: {e}")
+
+        try:
+            # 指定 embedding_function 和 HNSW 参数（使用 cosine 距离）
+            collection_metadata = {"hnsw:space": "cosine"}
+            if metadata:
+                collection_metadata.update(metadata)
             collection = self.client.create_collection(
                 name=name,
-                metadata=metadata or {}
+                metadata=collection_metadata,
+                embedding_function=self.embedding_function,
             )
-            logger.info(f"📦 创建新集合: {name}")
+            logger.info(f"📦 创建新集合: {name} (cosine distance)")
+            return collection
+        except Exception as create_error:
+            # 如果创建失败（可能是因为集合已存在），再次尝试获取
+            logger.warning(f"📦 创建集合失败，再次尝试获取: {name}, error: {create_error}")
+            collection = self.client.get_collection(name=name)
+            logger.info(f"📦 获取已存在的集合: {name}")
             return collection
 
     @property
@@ -129,7 +145,7 @@ class ChromaVectorStore:
                 self._embedding_function = embedding_functions.OpenAIEmbeddingFunction(
                     api_key=settings.OPENAI_API_KEY,
                     model_name="text-embedding-3-small",
-                    openai_api_base=settings.OPENAI_BASE_URL,
+                    api_base=settings.OPENAI_BASE_URL,
                 )
                 logger.info("🔑 ChromaDB 使用 OpenAI Embedding")
             else:
@@ -293,7 +309,7 @@ class ChromaVectorStore:
                 distance = results['distances'][0][i]
                 # ChromaDB 使用 L2 距离，转换为相似度 (0-1)
                 # L2 距离越小，相似度越高
-                similarity = max(0, 1 - distance)
+                similarity = max(0, 1 - distance / 2)
 
                 if similarity >= threshold:
                     metadata = results['metadatas'][0][i] or {}
@@ -343,7 +359,7 @@ class ChromaVectorStore:
         if results and results['documents'] and len(results['documents']) > 0:
             for i, doc in enumerate(results['documents'][0]):
                 distance = results['distances'][0][i]
-                similarity = max(0, 1 - distance)
+                similarity = max(0, 1 - distance / 2)
 
                 if similarity >= threshold:
                     metadata = results['metadatas'][0][i] or {}

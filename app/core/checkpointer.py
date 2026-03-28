@@ -159,3 +159,31 @@ async def get_checkpointer() -> BaseCheckpointSaver:
 
     logger.info(f"✅ Checkpointer 初始化完成: {type(_checkpointer).__name__}")
     return _checkpointer
+
+
+async def shutdown_checkpointer() -> None:
+    """
+    关闭 checkpointer 连接
+
+    在应用关闭时调用，确保数据库连接正确关闭。
+    """
+    global _checkpointer, _factory
+
+    if _factory is not None and isinstance(_factory, SQLiteCheckpointerFactory):
+        if _factory._conn is not None:
+            await _factory._conn.close()
+            logger.info("✅ SQLite checkpointer 连接已关闭")
+
+    _checkpointer = None
+    _factory = None
+    logger.info("✅ Checkpointer 已清理")
+
+
+__all__ = [
+    "get_checkpointer",
+    "get_checkpointer_factory",
+    "shutdown_checkpointer",
+    "CheckpointerFactory",
+    "SQLiteCheckpointerFactory",
+    "PostgreSQLCheckpointerFactory",
+]

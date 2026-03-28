@@ -7,12 +7,14 @@ Agent 调用器
 - 发送 AI 回复
 """
 
+import asyncio
 import time
 from typing import List, Dict, Any, Optional
 
 from langchain_core.messages import AIMessage, HumanMessage
 
 from app.utils.logger import get_logger
+from app.core.config import get_settings
 from app.deepagents.factory import create_agent_for_session
 from app.deepagents.main_agent import get_thread_config
 from app.utils.llm_helper import ensure_final_report_in_state
@@ -31,6 +33,26 @@ MAX_RETRY = 1        # 最多重试 1 次，避免无限循环
 
 _FAILURE_MARKERS = ["工具调用失败", "执行失败", "无法完成", "❌ 任务失败"]
 
+# 全局会话锁字典（用于并发控制）
+_session_locks: Dict[str, asyncio.Lock] = {}
+_locks_lock = asyncio.Lock()  # 保护 _session_locks 字典的锁
+
+
+async def _get_session_lock(session_id: str) -> asyncio.Lock:
+    """
+    获取会话锁（线程安全）
+
+    Args:
+        session_id: 会话 ID
+
+    Returns:
+        会话对应的锁对象
+    """
+    async with _locks_lock:
+        if session_id not in _session_locks:
+            _session_locks[session_id] = asyncio.Lock()
+        return _session_locks[session_id]
+
 
 class AgentInvoker:
     """Agent 调用器"""
@@ -42,11 +64,24 @@ class AgentInvoker:
         """调用 Agent 并返回回复列表"""
         logger.info(f"🤖 调用 Agent: session={context.session_id}, text={text[:50]}...")
 
+        # 获取会话锁，确保同一会话的并发请求排队处理
+        session_lock = await _get_session_lock(context.session_id)
+
+        async with session_lock:
+            logger.info(f"🔒 获取会话锁: session={context.session_id}")
+
+            return await self._invoke_agent_internal(context, text)
+
+    async def _invoke_agent_internal(self, context: ChannelContext, text: str) -> List[str]:
+        """内部 Agent 调用逻辑（已加锁保护）"""
         # 1. 获取 Agent（FinalReportEnrichedAgent 包装）
+        # 传递 user_id 以支持动态审批配置
+        logger.info(f"🔍 agent_invoker: context.user_id={context.user_id}, context.user_permissions={context.user_permissions}")
         agent = await create_agent_for_session(
             session_id=context.session_id,
             enable_approval=True,
             user_permissions=context.user_permissions,
+            user_id=context.user_id,
         )
 
         # 2. 记忆注入（对齐 chat.py）
@@ -124,6 +159,97 @@ class AgentInvoker:
                     # 🔍 诊断：打印最后一个事件的完整内容
                     logger.info(f"🔍 最后一个事件的完整内容: {str(last_event)[:500]}")
 
+                    # 🔒 检查是否是审批中断事件
+                    if "__interrupt__" in last_event:
+                        logger.info("🔒 检测到审批中断事件，保存审批状态并等待用户审批")
+
+                        # 从中断事件中提取审批信息
+                        interrupt_data = last_event["__interrupt__"]
+
+                        # interrupt_data 是一个元组，第一个元素是 Interrupt 对象
+                        if isinstance(interrupt_data, tuple) and len(interrupt_data) > 0:
+                            interrupt_obj = interrupt_data[0]
+                            if hasattr(interrupt_obj, 'value'):
+                                approval_info = interrupt_obj.value
+                                logger.info(f"📋 审批信息 (HITLRequest): {approval_info}")
+
+                                # 保存审批状态到数据库
+                                from app.services.session_state_manager import SessionStateManager
+                                SessionStateManager.set_awaiting_approval(
+                                    context.session_id,
+                                    approval_data=approval_info
+                                )
+
+                                # 发送审批请求消息给用户
+                                from app.integrations.feishu.message_formatter import format_approval_request
+
+                                # 从 DeepAgents HITLRequest 格式转换为显示格式
+                                # HITLRequest: {"action_requests": [...], "review_configs": [...]}
+                                action_requests = approval_info.get('action_requests', [])
+
+                                # 转换 action_requests 为命令格式
+                                commands = []
+                                for req in action_requests:
+                                    # DeepAgents 格式: {name, args, description}
+                                    # 转换为: {type, action, params, reason}
+                                    tool_name = req.get('name', 'unknown')
+                                    tool_args = req.get('args', {})
+                                    description = req.get('description', '')
+
+                                    # 从工具名推断类型
+                                    if tool_name.startswith('delete_') or tool_name.startswith('restart_') or tool_name.startswith('scale_'):
+                                        tool_type = 'k8s'
+                                    elif tool_name.startswith('query_') or tool_name.startswith('get_'):
+                                        if 'prometheus' in tool_name.lower() or 'cpu' in tool_name.lower() or 'memory' in tool_name.lower():
+                                            tool_type = 'prometheus'
+                                        elif 'log' in tool_name.lower():
+                                            tool_type = 'logs'
+                                        else:
+                                            tool_type = 'k8s'
+                                    else:
+                                        tool_type = 'k8s'
+
+                                    commands.append({
+                                        'type': tool_type,
+                                        'action': tool_name,
+                                        'params': tool_args,
+                                        'reason': description
+                                    })
+
+                                # 从 review_configs 推断风险等级
+                                review_configs = approval_info.get('review_configs', [])
+                                risk_level = '中等风险'
+                                if review_configs:
+                                    # 如果需要审批，说明有一定风险
+                                    allowed_decisions = review_configs[0].get('allowed_decisions', [])
+                                    if 'reject' in allowed_decisions:
+                                        risk_level = '高风险操作'
+                                    elif 'edit' in allowed_decisions:
+                                        risk_level = '中等风险'
+
+                                approval_msg = format_approval_request(
+                                    commands=commands,
+                                    risk_level=risk_level,
+                                    user_input=''  # 用户输入需要从上下文获取，暂时留空
+                                )
+
+                                # 使用卡片格式发送审批请求
+                                cleaned_approval = clean_xml_tags(approval_msg)
+                                approval_card = build_formatted_reply_card(content=cleaned_approval)
+                                outgoing = OutgoingMessage(
+                                    chat_id=context.chat_id,
+                                    message_type=MessageType.CARD,
+                                    content=approval_card
+                                )
+                                await self.channel.send_message(outgoing)
+
+                                logger.info("✅ 审批请求已发送，等待用户响应")
+                                return []  # 返回空回复，等待用户审批
+                            else:
+                                logger.warning(f"⚠️ Interrupt 对象没有 value 属性: {type(interrupt_obj)}")
+                        else:
+                            logger.warning(f"⚠️ 无法从中断事件中提取审批信息，数据类型: {type(interrupt_data)}")
+
                     # 尝试从最后一个事件中提取 state
                     last_state = list(last_event.values())[0] if last_event else None
                     if last_state and isinstance(last_state, dict) and "messages" in last_state:
@@ -131,15 +257,16 @@ class AgentInvoker:
                         logger.info(f"🔍 从最后一个事件中找到有效 state")
                     else:
                         # 如果最后一个事件的 state 无效（None 或空字典），
-                        # 我们需要使用 ainvoke 来获取最终的 state
-                        logger.warning(f"⚠️ 最后一个事件的 state 无效，使用 ainvoke 获取最终 state")
-                        try:
-                            final_result = await agent.ainvoke(input_state, config=config)
-                            if isinstance(final_result, dict):
-                                final_state = final_result
-                                logger.info(f"✅ 通过 ainvoke 获取到最终 state: keys={list(final_state.keys())}")
-                        except Exception as e:
-                            logger.error(f"❌ ainvoke 失败: {e}")
+                        # 并且不是审批中断，才使用 ainvoke 来获取最终的 state
+                        if "__interrupt__" not in last_event:
+                            logger.warning(f"⚠️ 最后一个事件的 state 无效，使用 ainvoke 获取最终 state")
+                            try:
+                                final_result = await agent.ainvoke(input_state, config=config)
+                                if isinstance(final_result, dict):
+                                    final_state = final_result
+                                    logger.info(f"✅ 通过 ainvoke 获取到最终 state: keys={list(final_state.keys())}")
+                            except Exception as e:
+                                logger.error(f"❌ ainvoke 失败: {e}")
 
                     # 🔍 诊断：打印提取的 state
                     logger.info(f"🔍 提取的 final_state 类型: {type(final_state)}, keys={list(final_state.keys()) if isinstance(final_state, dict) else 'not-dict'}")
@@ -179,7 +306,7 @@ class AgentInvoker:
                         content_hash = hash(final_report)
                         if content_hash not in all_reply_hashes:
                             try:
-                                await self._send_reply(context.chat_id, final_report)
+                                await self._send_reply(context.chat_id, final_report, context)
                                 self._save_to_db(context.session_id, MessageRole.ASSISTANT, final_report)
                                 replies.append(final_report)
                                 all_reply_hashes.append(content_hash)
@@ -212,7 +339,7 @@ class AgentInvoker:
                     "建议：发送 /new 开启新会话后重试。"
                 )
                 try:
-                    await self._send_reply(context.chat_id, fallback)
+                    await self._send_reply(context.chat_id, fallback, context)
                     self._save_to_db(context.session_id, MessageRole.ASSISTANT, fallback)
                 except Exception as send_err:
                     logger.error(f"❌ 发送兜底回复失败，跳过保存: {send_err}")
@@ -269,7 +396,7 @@ class AgentInvoker:
         finally:
             db.close()
 
-    async def _send_reply(self, chat_id: str, content: str) -> None:
+    async def _send_reply(self, chat_id: str, content: str, context: Optional[ChannelContext] = None) -> None:
         """发送回复消息（卡片格式，支持 Markdown 渲染）"""
         # 🔍 诊断：记录原始内容
         logger.info(f"🔍 [卡片转换] 原始内容: {content[:200]}...")
@@ -278,11 +405,18 @@ class AgentInvoker:
         # 🔍 诊断：记录清理后的内容
         logger.info(f"🔍 [卡片转换] 清理后内容: {cleaned[:200]}...")
 
-        card = build_formatted_reply_card(content=cleaned)
+        # 获取用户 ID（用于 @）
+        settings = get_settings()
+        mention_user_id = None
+        if settings.FEISHU_REPLY_WITH_MENTION and context:
+            mention_user_id = context.sender_id
+            logger.info(f"🔔 启用 @用户回复: user_id={mention_user_id}")
+
+        card = build_formatted_reply_card(content=cleaned, mention_user_id=mention_user_id)
         # 🔍 诊断：记录卡片 JSON 格式
         import json
         card_json = json.dumps(card, ensure_ascii=False, indent=2)
-        logger.info(f"🔍 [卡片转换] 卡片 JSON 格式:\n{card_json[:1000]}...")
+        logger.info(f"🔍 [卡片转换] 卡片 JSON 格式:\n{card_json[:80]}...")
 
         outgoing = OutgoingMessage(
             chat_id=chat_id,
