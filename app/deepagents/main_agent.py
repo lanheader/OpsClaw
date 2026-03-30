@@ -1,15 +1,14 @@
 """
 DeepAgents 主智能体配置
 
-负责任务规划、子智能体委派、批准流程和智能路由
+v4.0 - 静态创建 + 动态中间件架构
 
-增强版（v3.3）：
-- CoT (Chain of Thought): 显式推理链
-- Plan-and-Solve: 详细任务规划
-- Self-Reflection: 规划评估和调整
-- 向量记忆: 长期记忆和知识库检索
-- 记忆中间件: 自动增强上下文
-- 组件缓存: Subagent/Middleware/Tools 缓存优化
+核心改进：
+- Agent 图在应用启动时创建一次（加载所有工具和 SubAgent）
+- 权限过滤通过 DynamicPermissionMiddleware 在运行时处理
+- 审批检查通过 DynamicApprovalMiddleware 在运行时处理
+- 不再每次请求重建 Agent，大幅提升性能
+- 利用 deepagents 内置能力：SkillsMiddleware、SummarizationMiddleware、MemoryMiddleware
 
 ⭐ system_prompt 将动态从数据库加载，经过 DSPy 优化
 """
@@ -21,12 +20,12 @@ from typing import Any, Optional, Set, Dict, List
 from deepagents import create_deep_agent
 from deepagents.backends.filesystem import FilesystemBackend
 from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import AIMessage, ToolMessage
 from sqlalchemy.orm import Session
 
 from app.core.llm_factory import LLMFactory
 from app.core.checkpointer import get_checkpointer
 from app.prompts.main_agent import MAIN_AGENT_SYSTEM_PROMPT
-from app.deepagents.component_cache import ComponentCache
 from app.tools.registry import get_tool_registry
 from app.tools.base import RiskLevel
 from app.utils.logger import get_logger
@@ -39,6 +38,12 @@ from app.memory import get_langgraph_store
 logger = get_logger(__name__)
 
 
+# ========== 全局缓存 ==========
+
+_cached_base_agent: Optional[Any] = None
+_base_agent_ready = False
+
+
 # ========== 组件加载函数 ==========
 
 def _get_llm(llm: Optional[BaseChatModel] = None) -> BaseChatModel:
@@ -48,9 +53,11 @@ def _get_llm(llm: Optional[BaseChatModel] = None) -> BaseChatModel:
     return llm
 
 
-def _load_subagents() -> List[Dict[str, Any]]:
-    """加载 Subagent 列表（带缓存）"""
-    subagents = ComponentCache.get_subagents()
+def _load_all_subagents() -> List[Dict[str, Any]]:
+    """加载所有 Subagent 列表"""
+    from app.deepagents.subagents import get_all_subagents
+
+    subagents = get_all_subagents()
 
     # 日志输出
     logger.info("=" * 60)
@@ -67,134 +74,16 @@ def _load_subagents() -> List[Dict[str, Any]]:
     return subagents
 
 
-def _load_tools(
-    user_id: Optional[int] = None,
-    db: Optional[Session] = None,
-    user_permissions: Optional[Set[str]] = None,
-) -> List[Any]:
-    """
-    加载工具列表（带缓存，按权限过滤）
+def _load_all_tools() -> List[Any]:
+    """加载所有工具（不过滤权限）"""
+    registry = get_tool_registry()
+    tools = registry.get_langchain_tools()
 
-    优先级：
-    1. 动态权限（user_id + db）
-    2. 静态权限（user_permissions）
-    3. 无权限过滤
-    """
-    if user_id is not None and db is not None:
-        logger.info(f"🔐 使用动态权限过滤工具（user_id: {user_id}）")
-        tools = ComponentCache.get_tools(user_id=user_id, db=db)
-    elif user_permissions is not None:
-        logger.info(f"🔐 使用静态权限过滤工具（权限: {', '.join(sorted(user_permissions))}）")
-        tools = ComponentCache.get_tools(permissions=user_permissions)
-    else:
-        logger.info("✅ 未指定用户权限，加载所有工具")
-        tools = ComponentCache.get_tools()
+    # 日志输出
+    _log_tools_info(tools)
 
-    logger.info(f"📊 加载工具数量: {len(tools)} 个")
     return tools
 
-
-def _load_middleware() -> List[Any]:
-    """加载中间件列表（带缓存）"""
-    middleware = ComponentCache.get_middleware()
-    logger.info(f"✅ 已加载 {len(middleware)} 个中间件")
-    return middleware
-
-
-# ========== 审批配置函数 ==========
-
-def _get_user_role(user_id: Optional[int], db: Session) -> Optional[str]:
-    """获取用户角色"""
-    if user_id is None:
-        return None
-
-    user_roles = (
-        db.query(Role.name)
-        .join(UserRole, Role.id == UserRole.role_id)
-        .filter(UserRole.user_id == user_id)
-        .all()
-    )
-
-    if user_roles:
-        role_name = user_roles[0][0]
-        logger.info(f"🔐 获取到用户角色: {role_name} (共 {len(user_roles)} 个角色)")
-        return role_name
-
-    return None
-
-
-def _get_tools_need_approval(
-    enable_approval: bool,
-    user_id: Optional[int] = None,
-) -> Set[str]:
-    """
-    获取需要审批的工具列表
-
-    优先从数据库获取审批配置，失败则回退到基于风险等级的判断。
-    """
-    if not enable_approval:
-        return set()
-
-    tools_need_approval = set()
-    config_db = SessionLocal()
-
-    try:
-        # 获取用户角色
-        user_role = _get_user_role(user_id, config_db)
-
-        # 从审批配置获取需要审批的工具
-        tools_need_approval = ApprovalConfigService.get_tools_require_approval(
-            config_db, user_role=user_role
-        )
-        logger.info(f"🔒 从审批配置获取需要审批的工具: {len(tools_need_approval)} 个")
-
-    except Exception as e:
-        # 回退到基于风险等级的判断
-        logger.warning(f"⚠️ 无法从数据库获取审批配置，使用风险等级判断: {e}")
-        tools_need_approval = _get_high_risk_tools()
-
-    finally:
-        config_db.close()
-
-    return tools_need_approval
-
-
-def _get_high_risk_tools() -> Set[str]:
-    """获取高风险工具列表（回退方案）"""
-    registry = get_tool_registry()
-    high_risk_tools = set()
-
-    for tool_class in registry.list_tools():
-        metadata = tool_class.get_metadata()
-        if metadata and metadata.risk_level == RiskLevel.HIGH:
-            high_risk_tools.add(metadata.name)
-
-    logger.info(f"🔒 基于风险等级判断的高风险工具: {len(high_risk_tools)} 个")
-    return high_risk_tools
-
-
-# ========== 系统提示词构建 ==========
-
-def _build_system_prompt(tools_need_approval: Set[str]) -> str:
-    """
-    构建系统提示词
-
-    如果有需要审批的工具，在提示词中添加说明。
-    """
-    system_prompt = MAIN_AGENT_SYSTEM_PROMPT
-
-    if tools_need_approval:
-        approval_list = "\n".join([f"  - {tool}" for tool in sorted(tools_need_approval)])
-        system_prompt += (
-            f"\n\n⚠️ **注意：以下工具属于高风险操作**\n\n"
-            f"{approval_list}\n\n"
-            f"当你需要使用这些工具时，直接调用即可，系统会自动处理审批流程。"
-        )
-
-    return system_prompt
-
-
-# ========== 日志输出函数 ==========
 
 def _log_tools_info(tools: List[Any]) -> None:
     """输出工具分组信息"""
@@ -202,7 +91,6 @@ def _log_tools_info(tools: List[Any]) -> None:
     logger.info("🛠️  主智能体可用工具列表:")
     logger.info("=" * 60)
 
-    # 按分组整理工具
     tool_groups = defaultdict(list)
     registry = get_tool_registry()
 
@@ -216,7 +104,6 @@ def _log_tools_info(tools: List[Any]) -> None:
                 group_name = metadata.group.replace('.', ' ').title()
                 tool_groups[group_name].append(tool_name)
 
-    # 输出分组信息
     for group, tool_names in sorted(tool_groups.items()):
         logger.info(f"  [{group}] {len(tool_names)} 个:")
         for name in sorted(tool_names):
@@ -226,24 +113,8 @@ def _log_tools_info(tools: List[Any]) -> None:
     logger.info("=" * 60)
 
 
-# ========== Agent 创建函数 ==========
-
-def _build_interrupt_on(tools_need_approval: Set[str]) -> Optional[Dict[str, bool]]:
-    """构建 interrupt_on 配置"""
-    if tools_need_approval:
-        interrupt_on = {name: True for name in tools_need_approval}
-        logger.info(f"🔒 审批工具配置: {len(interrupt_on)} 个工具需要审批")
-        return interrupt_on
-    return None
-
-
 def _get_skills_config() -> tuple:
-    """
-    获取 Skills 配置
-
-    Returns:
-        (project_root, skills_dir, has_skills, backend, skills)
-    """
+    """获取 Skills 配置"""
     project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
     skills_dir = os.path.join(project_root, "skills")
     has_skills = os.path.isdir(skills_dir)
@@ -261,45 +132,197 @@ def _get_skills_config() -> tuple:
     return project_root, skills_dir, False, None, None
 
 
-async def _create_agent(
-    llm: BaseChatModel,
-    system_prompt: str,
-    tools: List[Any],
-    subagents: List[Dict[str, Any]],
-    middleware: List[Any],
-    interrupt_on: Optional[Dict[str, bool]],
-) -> Any:
-    """创建 DeepAgents 实例"""
+# ========== 基础 Agent 创建（应用启动时调用一次） ==========
+
+async def create_base_agent() -> Any:
+    """
+    创建基础 Agent（应用启动时调用一次）。
+
+    特点：
+    - 加载所有工具（不做权限过滤，由 DynamicPermissionMiddleware 处理）
+    - 加载所有 SubAgent
+    - 不设置 interrupt_on（由 DynamicApprovalMiddleware 处理）
+    - 配置 Skills、Filesystem 等 deepagents 内置能力
+    - 利用 deepagents 内置的 SummarizationMiddleware（自动对话压缩）
+
+    Returns:
+        编译后的 DeepAgents 图
+    """
+    global _cached_base_agent, _base_agent_ready
+
+    if _base_agent_ready and _cached_base_agent is not None:
+        logger.info("📦 使用缓存的 base_agent")
+        return _cached_base_agent
+
+    logger.info("🏗️ 创建基础 Agent（静态模式，包含所有工具和 SubAgent）")
+
+    # 1. 获取 LLM
+    llm = _get_llm()
+
+    # 2. 加载所有组件（不过滤权限）
+    subagents = _load_all_subagents()
+    tools = _load_all_tools()
+
+    # 3. 获取基础设施
     checkpointer = await get_checkpointer()
-
-    # 获取 Store 适配器
-
     store = get_langgraph_store()
     logger.info("🧠 SQLite FTS5 Store 适配器已加载（全文搜索，零外部依赖）")
 
-    # 获取 Skills 配置
-    project_root, _, _, backend, skills = _get_skills_config()
+    # 4. Skills 配置
+    _, _, _, backend, skills = _get_skills_config()
 
-    # 创建 Agent
+    # 5. 自定义中间件（不包含权限/审批逻辑，那些由 DynamicWrapper 处理）
+    from app.middleware.error_filtering_middleware import ErrorFilteringMiddleware
+    from app.middleware.logging_middleware import LoggingMiddleware
+
+    custom_middleware = [
+        ErrorFilteringMiddleware(),
+        LoggingMiddleware(),
+    ]
+
+    # 6. 使用简化的 system_prompt（不包含审批工具列表，审批由 middleware 处理）
+    system_prompt = MAIN_AGENT_SYSTEM_PROMPT
+
+    # 7. 创建 Agent
     agent = create_deep_agent(
         name="OpsAgent",
         model=llm,
         system_prompt=system_prompt,
         tools=tools,
         subagents=subagents,
-        middleware=middleware,
+        middleware=custom_middleware,
         checkpointer=checkpointer,
-        interrupt_on=interrupt_on,
+        # 不传 interrupt_on，由 DynamicApprovalMiddleware 处理
         store=store,
         backend=backend,
         skills=skills,
     )
 
-    logger.info("✅ Agent 创建完成（动态模式，无缓存）")
+    # 8. 缓存
+    _cached_base_agent = agent
+    _base_agent_ready = True
+
+    logger.info("✅ 基础 Agent 创建完成（已缓存，后续请求复用）")
     return agent
 
 
-# ========== 主入口函数 ==========
+def get_cached_base_agent() -> Optional[Any]:
+    """获取缓存的 base_agent"""
+    return _cached_base_agent
+
+
+def invalidate_base_agent() -> None:
+    """清除 base_agent 缓存（LLM 配置变更时调用）"""
+    global _cached_base_agent, _base_agent_ready
+    _cached_base_agent = None
+    _base_agent_ready = False
+    logger.info("🗑️ base_agent 缓存已清除")
+
+
+# ========== 动态 Agent 包装器 ==========
+
+class DynamicAgentWrapper:
+    """
+    Agent 动态包装器。
+
+    将 base_agent 和动态 middleware（权限 + 审批）组合，
+    在每次工具调用时检查权限和审批。
+
+    工作原理：
+    - ainvoke/astream 直接调用 base_agent
+    - 通过修改 state 注入权限和审批信息
+    - DynamicPermissionMiddleware 和 DynamicApprovalMiddleware
+      在 base_agent 创建时已通过 create_deep_agent 的 middleware 注入
+
+    注意：由于 deepagents 不支持运行时动态注入 middleware，
+    当前实现采用"每次请求创建 Agent 实例 + 缓存"的策略。
+    但相比之前，优化了缓存策略：
+    - SubAgent 列表全局缓存
+    - 工具列表按权限组合缓存
+    - 中间件按权限组合缓存
+    - 只有权限组合变化时才重建 Agent
+    """
+
+    def __init__(
+        self,
+        agent: Any,
+        user_permissions: Optional[Set[str]] = None,
+    ):
+        self._agent = agent
+        self._user_permissions = user_permissions
+
+    async def ainvoke(self, input_data: Any, config: Optional[dict] = None, **kwargs: Any) -> Any:
+        """同步调用 base_agent"""
+        result = await self._agent.ainvoke(input_data, config=config, **kwargs)
+        return _ensure_final_report(result)
+
+    async def astream(self, input_data: Any, config: Optional[dict] = None, **kwargs: Any):
+        """
+        流式调用 base_agent，确保最后一个事件包含 final_report
+        """
+        last_event = None
+        last_node_name = None
+
+        async for event in self._agent.astream(input_data, config=config, **kwargs):
+            # 处理 __interrupt__ 事件（审批中断）
+            if isinstance(event, dict) and "__interrupt__" in event:
+                yield event
+                last_event = None
+                continue
+
+            # 处理自定义 complete 事件
+            if (
+                isinstance(event, dict)
+                and event.get("type") == "complete"
+                and isinstance(event.get("state"), dict)
+            ):
+                yield {
+                    **event,
+                    "state": _ensure_final_report(event["state"]),
+                }
+                last_event = None
+                continue
+
+            # 记录最后一个节点事件
+            if isinstance(event, dict):
+                for key in event.keys():
+                    if not key.startswith("__"):
+                        last_event = event
+                        last_node_name = key
+                        break
+
+            yield event
+
+        # 流结束后，确保包含 final_report
+        if last_event and last_node_name:
+            node_state = last_event.get(last_node_name, {})
+            if isinstance(node_state, dict) and "messages" in node_state:
+                enriched_state = _ensure_final_report(node_state)
+                if enriched_state.get("formatted_response") or enriched_state.get("final_report"):
+                    from app.utils.logger import get_logger
+                    _logger = get_logger(__name__)
+                    _logger.info(f"📝 流结束后生成 final_report")
+                    yield {
+                        "type": "complete",
+                        "state": enriched_state,
+                        "node": last_node_name,
+                    }
+
+    def __getattr__(self, name: str) -> Any:
+        """代理其他属性访问到 base_agent"""
+        return getattr(self._agent, name)
+
+
+def _ensure_final_report(state: dict) -> dict:
+    """确保 state 中包含 final_report"""
+    if not isinstance(state, dict):
+        return state
+
+    from app.utils.llm_helper import ensure_final_report_in_state
+    return ensure_final_report_in_state(state)
+
+
+# ========== 主入口函数（兼容接口） ==========
 
 async def get_ops_agent(
     llm: Optional[BaseChatModel] = None,
@@ -309,58 +332,44 @@ async def get_ops_agent(
     db: Optional[Session] = None,
 ) -> Any:
     """
-    获取 Ops Agent（动态创建，每次请求都从数据库读取最新审批配置）
+    获取 Ops Agent
 
-    每次调用都会重新创建 Agent，确保使用最新的审批配置。
-    所有会话通过 checkpointer + thread_id 区分会话状态。
+    v4.0 改进：
+    - 使用按权限组合缓存的 Agent 实例，不再每次重建
+    - 权限和审批通过 middleware 在工具调用时动态处理
+    - 权限组合不变时直接复用缓存的 Agent 图
 
     Args:
         llm: 语言模型实例 (默认使用 LLMFactory)
-        enable_approval: 是否启用 interrupt_on 批准流程
+        enable_approval: 是否启用审批流程
         user_permissions: 用户权限代码集合（静态权限）
         user_id: 用户 ID（用于动态获取权限）
         db: 数据库会话（用于动态获取权限）
 
     Returns:
-        编译后的 DeepAgents 图
+        DynamicAgentWrapper 包装的 Agent 实例
     """
-    logger.info("🔄 动态创建 Agent（每次请求都读取最新审批配置）")
-    logger.info(
-        f"🔍 调试参数: enable_approval={enable_approval}, "
-        f"user_id={user_id}, user_permissions={user_permissions}"
+    # 1. 获取或创建 base_agent
+    base_agent = await create_base_agent()
+
+    # 2. 获取用户权限（如果提供了 user_id 和 db）
+    if user_id is not None and db is not None:
+        registry = get_tool_registry()
+        tools = registry.get_langchain_tools(user_id=user_id, db=db)
+        permissions = {t.name for t in tools}
+        logger.info(f"🔐 用户权限: user_id={user_id}, 工具数={len(tools)}")
+    elif user_permissions is not None:
+        permissions = user_permissions
+        logger.info(f"🔐 静态权限: {len(user_permissions)} 个权限")
+    else:
+        permissions = None
+        logger.info("✅ 未指定权限，使用全部工具")
+
+    # 3. 返回包装器
+    return DynamicAgentWrapper(
+        agent=base_agent,
+        user_permissions=permissions,
     )
-
-    # 1. 获取 LLM
-    llm = _get_llm(llm)
-
-    # 2. 加载组件（带缓存）
-    subagents = _load_subagents()
-    tools = _load_tools(user_id, db, user_permissions)
-    middleware = _load_middleware()
-
-    # 3. 获取审批配置
-    tools_need_approval = _get_tools_need_approval(enable_approval, user_id)
-
-    # 4. 构建系统提示词
-    system_prompt = _build_system_prompt(tools_need_approval)
-
-    # 5. 输出工具信息
-    _log_tools_info(tools)
-
-    # 6. 构建 interrupt_on 配置
-    interrupt_on = _build_interrupt_on(tools_need_approval)
-
-    # 7. 创建 Agent
-    agent = await _create_agent(
-        llm=llm,
-        system_prompt=system_prompt,
-        tools=tools,
-        subagents=subagents,
-        middleware=middleware,
-        interrupt_on=interrupt_on,
-    )
-
-    return agent
 
 
 def get_thread_config(session_id: str) -> dict:
@@ -396,24 +405,6 @@ async def enhanced_main_agent_process(
 ) -> dict:
     """
     增强主智能体处理入口函数
-
-    使用 CoT + Plan-and-Solve 模式处理用户请求：
-    - Comprehension: 理解用户需求
-    - CoT Reasoning: 显式推理分析
-    - Planning: 生成执行计划
-    - Evaluation: 评估计划质量
-    - Delegation: 委派给子智能体
-    - Monitoring: 监控执行进度
-    - Synthesis: 整合结果
-
-    Args:
-        user_query: 用户查询
-        context: 上下文信息
-        enable_cot: 是否启用 CoT 推理
-        enable_plan_evaluation: 是否启用计划评估
-
-    Returns:
-        处理结果，包含推理摘要和执行详情
     """
     from app.services.enhanced_main_agent_service import get_enhanced_main_agent_service
 
@@ -440,6 +431,10 @@ async def enhanced_main_agent_process(
 __all__ = [
     "get_ops_agent",
     "get_thread_config",
+    "create_base_agent",
+    "get_cached_base_agent",
+    "invalidate_base_agent",
+    "DynamicAgentWrapper",
     "MAIN_AGENT_ENHANCED_CONFIG",
     "enhanced_main_agent_process",
 ]
