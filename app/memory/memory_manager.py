@@ -17,9 +17,13 @@ import os
 from typing import List, Dict, Optional, Any
 from datetime import datetime
 
+from langchain_core.messages import HumanMessage, SystemMessage
+
 from app.core.constants import is_incident_handling
+from app.core.llm_factory import LLMFactory
 from app.utils.logger import get_logger
 from app.memory.sqlite_memory_store import SQLiteMemoryStore
+from app.memory.query_expander import expand_query
 
 logger = get_logger(__name__)
 
@@ -136,9 +140,6 @@ class MemoryManager:
             return existing_summary or ""
 
         try:
-            from app.core.llm_factory import LLMFactory
-            from langchain_core.messages import HumanMessage, SystemMessage
-
             llm = LLMFactory.create_llm()
 
             # 拼接消息文本
@@ -211,7 +212,6 @@ class MemoryManager:
         # 扩展查询关键词
         search_query = user_query
         try:
-            from app.memory.query_expander import expand_query
             search_query = await expand_query(user_query)
         except Exception as e:
             logger.warning(f"⚠️ 查询扩展失败，使用原始查询: {e}")

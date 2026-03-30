@@ -47,7 +47,7 @@ def get_all_subagents() -> List[SubAgent]:
     for config in configs:
         subagent_name = config["name"]
 
-        # 从静态文件加载提示词
+        # 动态加载提示词（优先数据库，降级到静态文件）
         prompt = _load_prompt(subagent_name)
         config["system_prompt"] = prompt
 

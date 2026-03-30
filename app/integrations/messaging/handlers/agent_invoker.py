@@ -5,6 +5,7 @@ Agent 调用器 - 使用统一的 AgentChatService
 - 调用统一的 AgentChatService 处理飞书消息
 - 发送 AI 回复（卡片格式）
 - 处理审批流程
+- 使用统一的会话锁管理器
 """
 
 import asyncio
@@ -18,6 +19,7 @@ from app.integrations.feishu.message_formatter import clean_xml_tags, format_app
 from app.models.database import SessionLocal
 from app.services.chat_service import save_feishu_message
 from app.models.chat_message import MessageRole
+from app.services.session_lock_manager import SessionLockContext
 
 # 导入统一的消息处理服务
 from app.services.agent_chat_service import (
@@ -28,18 +30,6 @@ from app.services.agent_chat_service import (
 )
 
 logger = get_logger(__name__)
-
-# 全局会话锁字典（用于并发控制）
-_session_locks: Dict[str, asyncio.Lock] = {}
-_locks_lock = asyncio.Lock()
-
-
-async def _get_session_lock(session_id: str) -> asyncio.Lock:
-    """获取会话锁（线程安全）"""
-    async with _locks_lock:
-        if session_id not in _session_locks:
-            _session_locks[session_id] = asyncio.Lock()
-        return _session_locks[session_id]
 
 
 class AgentInvoker:
@@ -54,10 +44,8 @@ class AgentInvoker:
         """调用 Agent 并返回回复列表"""
         logger.info(f"🤖 调用 Agent: session={context.session_id}, text={text[:50]}...")
 
-        # 获取会话锁
-        session_lock = await _get_session_lock(context.session_id)
-
-        async with session_lock:
+        # 使用统一的会话锁管理器
+        async with SessionLockContext(context.session_id, timeout=600):
             logger.info(f"🔒 获取会话锁: session={context.session_id}")
 
             # 构建请求

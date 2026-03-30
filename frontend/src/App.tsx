@@ -8,19 +8,18 @@ import {
   RocketOutlined,
   HistoryOutlined,
   SettingOutlined,
-  BugOutlined,
   UserOutlined,
   LogoutOutlined,
   TeamOutlined,
   SafetyOutlined,
   MessageOutlined,
+  EditOutlined,
 } from '@ant-design/icons';
 import { BrowserRouter, Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Dashboard } from './pages/Dashboard';
 import { WorkflowExecute } from './pages/WorkflowExecute';
 import { WorkflowDetail } from './pages/WorkflowDetail';
-import { Diagnostics } from './pages/Diagnostics';
 import { Login } from './pages/Login';
 import { UserManagement } from './pages/UserManagement';
 import { RoleManagement } from './pages/RoleManagement';
@@ -28,6 +27,7 @@ import { ApprovalConfigManagement } from './pages/ApprovalConfigManagement';
 import SystemSettings from './pages/SystemSettings';
 import Chat from './pages/Chat';
 import Profile from './pages/Profile';
+import PromptManagement from './pages/PromptManagement';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { PermissionProvider, usePermission } from './contexts/PermissionContext';
 import { PrivateRoute } from './components/PrivateRoute';
@@ -95,11 +95,6 @@ const AppLayout: React.FC = () => {
       icon: <HistoryOutlined />,
       label: <Link to="/history">执行历史</Link>,
     },
-    hasPermission('view_diagnostics') && {
-      key: '/diagnostics',
-      icon: <BugOutlined />,
-      label: <Link to="/diagnostics">API 诊断</Link>,
-    },
     hasPermission('manage_users') && {
       key: '/users',
       icon: <TeamOutlined />,
@@ -119,6 +114,11 @@ const AppLayout: React.FC = () => {
       key: '/settings',
       icon: <SettingOutlined />,
       label: <Link to="/settings">系统设置</Link>,
+    },
+    hasPermission('manage_roles') && {
+      key: '/prompts',
+      icon: <EditOutlined />,
+      label: <Link to="/prompts">提示词管理</Link>,
     },
   ].filter((item): item is { key: string; icon: JSX.Element; label: JSX.Element } => Boolean(item));
 
@@ -177,12 +177,12 @@ const AppLayout: React.FC = () => {
               <Route path="/chat" element={<Chat />} />
               <Route path="/chat/:sessionId" element={<Chat />} />
               <Route path="/history" element={<div>执行历史（待实现）</div>} />
-              <Route path="/diagnostics" element={<Diagnostics />} />
               <Route path="/users" element={<UserManagement />} />
               <Route path="/roles" element={<RoleManagement />} />
               <Route path="/approval-config" element={<ApprovalConfigManagement />} />
               <Route path="/profile" element={<Profile />} />
               <Route path="/settings" element={<SystemSettings />} />
+              <Route path="/prompts" element={<PromptManagement />} />
             </Routes>
           </div>
         </Content>

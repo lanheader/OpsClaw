@@ -15,19 +15,46 @@ ReWOO (Reasoning WithOut Observation) 模式：
 
 import asyncio
 import json
-import logging
-from typing import Dict, List, Any, Optional, Set, Tuple
+from typing import Dict, List, Any, Optional
 from datetime import datetime
 from dataclasses import dataclass, field
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.core.llm_factory import LLMFactory
 from app.tools import get_tools_by_package
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+# ==================== 辅助函数 ====================
+
+def _extract_json_from_response(content: str) -> Optional[Dict]:
+    """从 LLM 响应中提取 JSON"""
+    try:
+        # 尝试提取 ```json ... ``` 块
+        if "```json" in content:
+            start = content.find("```json") + 7
+            end = content.find("```", start)
+            return json.loads(content[start:end].strip())
+
+        # 尝试提取 ``` ... ``` 块
+        if "```" in content:
+            start = content.find("```") + 3
+            end = content.find("```", start)
+            return json.loads(content[start:end].strip())
+
+        # 尝试提取第一个 JSON 对象
+        start = content.find("{")
+        end = content.rfind("}") + 1
+        if start >= 0 and end > start:
+            return json.loads(content[start:end])
+
+    except json.JSONDecodeError:
+        pass
+
+    return None
 
 
 # ==================== 数据模型 ====================
@@ -153,6 +180,40 @@ class EnhancedDataAgentService:
 
         使用 CoT 推理分析用户需求，生成采集计划
         """
+        prompt = self._build_planner_prompt(
+            user_query, context, existing_data, memory_context
+        )
+
+        try:
+            response = await self.llm.ainvoke(prompt)
+            parsed = _extract_json_from_response(response.content)
+
+            if not parsed or "steps" not in parsed:
+                raise ValueError("无法解析采集计划")
+
+            steps, total_duration = self._parse_collection_steps(parsed)
+
+            return CollectionPlan(
+                steps=steps,
+                metadata={
+                    "user_query": user_query,
+                    "planned_at": datetime.now().isoformat()
+                },
+                estimated_total_duration=total_duration
+            )
+
+        except Exception as e:
+            logger.error(f"❌ [Planner] 规划失败: {e}")
+            return self._get_default_plan(user_query, context)
+
+    def _build_planner_prompt(
+        self,
+        user_query: str,
+        context: Dict[str, Any],
+        existing_data: Dict[str, Any],
+        memory_context: str
+    ) -> str:
+        """构建规划提示词"""
         existing_info = ""
         if existing_data:
             existing_info = f"\n已采集的数据:\n{json.dumps(existing_data, ensure_ascii=False, indent=2)}"
@@ -161,7 +222,7 @@ class EnhancedDataAgentService:
         if context:
             context_info = f"\n上下文信息:\n{json.dumps(context, ensure_ascii=False, indent=2)}"
 
-        prompt = f"""作为运维数据采集专家，请分析以下用户需求，规划需要采集的数据：
+        return f"""作为运维数据采集专家，请分析以下用户需求，规划需要采集的数据：
 
 用户需求：{user_query}{context_info}{existing_info}{memory_context}
 
@@ -215,55 +276,28 @@ class EnhancedDataAgentService:
 - 独立的数据源可以并行采集
 """
 
-        try:
-            response = await self.llm.ainvoke(prompt)
-            content = response.content
+    def _parse_collection_steps(
+        self,
+        parsed: Dict[str, Any]
+    ) -> tuple[List[CollectionStep], float]:
+        """解析采集步骤"""
+        steps = []
+        total_duration = 0.0
 
-            # 解析 JSON
-            if "```json" in content:
-                json_start = content.find("```json") + 7
-                json_end = content.find("```", json_start)
-                json_str = content[json_start:json_end].strip()
-            elif "```" in content:
-                json_start = content.find("```") + 3
-                json_end = content.find("```", json_start)
-                json_str = content[json_start:json_end].strip()
-            else:
-                start = content.find("{")
-                end = content.rfind("}") + 1
-                json_str = content[start:end] if start >= 0 else content
-
-            parsed = json.loads(json_str)
-
-            steps = []
-            total_duration = 0.0
-
-            for i, step_data in enumerate(parsed.get("steps", [])):
-                step = CollectionStep(
-                    id=step_data.get("id", f"step{i+1}"),
-                    tool=step_data.get("tool", ""),
-                    action=step_data.get("action", ""),
-                    params=step_data.get("params", {}),
-                    priority=step_data.get("priority", 5),
-                    estimated_duration=step_data.get("estimated_duration", 5.0),
-                    dependencies=step_data.get("dependencies", [])
-                )
-                steps.append(step)
-                total_duration += step.estimated_duration
-
-            return CollectionPlan(
-                steps=steps,
-                metadata={
-                    "user_query": user_query,
-                    "planned_at": datetime.now().isoformat()
-                },
-                estimated_total_duration=total_duration
+        for i, step_data in enumerate(parsed.get("steps", [])):
+            step = CollectionStep(
+                id=step_data.get("id", f"step{i+1}"),
+                tool=step_data.get("tool", ""),
+                action=step_data.get("action", ""),
+                params=step_data.get("params", {}),
+                priority=step_data.get("priority", 5),
+                estimated_duration=step_data.get("estimated_duration", 5.0),
+                dependencies=step_data.get("dependencies", [])
             )
+            steps.append(step)
+            total_duration += step.estimated_duration
 
-        except Exception as e:
-            logger.error(f"❌ [Planner] 规划失败: {e}")
-            # 返回默认计划
-            return self._get_default_plan(user_query, context)
+        return steps, total_duration
 
     def _get_default_plan(
         self,
@@ -521,51 +555,47 @@ class EnhancedDataAgentService:
 
         prompt = f"""请分析以下采集的数据, 生成简洁摘要:
 
-        用户需求: {user_query}
+用户需求: {user_query}
 
-        采集的数据:
-        {data_str}
+采集的数据:
+{data_str}
 
-        请提供:
-        1. key_findings: 关键发现(数组, 最多5条)
-        2. issues: 异常情况(数组, 最多3条)
-        3. data_quality: 数据质量评估(good/partial/poor)
+请提供:
+1. key_findings: 关键发现(数组, 最多5条)
+2. issues: 异常情况(数组, 最多3条)
+3. data_quality: 数据质量评估(good/partial/poor)
 
-        以 JSON 格式输出:
-        ```json
-        {{
-          "key_findings": ["发现1", "发现2"],
-          "issues": ["异常1", "异常2"],
-          "data_quality": "good"
-        }}
-        ```
-        """
+以 JSON 格式输出:
+```json
+{{
+  "key_findings": ["发现1", "发现2"],
+  "issues": ["异常1", "异常2"],
+  "data_quality": "good"
+}}
+```
+"""
 
         try:
             response = await self.llm.ainvoke(prompt)
-            content = response.content
+            summary = _extract_json_from_response(response.content)
 
-            # 提取 JSON
-            if "```json" in content:
-                json_start = content.find("```json") + 7
-                json_end = content.find("```", json_start)
-                json_str = content[json_start:json_end].strip()
-            else:
-                start = content.find("{")
-                end = content.rfind("}") + 1
-                json_str = content[start:end] if start >= 0 else content
+            if summary:
+                return summary
 
-            summary = json.loads(json_str)
-            return summary
+            # 解析失败，返回默认
+            return self._get_default_summary(processed_data)
 
         except Exception as e:
             logger.warning(f"⚠️ 数据摘要生成失败: {e}")
-            # 返回默认摘要
-            return {
-                "key_findings": [f"采集了 {len(processed_data)} 类数据"],
-                "issues": [],
-                "data_quality": "good"
-            }
+            return self._get_default_summary(processed_data)
+
+    def _get_default_summary(self, processed_data: Dict[str, Any]) -> Dict[str, Any]:
+        """获取默认摘要"""
+        return {
+            "key_findings": [f"采集了 {len(processed_data)} 类数据"],
+            "issues": [],
+            "data_quality": "good"
+        }
 
 
 # ==================== 便捷函数 ====================
@@ -628,54 +658,3 @@ __all__ = [
     "get_enhanced_data_agent_service",
     "enhanced_collect_data",
 ]
-
-
-_data_agent_service_instance: Optional[EnhancedDataAgentService] = None
-
-
-def get_enhanced_data_agent_service() -> EnhancedDataAgentService:
-    """获取增强数据采集服务单例"""
-    global _data_agent_service_instance
-    if _data_agent_service_instance is None:
-        _data_agent_service_instance = EnhancedDataAgentService()
-    return _data_agent_service_instance
-
-
-async def enhanced_collect_data(
-    user_query: str,
-    context: Dict[str, Any] = None,
-    collected_data: Dict[str, Any] = None
-) -> Dict[str, Any]:
-    """
-    增强数据采集入口函数（兼容旧接口）
-
-    使用 ReWOO 模式并行采集数据
-
-    Args:
-        user_query: 用户查询
-        context: 上下文信息
-        collected_data: 已采集的数据
-
-    Returns:
-        采集和整合后的数据
-    """
-    service = get_enhanced_data_agent_service()
-    result = await service.collect_data_rewoo(
-        user_query=user_query,
-        context=context or {},
-        collected_data=collected_data
-    )
-
-    return {
-        "raw_results": {k: {
-            "success": v.success,
-            "data": v.data,
-            "error": v.error,
-            "duration": v.duration
-        } for k, v in result.raw_results.items()},
-        "processed_data": result.processed_data,
-        "summary": result.summary,
-        "metadata": result.metadata
-    }
-
-

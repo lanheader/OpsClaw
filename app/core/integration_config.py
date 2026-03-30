@@ -16,6 +16,8 @@ logger = logging.getLogger(__name__)
 class IntegrationConfig:
     """集成配置管理（从数据库读取）"""
 
+    # ========== 通用方法 ==========
+
     @staticmethod
     def get_setting(db: Session, key: str, default: Any = None) -> Any:
         """
@@ -43,6 +45,35 @@ class IntegrationConfig:
         return default
 
     @staticmethod
+    def set_setting(db: Session, key: str, value: str, value_type: str = "string") -> None:
+        """
+        设置系统设置值
+
+        Args:
+            db: 数据库会话
+            key: 设置键
+            value: 设置值
+            value_type: 值类型
+        """
+        setting = db.query(SystemSetting).filter(
+            SystemSetting.key == key
+        ).first()
+
+        if setting:
+            setting.value = value
+        else:
+            setting = SystemSetting(
+                key=key,
+                value=value,
+                value_type=value_type,
+                category="kubernetes",
+                name=key.split(".")[-1],
+            )
+            db.add(setting)
+
+    # ========== Kubernetes 配置 ==========
+
+    @staticmethod
     def is_k8s_enabled(db: Session) -> bool:
         """检查 K8s 集成是否启用"""
         return IntegrationConfig.get_setting(db, "k8s.enabled", False)
@@ -53,13 +84,13 @@ class IntegrationConfig:
         获取 K8s 认证模式
 
         Returns:
-            "config" (kubeconfig 文件) 或 "token" (ServiceAccount Token)
+            "kubeconfig" (kubeconfig 内容) 或 "token" (ServiceAccount Token)
         """
-        return IntegrationConfig.get_setting(db, "k8s.auth_mode", "config")
+        return IntegrationConfig.get_setting(db, "k8s.auth_mode", "kubeconfig")
 
     @staticmethod
     def get_k8s_kubeconfig(db: Session) -> Optional[str]:
-        """获取 K8s kubeconfig 内容或路径"""
+        """获取 K8s kubeconfig 内容（直接存储在数据库中）"""
         return IntegrationConfig.get_setting(db, "k8s.kubeconfig")
 
     @staticmethod
@@ -77,10 +108,19 @@ class IntegrationConfig:
         """获取 K8s CA 证书"""
         return IntegrationConfig.get_setting(db, "k8s.ca_cert")
 
+    # ========== Prometheus 配置 ==========
+
     @staticmethod
     def is_prometheus_enabled(db: Session) -> bool:
         """检查 Prometheus 集成是否启用"""
         return IntegrationConfig.get_setting(db, "prometheus.enabled", False)
+
+    @staticmethod
+    def get_prometheus_url(db: Session) -> Optional[str]:
+        """获取 Prometheus URL"""
+        return IntegrationConfig.get_setting(db, "prometheus.url")
+
+    # ========== Loki 配置 ==========
 
     @staticmethod
     def is_loki_enabled(db: Session) -> bool:
@@ -88,14 +128,11 @@ class IntegrationConfig:
         return IntegrationConfig.get_setting(db, "loki.enabled", False)
 
     @staticmethod
-    def get_prometheus_url(db: Session) -> Optional[str]:
-        """获取 Prometheus URL"""
-        return IntegrationConfig.get_setting(db, "prometheus.url")
-
-    @staticmethod
     def get_loki_url(db: Session) -> Optional[str]:
         """获取 Loki URL"""
         return IntegrationConfig.get_setting(db, "loki.url")
+
+    # ========== 配置字典 ==========
 
     @staticmethod
     def get_config_dict(db: Session) -> Dict[str, Any]:

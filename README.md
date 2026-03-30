@@ -20,7 +20,7 @@ English | [简体中文](README_ZH.md)
 
 Ops Agent is an intelligent operations automation platform built on the **DeepAgents Framework**. It achieves full-process automation from monitoring, diagnosis to self-healing through the collaboration of a main agent and specialized sub-agents.
 
-**Current Version**: v3.4 | **Subagents**: 3 | **Middleware**: 3 | **K8s Tools**: 28
+**Current Version**: v3.5 | **Subagents**: 3 | **Middleware**: 3 | **K8s Tools**: 28
 
 ### ✨ Key Features
 
@@ -150,13 +150,9 @@ uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ┌─────────────────────────────────────────────────────────────────┐
 │              Subagents Layer (3 Subagents)                       │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐         │
-│  │intent-agent  │  │  data-agent  │  │analyze-agent │         │
-│  │  (Intent)    │  │  (Data)      │  │  (Analysis)  │         │
+│  │  data-agent  │  │analyze-agent │  │execute-agent │         │
+│  │  (Data)      │  │  (Analysis)  │  │  (Execute)   │         │
 │  └──────────────┘  └──────────────┘  └──────────────┘         │
-│  ┌──────────────┐                                              │
-│  │execute-agent │                                              │
-│  │  (Execute)   │                                              │
-│  └──────────────┘                                              │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
@@ -446,6 +442,6 @@ MIT License
 
 <div align="center">
 
-**Last Updated**: 2026-03-28 | **Version**: v3.4 | **Maintainer**: lanjiaxuan
+**Last Updated**: 2026-03-30 | **Version**: v3.5 | **Maintainer**: lanjiaxuan
 
 </div>

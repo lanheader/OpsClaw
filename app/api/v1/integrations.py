@@ -4,7 +4,8 @@
 import logging
 import os
 import time
-from typing import Optional, Dict, Any
+import tempfile
+from typing import Optional, Dict, Any, Literal
 from fastapi import APIRouter, HTTPException, status, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -15,6 +16,12 @@ from app.models.system_setting import SystemSetting
 from app.core.deps import get_current_admin
 from app.core.config import get_settings
 from app.core.integration_config import IntegrationConfig
+from app.schemas.kubernetes_config import (
+    KubernetesConfigResponse,
+    KubernetesConfigUpdate,
+    KubernetesConnectionTestRequest,
+    KubernetesConnectionTestResponse,
+)
 
 from kubernetes import client as k8s_client
 from kubernetes import config as k8s_config
@@ -40,51 +47,50 @@ class IntegrationTestResponse(BaseModel):
 async def test_kubernetes_connection(
     current_user: User = Depends(get_current_admin), db: Session = Depends(get_db)
 ):
-    """测试 Kubernetes 连接"""
-    settings = get_settings()
-
-    if not settings.K8S_ENABLED:
-        return IntegrationTestResponse(
-            success=False, service="kubernetes", error="Kubernetes 未启用"
-        )
-
+    """测试 Kubernetes 连接（使用数据库配置）"""
     try:
+        from app.integrations.kubernetes.client import create_client
+
         start_time = time.time()
 
-        # 加载 kubeconfig
-        if settings.KUBECONFIG and os.path.exists(settings.KUBECONFIG):
-            k8s_config.load_kube_config(config_file=settings.KUBECONFIG)
-        else:
-            k8s_config.load_kube_config()
+        # 从数据库配置创建客户端
+        k8s_client_instance = create_client(db=db)
 
-        # 创建 API 客户端
-        v1 = k8s_client.CoreV1Api()
-
-        # 测试连接 - 获取版本信息
-        version_api = k8s_client.VersionApi()
-        version_info = version_api.get_code()
-
-        # 获取节点数量
-        nodes = v1.list_node()
-        node_count = len(nodes.items)
+        # 检查健康状态
+        health = await k8s_client_instance.check_kubernetes_health()
 
         end_time = time.time()
         response_time_ms = (end_time - start_time) * 1000
 
-        logger.info(
-            f"Admin {current_user.username} tested Kubernetes connection, response_time={response_time_ms:.2f}ms"
-        )
+        if health["healthy"]:
+            # 获取节点数量
+            try:
+                nodes = k8s_client_instance.core_v1.list_node()
+                node_count = len(nodes.items)
+            except Exception:
+                node_count = 0
 
-        return IntegrationTestResponse(
-            success=True,
-            service="kubernetes",
-            response_time_ms=round(response_time_ms, 2),
-            version=version_info.git_version,
-            details={
-                "node_count": node_count,
-                "platform": version_info.platform,
-            },
-        )
+            logger.info(
+                f"Admin {current_user.username} tested Kubernetes connection, response_time={response_time_ms:.2f}ms"
+            )
+
+            return IntegrationTestResponse(
+                success=True,
+                service="kubernetes",
+                response_time_ms=round(response_time_ms, 2),
+                version=health.get("server_version", "unknown"),
+                details={
+                    "node_count": node_count,
+                    "platform": health.get("platform", "unknown"),
+                    "git_version": health.get("git_version", "unknown"),
+                },
+            )
+        else:
+            return IntegrationTestResponse(
+                success=False,
+                service="kubernetes",
+                error=health.get("error", "Unknown error")
+            )
 
     except Exception as e:
         logger.error(f"Kubernetes test error: {str(e)}")
@@ -404,4 +410,248 @@ async def get_service_config(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取 {service} 配置失败: {str(e)}"
+        )
+
+
+# ========== Kubernetes 配置管理（专用端点）==========
+
+
+def _mask_sensitive(value: Optional[str], show_length: int = 20) -> Optional[str]:
+    """脱敏敏感信息"""
+    if not value:
+        return None
+    if len(value) <= show_length:
+        return value[:4] + "*" * (len(value) - 4)
+    return value[:show_length] + "..."
+
+
+@router.get("/kubernetes/config", response_model=KubernetesConfigResponse)
+async def get_kubernetes_config(
+    current_user: User = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    获取 Kubernetes 配置
+
+    敏感字段会进行脱敏处理。
+    """
+    try:
+        config = IntegrationConfig.get_config_dict(db)
+        k8s_config_data = config.get("k8s", {})
+
+        return KubernetesConfigResponse(
+            enabled=k8s_config_data.get("enabled", False),
+            auth_mode=k8s_config_data.get("auth_mode", "kubeconfig"),
+            kubeconfig_content_masked=_mask_sensitive(k8s_config_data.get("kubeconfig")),
+            api_host=k8s_config_data.get("api_host"),
+            token_masked=_mask_sensitive(k8s_config_data.get("token")),
+            ca_cert_masked=_mask_sensitive(k8s_config_data.get("ca_cert"), show_length=50),
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to get Kubernetes config: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取 Kubernetes 配置失败: {str(e)}"
+        )
+
+
+@router.put("/kubernetes/config", response_model=KubernetesConfigResponse)
+async def update_kubernetes_config(
+    data: KubernetesConfigUpdate,
+    current_user: User = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    更新 Kubernetes 配置
+
+    支持两种认证模式：
+    - kubeconfig: 将 kubeconfig 文件内容粘贴到 kubeconfig_content 字段
+    - token: 提供 api_host、token 和可选的 ca_cert
+
+    更新后会自动启用 K8s 集成。
+    """
+    try:
+        # 更新配置项
+        config_updates = {
+            "k8s.enabled": (str(data.enabled).lower(), "boolean", "K8s 集成开关"),
+            "k8s.auth_mode": (data.auth_mode, "string", "K8s 认证模式"),
+        }
+
+        # 根据认证模式更新对应的配置
+        if data.auth_mode == "kubeconfig":
+            if data.kubeconfig_content:
+                config_updates["k8s.kubeconfig"] = (
+                    data.kubeconfig_content,
+                    "string",
+                    "K8s kubeconfig 内容"
+                )
+        else:  # token 模式
+            if data.api_host:
+                config_updates["k8s.api_host"] = (
+                    data.api_host,
+                    "string",
+                    "K8s API Server 地址"
+                )
+            if data.token:
+                config_updates["k8s.token"] = (
+                    data.token,
+                    "string",
+                    "K8s ServiceAccount Token"
+                )
+            if data.ca_cert:
+                config_updates["k8s.ca_cert"] = (
+                    data.ca_cert,
+                    "string",
+                    "K8s CA 证书"
+                )
+
+        # 批量更新配置
+        for key, (value, value_type, description) in config_updates.items():
+            setting = db.query(SystemSetting).filter(
+                SystemSetting.key == key
+            ).first()
+
+            if setting:
+                setting.value = value
+            else:
+                setting = SystemSetting(
+                    key=key,
+                    value=value,
+                    value_type=value_type,
+                    description=description,
+                    category="kubernetes",
+                    name=key.split(".")[-1],
+                )
+                db.add(setting)
+
+        db.commit()
+
+        logger.info(f"Admin {current_user.username} updated Kubernetes config (mode={data.auth_mode})")
+
+        # 返回更新后的配置（脱敏）
+        return await get_kubernetes_config(current_user, db)
+
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to update Kubernetes config: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"更新 Kubernetes 配置失败: {str(e)}"
+        )
+
+
+@router.post("/kubernetes/test", response_model=KubernetesConnectionTestResponse)
+async def test_kubernetes_config(
+    request: Optional[KubernetesConnectionTestRequest] = None,
+    current_user: User = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    测试 Kubernetes 连接
+
+    如果不提供请求体，则使用数据库中保存的配置进行测试。
+    如果提供请求体，则使用临时配置进行测试（不会保存到数据库）。
+    """
+    try:
+        from app.integrations.kubernetes.client import KubernetesClient, create_client
+        import time
+
+        start_time = time.time()
+
+        # 决定使用哪个配置
+        if request and request.auth_mode:
+            logger.info(f"Testing K8s with request config: auth_mode={request.auth_mode}")
+            # 使用临时配置
+            if request.auth_mode == "kubeconfig":
+                if not request.kubeconfig_content:
+                    return KubernetesConnectionTestResponse(
+                        success=False,
+                        message="kubeconfig 模式需要提供 kubeconfig_content"
+                    )
+                client = KubernetesClient(
+                    auth_mode="kubeconfig",
+                    kubeconfig_content=request.kubeconfig_content
+                )
+            else:  # token 模式
+                if not request.token or not request.api_host:
+                    return KubernetesConnectionTestResponse(
+                        success=False,
+                        message="token 模式需要提供 token 和 api_host"
+                    )
+                client = KubernetesClient(
+                    auth_mode="token",
+                    token=request.token,
+                    api_host=request.api_host,
+                    ca_cert=request.ca_cert
+                )
+        else:
+            # 使用数据库配置
+            logger.info("Testing K8s with database config")
+
+            # 先检查配置
+            enabled = IntegrationConfig.is_k8s_enabled(db)
+            auth_mode = IntegrationConfig.get_k8s_auth_mode(db)
+            logger.info(f"K8s config from DB: enabled={enabled}, auth_mode={auth_mode}")
+
+            if not enabled:
+                return KubernetesConnectionTestResponse(
+                    success=False,
+                    message="Kubernetes 集成未启用，请先在配置中启用"
+                )
+
+            if auth_mode == "token":
+                api_host = IntegrationConfig.get_k8s_api_host(db)
+                token = IntegrationConfig.get_k8s_token(db)
+                ca_cert = IntegrationConfig.get_k8s_ca_cert(db)
+                logger.info(f"Token mode: api_host={api_host}, has_token={bool(token)}, has_ca_cert={bool(ca_cert)}")
+
+                if not api_host or not token:
+                    return KubernetesConnectionTestResponse(
+                        success=False,
+                        message="token 模式需要配置 api_host 和 token"
+                    )
+            else:
+                kubeconfig = IntegrationConfig.get_k8s_kubeconfig(db)
+                logger.info(f"Kubeconfig mode: has_kubeconfig={bool(kubeconfig)}")
+
+                if not kubeconfig:
+                    return KubernetesConnectionTestResponse(
+                        success=False,
+                        message="kubeconfig 模式需要配置 kubeconfig 内容"
+                    )
+
+            client = create_client(db=db)
+
+        # 执行健康检查
+        health = await client.check_kubernetes_health()
+
+        end_time = time.time()
+        response_time_ms = (end_time - start_time) * 1000
+
+        if health["healthy"]:
+            logger.info(
+                f"Admin {current_user.username} tested Kubernetes connection, "
+                f"response_time={response_time_ms:.2f}ms"
+            )
+
+            return KubernetesConnectionTestResponse(
+                success=True,
+                message="Kubernetes 连接成功",
+                cluster_info=f"Platform: {health.get('platform', 'unknown')}",
+                server_version=health.get("server_version", "unknown"),
+                response_time_ms=round(response_time_ms, 2),
+            )
+        else:
+            return KubernetesConnectionTestResponse(
+                success=False,
+                message=f"Kubernetes 连接失败: {health.get('error', 'Unknown error')}",
+                response_time_ms=round(response_time_ms, 2),
+            )
+
+    except Exception as e:
+        logger.error(f"Kubernetes test error: {str(e)}")
+        return KubernetesConnectionTestResponse(
+            success=False,
+            message=f"连接测试失败: {str(e)}"
         )

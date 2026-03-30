@@ -3,45 +3,303 @@ DeepAgents 主智能体配置
 
 负责任务规划、子智能体委派、批准流程和智能路由
 
-增强版（v3.2）：
+增强版（v3.3）：
 - CoT (Chain of Thought): 显式推理链
 - Plan-and-Solve: 详细任务规划
 - Self-Reflection: 规划评估和调整
 - 向量记忆: 长期记忆和知识库检索
 - 记忆中间件: 自动增强上下文
+- 组件缓存: Subagent/Middleware/Tools 缓存优化
 
 ⭐ system_prompt 将动态从数据库加载，经过 DSPy 优化
 """
 
-from collections import defaultdict
 import os
+from collections import defaultdict
+from typing import Any, Optional, Set, Dict, List
+
 from deepagents import create_deep_agent
 from deepagents.backends.filesystem import FilesystemBackend
 from langchain_core.language_models import BaseChatModel
-from typing import Any, Optional, Set
 from sqlalchemy.orm import Session
 
 from app.core.llm_factory import LLMFactory
 from app.core.checkpointer import get_checkpointer
-from app.core.constants import is_incident_handling
-from app.models.role import Role
-from app.models.user_role import UserRole
 from app.prompts.main_agent import MAIN_AGENT_SYSTEM_PROMPT
-from app.deepagents.subagents import get_all_subagents
-from app.middleware.logging_middleware import LoggingMiddleware
-from app.middleware.message_trimming_middleware import MessageTrimmingMiddleware
-
-from app.middleware.error_filtering_middleware import ErrorFilteringMiddleware
+from app.deepagents.component_cache import ComponentCache
 from app.tools.registry import get_tool_registry
 from app.tools.base import RiskLevel
 from app.utils.logger import get_logger
-from app.services.enhanced_main_agent_service import get_enhanced_main_agent_service
 from app.services.approval_config_service import ApprovalConfigService
 from app.models.database import SessionLocal
-from app.models.user import User
+from app.models.role import Role
+from app.models.user_role import UserRole
+from app.memory import get_langgraph_store
 
 logger = get_logger(__name__)
 
+
+# ========== 组件加载函数 ==========
+
+def _get_llm(llm: Optional[BaseChatModel] = None) -> BaseChatModel:
+    """获取 LLM 实例"""
+    if llm is None:
+        llm = LLMFactory.create_llm()
+    return llm
+
+
+def _load_subagents() -> List[Dict[str, Any]]:
+    """加载 Subagent 列表（带缓存）"""
+    subagents = ComponentCache.get_subagents()
+
+    # 日志输出
+    logger.info("=" * 60)
+    logger.info("🤖 主智能体可用 Subagent 列表:")
+    for subagent in subagents:
+        name = subagent.get('name', 'unknown')
+        desc = subagent.get('description', 'No description')
+        tool_count = len(subagent.get('tools', []))
+        logger.info(f"  - {name}: {desc}")
+        logger.info(f"    工具数量: {tool_count}")
+    logger.info(f"📊 总计: {len(subagents)} 个 Subagent")
+    logger.info("=" * 60)
+
+    return subagents
+
+
+def _load_tools(
+    user_id: Optional[int] = None,
+    db: Optional[Session] = None,
+    user_permissions: Optional[Set[str]] = None,
+) -> List[Any]:
+    """
+    加载工具列表（带缓存，按权限过滤）
+
+    优先级：
+    1. 动态权限（user_id + db）
+    2. 静态权限（user_permissions）
+    3. 无权限过滤
+    """
+    if user_id is not None and db is not None:
+        logger.info(f"🔐 使用动态权限过滤工具（user_id: {user_id}）")
+        tools = ComponentCache.get_tools(user_id=user_id, db=db)
+    elif user_permissions is not None:
+        logger.info(f"🔐 使用静态权限过滤工具（权限: {', '.join(sorted(user_permissions))}）")
+        tools = ComponentCache.get_tools(permissions=user_permissions)
+    else:
+        logger.info("✅ 未指定用户权限，加载所有工具")
+        tools = ComponentCache.get_tools()
+
+    logger.info(f"📊 加载工具数量: {len(tools)} 个")
+    return tools
+
+
+def _load_middleware() -> List[Any]:
+    """加载中间件列表（带缓存）"""
+    middleware = ComponentCache.get_middleware()
+    logger.info(f"✅ 已加载 {len(middleware)} 个中间件")
+    return middleware
+
+
+# ========== 审批配置函数 ==========
+
+def _get_user_role(user_id: Optional[int], db: Session) -> Optional[str]:
+    """获取用户角色"""
+    if user_id is None:
+        return None
+
+    user_roles = (
+        db.query(Role.name)
+        .join(UserRole, Role.id == UserRole.role_id)
+        .filter(UserRole.user_id == user_id)
+        .all()
+    )
+
+    if user_roles:
+        role_name = user_roles[0][0]
+        logger.info(f"🔐 获取到用户角色: {role_name} (共 {len(user_roles)} 个角色)")
+        return role_name
+
+    return None
+
+
+def _get_tools_need_approval(
+    enable_approval: bool,
+    user_id: Optional[int] = None,
+) -> Set[str]:
+    """
+    获取需要审批的工具列表
+
+    优先从数据库获取审批配置，失败则回退到基于风险等级的判断。
+    """
+    if not enable_approval:
+        return set()
+
+    tools_need_approval = set()
+    config_db = SessionLocal()
+
+    try:
+        # 获取用户角色
+        user_role = _get_user_role(user_id, config_db)
+
+        # 从审批配置获取需要审批的工具
+        tools_need_approval = ApprovalConfigService.get_tools_require_approval(
+            config_db, user_role=user_role
+        )
+        logger.info(f"🔒 从审批配置获取需要审批的工具: {len(tools_need_approval)} 个")
+
+    except Exception as e:
+        # 回退到基于风险等级的判断
+        logger.warning(f"⚠️ 无法从数据库获取审批配置，使用风险等级判断: {e}")
+        tools_need_approval = _get_high_risk_tools()
+
+    finally:
+        config_db.close()
+
+    return tools_need_approval
+
+
+def _get_high_risk_tools() -> Set[str]:
+    """获取高风险工具列表（回退方案）"""
+    registry = get_tool_registry()
+    high_risk_tools = set()
+
+    for tool_class in registry.list_tools():
+        metadata = tool_class.get_metadata()
+        if metadata and metadata.risk_level == RiskLevel.HIGH:
+            high_risk_tools.add(metadata.name)
+
+    logger.info(f"🔒 基于风险等级判断的高风险工具: {len(high_risk_tools)} 个")
+    return high_risk_tools
+
+
+# ========== 系统提示词构建 ==========
+
+def _build_system_prompt(tools_need_approval: Set[str]) -> str:
+    """
+    构建系统提示词
+
+    如果有需要审批的工具，在提示词中添加说明。
+    """
+    system_prompt = MAIN_AGENT_SYSTEM_PROMPT
+
+    if tools_need_approval:
+        approval_list = "\n".join([f"  - {tool}" for tool in sorted(tools_need_approval)])
+        system_prompt += (
+            f"\n\n⚠️ **注意：以下工具属于高风险操作**\n\n"
+            f"{approval_list}\n\n"
+            f"当你需要使用这些工具时，直接调用即可，系统会自动处理审批流程。"
+        )
+
+    return system_prompt
+
+
+# ========== 日志输出函数 ==========
+
+def _log_tools_info(tools: List[Any]) -> None:
+    """输出工具分组信息"""
+    logger.info("=" * 60)
+    logger.info("🛠️  主智能体可用工具列表:")
+    logger.info("=" * 60)
+
+    # 按分组整理工具
+    tool_groups = defaultdict(list)
+    registry = get_tool_registry()
+
+    for tool in tools:
+        tool_name = getattr(tool, 'name', 'unknown')
+        tool_class = registry.get_tool(tool_name)
+
+        if tool_class:
+            metadata = tool_class.get_metadata()
+            if metadata:
+                group_name = metadata.group.replace('.', ' ').title()
+                tool_groups[group_name].append(tool_name)
+
+    # 输出分组信息
+    for group, tool_names in sorted(tool_groups.items()):
+        logger.info(f"  [{group}] {len(tool_names)} 个:")
+        for name in sorted(tool_names):
+            logger.info(f"    - {name}")
+
+    logger.info(f"📊 总计: {len(tools)} 个工具")
+    logger.info("=" * 60)
+
+
+# ========== Agent 创建函数 ==========
+
+def _build_interrupt_on(tools_need_approval: Set[str]) -> Optional[Dict[str, bool]]:
+    """构建 interrupt_on 配置"""
+    if tools_need_approval:
+        interrupt_on = {name: True for name in tools_need_approval}
+        logger.info(f"🔒 审批工具配置: {len(interrupt_on)} 个工具需要审批")
+        return interrupt_on
+    return None
+
+
+def _get_skills_config() -> tuple:
+    """
+    获取 Skills 配置
+
+    Returns:
+        (project_root, skills_dir, has_skills, backend, skills)
+    """
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+    skills_dir = os.path.join(project_root, "skills")
+    has_skills = os.path.isdir(skills_dir)
+
+    if has_skills:
+        logger.info(f"📋 Skills 目录: {skills_dir}")
+        return (
+            project_root,
+            skills_dir,
+            True,
+            FilesystemBackend(root_dir=project_root, virtual_mode=False),
+            ["skills/"]
+        )
+
+    return project_root, skills_dir, False, None, None
+
+
+async def _create_agent(
+    llm: BaseChatModel,
+    system_prompt: str,
+    tools: List[Any],
+    subagents: List[Dict[str, Any]],
+    middleware: List[Any],
+    interrupt_on: Optional[Dict[str, bool]],
+) -> Any:
+    """创建 DeepAgents 实例"""
+    checkpointer = await get_checkpointer()
+
+    # 获取 Store 适配器
+
+    store = get_langgraph_store()
+    logger.info("🧠 SQLite FTS5 Store 适配器已加载（全文搜索，零外部依赖）")
+
+    # 获取 Skills 配置
+    project_root, _, _, backend, skills = _get_skills_config()
+
+    # 创建 Agent
+    agent = create_deep_agent(
+        name="OpsAgent",
+        model=llm,
+        system_prompt=system_prompt,
+        tools=tools,
+        subagents=subagents,
+        middleware=middleware,
+        checkpointer=checkpointer,
+        interrupt_on=interrupt_on,
+        store=store,
+        backend=backend,
+        skills=skills,
+    )
+
+    logger.info("✅ Agent 创建完成（动态模式，无缓存）")
+    return agent
+
+
+# ========== 主入口函数 ==========
 
 async def get_ops_agent(
     llm: Optional[BaseChatModel] = None,
@@ -59,190 +317,48 @@ async def get_ops_agent(
     Args:
         llm: 语言模型实例 (默认使用 LLMFactory)
         enable_approval: 是否启用 interrupt_on 批准流程
-        user_permissions: 用户权限代码集合，用于过滤可用工具（静态权限）
+        user_permissions: 用户权限代码集合（静态权限）
         user_id: 用户 ID（用于动态获取权限）
         db: 数据库会话（用于动态获取权限）
 
     Returns:
         编译后的 DeepAgents 图
     """
-    # 禁用全局缓存，每次都重新创建 Agent
-    # 这样可以确保每次都从数据库读取最新的审批配置
     logger.info("🔄 动态创建 Agent（每次请求都读取最新审批配置）")
-    logger.info(f"🔍 调试参数: enable_approval={enable_approval}, user_id={user_id}, user_permissions={user_permissions}")
+    logger.info(
+        f"🔍 调试参数: enable_approval={enable_approval}, "
+        f"user_id={user_id}, user_permissions={user_permissions}"
+    )
 
-    if llm is None:
-        # 使用默认 LLM provider（不再使用 profile）
-        llm = LLMFactory.create_llm()
+    # 1. 获取 LLM
+    llm = _get_llm(llm)
 
-    subagents = get_all_subagents()
+    # 2. 加载组件（带缓存）
+    subagents = _load_subagents()
+    tools = _load_tools(user_id, db, user_permissions)
+    middleware = _load_middleware()
 
-    # ========== 输出可用 Subagent 列表 ==========
-    logger.info("=" * 60)
-    logger.info("🤖 主智能体可用 Subagent 列表:")
-    logger.info("=" * 60)
-    for subagent in subagents:
-        name = subagent.get('name', 'unknown')
-        desc = subagent.get('description', 'No description')
-        tool_count = len(subagent.get('tools', []))
-        logger.info(f"  - {name}: {desc}")
-        logger.info(f"    工具数量: {tool_count}")
-    logger.info(f"📊 总计: {len(subagents)} 个 Subagent")
-    logger.info("=" * 60)
-    print(f"[MainAgent] ✅ 加载 {len(subagents)} 个 Subagent", flush=True)
+    # 3. 获取审批配置
+    tools_need_approval = _get_tools_need_approval(enable_approval, user_id)
 
-    # ========== 从 ToolRegistry 获取工具 ==========
-    registry = get_tool_registry()
+    # 4. 构建系统提示词
+    system_prompt = _build_system_prompt(tools_need_approval)
 
-    # 优先使用动态权限（user_id + db），否则使用静态权限（user_permissions）
-    if user_id is not None and db is not None:
-        # 动态权限：从数据库获取用户权限
-        logger.info(f"🔐 使用动态权限过滤工具（user_id: {user_id}）")
-        tools = registry.get_langchain_tools(user_id=user_id, db=db)
-    elif user_permissions is not None:
-        # 静态权限：使用传入的权限集合
-        logger.info(
-            f"🔐 使用静态权限过滤工具 "
-            f"(权限: {', '.join(sorted(user_permissions))})"
-        )
-        tools = registry.get_langchain_tools(permissions=user_permissions)
-    else:
-        # 无权限过滤：加载所有工具
-        logger.info("✅ 未指定用户权限，加载所有工具")
-        tools = registry.get_langchain_tools()
+    # 5. 输出工具信息
+    _log_tools_info(tools)
 
-    logger.info(f"📊 加载工具数量: {len(tools)} 个")
+    # 6. 构建 interrupt_on 配置
+    interrupt_on = _build_interrupt_on(tools_need_approval)
 
-    # 配置中间件（执行顺序：ErrorFiltering → Trimming → Logging）
-    # 注意：不使用 ContextCompressionMiddleware，因为它与 DeepAgents 内置的
-    # SummarizationMiddleware 冲突，会导致第二次 LLM 调用使用压缩后的上下文返回空内容
-    middleware = [
-        ErrorFilteringMiddleware(),  # 过滤工具调用错误消息
-        MessageTrimmingMiddleware(max_messages=40),  # 保留最近 40 条消息
-        LoggingMiddleware(),
-    ]
-    logger.info("✅ 错误消息过滤中间件已启用（过滤工具调用错误）")
-    logger.info("✅ 消息截断中间件已启用（保留最近 40 条消息）")
-    logger.info("✅ 日志中间件已启用")
-
-    # 构建需要审批的工具字典（用于 interrupt_on）
-    # 格式: {tool_name: True}
-    interrupt_on = None
-    tools_need_approval = set()
-
-    if enable_approval:
-        config_db = SessionLocal()
-        try:
-            # 获取用户角色（如果有）
-            user_role = None
-            if user_id is not None:
-                # 使用 config_db 查询用户角色，避免外部传入的 db 会话管理问题
-                # 用户角色存储在 user_roles 和 roles 表中
-                user_roles = config_db.query(Role.name).join(
-                    UserRole, Role.id == UserRole.role_id
-                ).filter(UserRole.user_id == user_id).all()
-
-                if user_roles:
-                    # 获取第一个角色（或可以根据业务逻辑选择）
-                    user_role = user_roles[0][0]
-                    logger.info(f"🔐 获取到用户角色: {user_role} (共 {len(user_roles)} 个角色)")
-
-            # 从审批配置获取需要审批的工具
-            tools_need_approval = ApprovalConfigService.get_tools_require_approval(
-                config_db, user_role=user_role
-            )
-            logger.info(
-                f"🔒 从审批配置获取需要审批的工具: {len(tools_need_approval)} 个"
-            )
-        except Exception as e:
-            # 如果数据库查询失败，回退到基于风险等级的判断
-            logger.warning(f"⚠️ 无法从数据库获取审批配置，使用风险等级判断: {e}")
-            import traceback
-            logger.warning(traceback.format_exc())
-            registry = get_tool_registry()
-            for tool_class in registry.list_tools():
-                metadata = tool_class.get_metadata()
-                if metadata and metadata.risk_level == RiskLevel.HIGH:
-                    tools_need_approval.add(metadata.name)
-            logger.info(f"🔒 基于风险等级判断的高风险工具: {len(tools_need_approval)} 个")
-        finally:
-            config_db.close()
-
-    # 在系统提示词中添加审批工具列表
-    # 注意：不告诉 LLM 要手动询问用户，因为 interrupt_on 会自动处理审批流程
-    system_prompt = MAIN_AGENT_SYSTEM_PROMPT
-    if tools_need_approval:
-        approval_list = "\n".join([f"  - {tool}" for tool in sorted(tools_need_approval)])
-        system_prompt += f"\n\n⚠️ **注意：以下工具属于高风险操作**\n\n{approval_list}\n\n当你需要使用这些工具时，直接调用即可，系统会自动处理审批流程。"
-
-    # ========== 输出可用工具列表 ==========
-    logger.info("=" * 60)
-    logger.info("🛠️  主智能体可用工具列表:")
-    logger.info("=" * 60)
-
-    # 从 ToolRegistry 获取分组信息并按分组显示
-    tool_groups = defaultdict(list)
-    registry = get_tool_registry()
-
-    for tool in tools:
-        tool_name = getattr(tool, 'name', 'unknown')
-        # 从 registry 获取工具所属分组
-        tool_class = registry.get_tool(tool_name)
-        if tool_class:
-            metadata = tool_class.get_metadata()
-            if metadata:
-                # 使用分组名称进行分类
-                group_name = metadata.group.replace('.', ' ').title()
-                tool_groups[group_name].append(tool_name)
-
-    for group, tool_names in sorted(tool_groups.items()):
-        logger.info(f"  [{group}] {len(tool_names)} 个:")
-        for name in sorted(tool_names):
-            logger.info(f"    - {name}")
-
-    logger.info(f"📊 总计: {len(tools)} 个工具")
-    logger.info("=" * 60)
-    logger.info(f"[MainAgent] ✅ 主智能体初始化完成，可用工具: {len(tools)} 个")
-
-    checkpointer = await get_checkpointer()
-
-    # 获取 Store 适配器（SQLite FTS5 全文搜索，零外部依赖）
-    from app.memory import get_langgraph_store
-    store = get_langgraph_store()
-    logger.info("🧠 SQLite FTS5 Store 适配器已加载（全文搜索，零外部依赖）")
-
-    # 如果有需要审批的工具，构建 interrupt_on 配置
-    if tools_need_approval:
-        interrupt_on = {name: True for name in tools_need_approval}
-        logger.info(f"🔒 审批工具配置: {len(interrupt_on)} 个工具需要审批")
-    else:
-        interrupt_on = None
-
-
-    # Skills 目录（支持安装第三方 skills）
-    project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-    skills_dir = os.path.join(project_root, "skills")
-    has_skills = os.path.isdir(skills_dir)
-
-    agent = create_deep_agent(
-        name="OpsAgent",  # 添加智能体名称，便于调试
-        model=llm,
+    # 7. 创建 Agent
+    agent = await _create_agent(
+        llm=llm,
         system_prompt=system_prompt,
         tools=tools,
         subagents=subagents,
         middleware=middleware,
-        checkpointer=checkpointer,
-        interrupt_on=interrupt_on,  # 重新启用审批机制
-        store=store,
-        backend=FilesystemBackend(root_dir=project_root, virtual_mode=False) if has_skills else None,
-        skills=["skills/"] if has_skills else None,
+        interrupt_on=interrupt_on,
     )
-    if has_skills:
-        logger.info(f"📋 Skills 目录: {skills_dir}")
-
-    # 不再缓存 agent，每次都动态创建
-    # 这样可以确保每次都从数据库读取最新的审批配置
-    logger.info("✅ Agent 创建完成（动态模式，无缓存）")
 
     return agent
 
@@ -260,15 +376,17 @@ def get_thread_config(session_id: str) -> dict:
     return {"configurable": {"thread_id": session_id}}
 
 
+# ========== 增强主智能体配置 ==========
+
 MAIN_AGENT_ENHANCED_CONFIG = {
-    "enable_cot": True,  # 启用 CoT 显式推理
-    "enable_plan_evaluation": True,  # 启用计划评估
-    "enable_reasoning_log": True,  # 启用推理链日志
-    "max_reasoning_depth": 5,  # 最大推理深度
-    "plan_evaluation_threshold": 0.7,  # 计划评估通过阈值
-    "enable_reflection": True,  # 启用 Self-Reflection
-    # 记忆功能已通过 LangGraph 原生 store 参数处理，无需额外配置
+    "enable_cot": True,
+    "enable_plan_evaluation": True,
+    "enable_reasoning_log": True,
+    "max_reasoning_depth": 5,
+    "plan_evaluation_threshold": 0.7,
+    "enable_reflection": True,
 }
+
 
 async def enhanced_main_agent_process(
     user_query: str,
@@ -296,16 +414,8 @@ async def enhanced_main_agent_process(
 
     Returns:
         处理结果，包含推理摘要和执行详情
-
-    示例:
-        result = await enhanced_main_agent_process(
-            user_query="检查生产环境的 Pod 状态并诊断问题",
-            context={"namespace": "production"}
-        )
-        print(f"推理摘要: {result['reasoning_summary']}")
-        print(f"子任务完成: {result['subtasks_completed']}")
     """
-
+    from app.services.enhanced_main_agent_service import get_enhanced_main_agent_service
 
     service = get_enhanced_main_agent_service()
     result = await service.process_user_request(
@@ -333,4 +443,3 @@ __all__ = [
     "MAIN_AGENT_ENHANCED_CONFIG",
     "enhanced_main_agent_process",
 ]
-

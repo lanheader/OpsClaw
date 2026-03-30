@@ -255,6 +255,9 @@ from app.api.v1 import tools
 app.include_router(tools.router, prefix="/api/v1")
 # 审批配置管理 API
 app.include_router(approval_config.router, prefix="/api/v1")
+# 提示词管理 API
+from app.api.v1 import prompts
+app.include_router(prompts.router, prefix="/api/v1")
 
 
 @app.get("/")

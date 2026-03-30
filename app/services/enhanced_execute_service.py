@@ -14,22 +14,42 @@
 5. Rollback: 失败时回滚
 """
 
-import asyncio
 import json
-import logging
-from typing import Dict, List, Any, Optional, Tuple, Callable
-from datetime import datetime
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum
+from typing import Dict, List, Any, Optional
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.core.llm_factory import LLMFactory
 from app.tools import get_tools_by_group
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+# ========== 辅助函数 ==========
+
+def _extract_json_from_response(content: str) -> Optional[Dict]:
+    """从 LLM 响应中提取 JSON"""
+    try:
+        # 尝试提取 ```json ... ``` 块
+        if "```json" in content:
+            start = content.find("```json") + 7
+            end = content.find("```", start)
+            return json.loads(content[start:end].strip())
+
+        # 尝试提取第一个 JSON 对象
+        start = content.find("{")
+        end = content.rfind("}") + 1
+        if start >= 0 and end > start:
+            return json.loads(content[start:end])
+
+    except json.JSONDecodeError:
+        pass
+
+    return None
 
 
 # ==================== 枚举类型 ====================
@@ -299,19 +319,10 @@ class EnhancedExecuteService:
 
         try:
             response = await self.llm.ainvoke(prompt)
-            content = response.content
+            assessment_data = _extract_json_from_response(response.content)
 
-            # 提取 JSON
-            if "```json" in content:
-                json_start = content.find("```json") + 7
-                json_end = content.find("```", json_start)
-                json_str = content[json_start:json_end].strip()
-            else:
-                start = content.find("{")
-                end = content.rfind("}") + 1
-                json_str = content[start:end] if start >= 0 else content
-
-            assessment_data = json.loads(json_str)
+            if not assessment_data:
+                raise ValueError("无法解析风险评估结果")
 
             return RiskAssessment(
                 risk_level=RiskLevel(assessment_data.get("risk_level", "MEDIUM")),
@@ -494,8 +505,7 @@ class EnhancedExecuteService:
         verification_results = {}
 
         for verification_step in execution_plan.verification_steps:
-            # 使用 LLM 验证
-            verification_prompt = f"""验证以下操作结果：
+            prompt = f"""验证以下操作结果：
 
 验证目标：{verification_step}
 
@@ -511,14 +521,17 @@ class EnhancedExecuteService:
 """
 
             try:
-                response = await self.llm.ainvoke(verification_prompt)
-                content = response.content
+                response = await self.llm.ainvoke(prompt)
+                result = _extract_json_from_response(response.content)
 
-                # 简单解析
-                verified = "true" in content.lower() or "✓" in content
-                verification_results[verification_step] = verified
+                if result and "verified" in result:
+                    verification_results[verification_step] = result["verified"]
+                else:
+                    # 简单解析
+                    content = response.content.lower()
+                    verification_results[verification_step] = "true" in content or "✓" in content
 
-            except:
+            except Exception:
                 # 默认验证通过
                 verification_results[verification_step] = True
 

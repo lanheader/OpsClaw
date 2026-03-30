@@ -16,22 +16,48 @@
 7. 整合结果（Synthesis）
 """
 
-import asyncio
 import json
-import logging
 from typing import Dict, List, Any, Optional, Tuple
 from datetime import datetime
 from dataclasses import dataclass, field
 from enum import Enum
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.core.llm_factory import LLMFactory
 from app.deepagents.subagents import get_all_subagents
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+# ==================== 辅助函数 ====================
+
+def _extract_json_from_response(content: str) -> Optional[Dict]:
+    """从 LLM 响应中提取 JSON"""
+    try:
+        # 尝试提取 ```json ... ``` 块
+        if "```json" in content:
+            start = content.find("```json") + 7
+            end = content.find("```", start)
+            return json.loads(content[start:end].strip())
+
+        # 尝试提取 ``` ... ``` 块
+        if "```" in content:
+            start = content.find("```") + 3
+            end = content.find("```", start)
+            return json.loads(content[start:end].strip())
+
+        # 尝试提取第一个 JSON 对象
+        start = content.find("{")
+        end = content.rfind("}") + 1
+        if start >= 0 and end > start:
+            return json.loads(content[start:end])
+
+    except json.JSONDecodeError:
+        pass
+
+    return None
 
 
 # ==================== 枚举类型 ====================
@@ -219,7 +245,27 @@ class EnhancedMainAgentService:
         context: Dict[str, Any]
     ) -> Tuple[TaskType, TaskComplexity]:
         """Phase 1: 理解用户请求"""
-        prompt = f"""分析以下用户请求：
+        prompt = self._build_comprehension_prompt(user_query, context)
+
+        try:
+            response = await self.llm.ainvoke(prompt)
+            result = _extract_json_from_response(response.content)
+
+            if result:
+                return (
+                    TaskType(result.get("task_type", "QUERY")),
+                    TaskComplexity(result.get("complexity", "SIMPLE"))
+                )
+
+            return self._default_comprehension(user_query)
+
+        except Exception as e:
+            logger.warning(f"⚠️ 请求理解失败: {e}，使用默认分析")
+            return self._default_comprehension(user_query)
+
+    def _build_comprehension_prompt(self, user_query: str, context: Dict[str, Any]) -> str:
+        """构建理解提示词"""
+        return f"""分析以下用户请求：
 
 用户请求：{user_query}
 
@@ -250,27 +296,6 @@ class EnhancedMainAgentService:
 ```
 """
 
-        try:
-            response = await self.llm.ainvoke(prompt)
-            content = response.content
-
-            # 提取 JSON
-            if "```json" in content:
-                json_start = content.find("```json") + 7
-                json_end = content.find("```", json_start)
-                json_str = content[json_start:json_end].strip()
-            else:
-                start = content.find("{")
-                end = content.rfind("}") + 1
-                json_str = content[start:end] if start >= 0 else content
-
-            result = json.loads(json_str)
-            return TaskType(result.get("task_type", "QUERY")), TaskComplexity(result.get("complexity", "SIMPLE"))
-
-        except Exception as e:
-            logger.warning(f"⚠️ 请求理解失败: {e}，使用默认分析")
-            return self._default_comprehension(user_query)
-
     def _default_comprehension(self, user_query: str) -> Tuple[TaskType, TaskComplexity]:
         """默认请求理解（基于关键词）"""
         query_lower = user_query.lower()
@@ -278,7 +303,7 @@ class EnhancedMainAgentService:
         # 判断任务类型
         if any(kw in query_lower for kw in ["查询", "查看", "什么", "多少", "list", "get", "show"]):
             task_type = TaskType.QUERY
-        elif any(kw in kw in query_lower for kw in ["诊断", "分析", "为什么", "原因", "diagnose", "analyze"]):
+        elif any(kw in query_lower for kw in ["诊断", "分析", "为什么", "原因", "diagnose", "analyze"]):
             task_type = TaskType.DIAGNOSIS
         elif any(kw in query_lower for kw in ["修复", "重启", "删除", "执行", "fix", "restart", "delete"]):
             task_type = TaskType.REMEDIATION
@@ -305,7 +330,30 @@ class EnhancedMainAgentService:
         context: Dict[str, Any]
     ) -> List[ReasoningStep]:
         """Phase 2: 生成 CoT 推理链"""
-        prompt = f"""使用链式思考（Chain of Thought）分析以下请求：
+        prompt = self._build_reasoning_prompt(user_query, task_type, complexity, context)
+
+        try:
+            response = await self.llm.ainvoke(prompt)
+            result = _extract_json_from_response(response.content)
+
+            if result and "reasoning_steps" in result:
+                return self._parse_reasoning_steps(result["reasoning_steps"])
+
+            return self._get_default_reasoning_chain(user_query, task_type)
+
+        except Exception as e:
+            logger.warning(f"⚠️ CoT 推理失败: {e}，使用默认推理")
+            return self._get_default_reasoning_chain(user_query, task_type)
+
+    def _build_reasoning_prompt(
+        self,
+        user_query: str,
+        task_type: TaskType,
+        complexity: TaskComplexity,
+        context: Dict[str, Any]
+    ) -> str:
+        """构建推理提示词"""
+        return f"""使用链式思考（Chain of Thought）分析以下请求：
 
 用户请求：{user_query}
 任务类型：{task_type.value}
@@ -355,37 +403,18 @@ class EnhancedMainAgentService:
 ```
 """
 
-        try:
-            response = await self.llm.ainvoke(prompt)
-            content = response.content
-
-            # 提取 JSON
-            if "```json" in content:
-                json_start = content.find("```json") + 7
-                json_end = content.find("```", json_start)
-                json_str = content[json_start:json_end].strip()
-            else:
-                start = content.find("{")
-                end = content.rfind("}") + 1
-                json_str = content[start:end] if start >= 0 else content
-
-            result = json.loads(json_str)
-
-            reasoning_steps = []
-            for step_data in result.get("reasoning_steps", []):
-                reasoning_steps.append(ReasoningStep(
-                    step_number=step_data.get("step_number", 1),
-                    thought=step_data.get("thought", ""),
-                    rationale=step_data.get("rationale", ""),
-                    conclusion=step_data.get("conclusion", ""),
-                    confidence=step_data.get("confidence", 0.5)
-                ))
-
-            return reasoning_steps
-
-        except Exception as e:
-            logger.warning(f"⚠️ CoT 推理失败: {e}，使用默认推理")
-            return self._get_default_reasoning_chain(user_query, task_type)
+    def _parse_reasoning_steps(self, steps_data: List[Dict]) -> List[ReasoningStep]:
+        """解析推理步骤"""
+        return [
+            ReasoningStep(
+                step_number=step.get("step_number", i + 1),
+                thought=step.get("thought", ""),
+                rationale=step.get("rationale", ""),
+                conclusion=step.get("conclusion", ""),
+                confidence=step.get("confidence", 0.5)
+            )
+            for i, step in enumerate(steps_data)
+        ]
 
     def _get_default_reasoning_chain(self, user_query: str, task_type: TaskType) -> List[ReasoningStep]:
         """获取默认推理链"""
@@ -485,7 +514,29 @@ class EnhancedMainAgentService:
         context: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Phase 4: 评估计划质量"""
-        prompt = f"""评估以下执行计划的质量：
+        prompt = self._build_evaluation_prompt(task_plan)
+
+        try:
+            response = await self.llm.ainvoke(prompt)
+            result = _extract_json_from_response(response.content)
+
+            if result:
+                return {
+                    "score": result.get("score", 0.5),
+                    "approved": result.get("approved", True),
+                    "feedback": result.get("feedback", ""),
+                    "suggestions": result.get("suggestions", [])
+                }
+
+            return self._get_default_evaluation()
+
+        except Exception as e:
+            logger.warning(f"⚠️ 计划评估失败: {e}，使用默认评估")
+            return self._get_default_evaluation()
+
+    def _build_evaluation_prompt(self, task_plan: TaskPlan) -> str:
+        """构建评估提示词"""
+        return f"""评估以下执行计划的质量：
 
 计划信息：
 - 任务类型: {task_plan.task_type.value}
@@ -520,37 +571,14 @@ class EnhancedMainAgentService:
 ```
 """
 
-        try:
-            response = await self.llm.ainvoke(prompt)
-            content = response.content
-
-            # 提取 JSON
-            if "```json" in content:
-                json_start = content.find("```json") + 7
-                json_end = content.find("```", json_start)
-                json_str = content[json_start:json_end].strip()
-            else:
-                start = content.find("{")
-                end = content.rfind("}") + 1
-                json_str = content[start:end] if start >= 0 else content
-
-            result = json.loads(json_str)
-
-            return {
-                "score": result.get("score", 0.5),
-                "approved": result.get("approved", True),
-                "feedback": result.get("feedback", ""),
-                "suggestions": result.get("suggestions", [])
-            }
-
-        except Exception as e:
-            logger.warning(f"⚠️ 计划评估失败: {e}，使用默认评估")
-            return {
-                "score": 0.7,
-                "approved": True,
-                "feedback": "默认通过",
-                "suggestions": []
-            }
+    def _get_default_evaluation(self) -> Dict[str, Any]:
+        """获取默认评估结果"""
+        return {
+            "score": 0.7,
+            "approved": True,
+            "feedback": "默认通过",
+            "suggestions": []
+        }
 
     async def _delegate_subtasks(
         self,
