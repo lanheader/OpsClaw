@@ -1,11 +1,16 @@
 """
-记忆管理模块 - 基于 ChromaDB 的向量记忆
+记忆管理模块 - 基于 SQLite FTS5 全文搜索
 
 功能：
 - 故障记忆管理（运维领域）
 - 知识库管理（运维知识）
 - 会话记忆管理
 - 智能上下文构建
+
+特点：
+- 零外部依赖（无需 embedding 模型）
+- SQLite FTS5 全文搜索 + BM25 排序
+- 支持中英文分词（unicode61 tokenizer）
 """
 
 import os
@@ -14,33 +19,21 @@ from datetime import datetime
 
 from app.core.constants import is_incident_handling
 from app.utils.logger import get_logger
+from app.memory.sqlite_memory_store import SQLiteMemoryStore
 
 logger = get_logger(__name__)
-
-from app.memory.chroma_store import get_chroma_store
-from app.core.config import get_settings
 
 # 触发摘要生成的会话消息数阈值
 SUMMARY_TRIGGER_THRESHOLD = 20
 
 
 class MemoryManager:
-    """记忆管理器 - 基于 ChromaDB"""
+    """记忆管理器 - 基于 SQLite FTS5"""
 
     def __init__(self, user_id: str = None):
         self._user_id = user_id or "default_user"
-        settings = get_settings()
-
-        if settings.ENABLE_VECTOR_MEMORY:
-            self.vector_store = get_chroma_store()
-            self._sqlite_store = None
-            self.mode = "vector"
-        else:
-            from app.memory.sqlite_memory_store import SQLiteMemoryStore
-            self._sqlite_store = SQLiteMemoryStore()
-            self.vector_store = None
-            self.mode = "keyword"
-            logger.info("📌 记忆模式: keyword (SQLite FTS5)")
+        self._store = SQLiteMemoryStore()
+        logger.info(f"📌 记忆管理器初始化: user_id={self._user_id}, 模式=SQLite FTS5")
 
     # ==================== 故障记忆 ====================
 
@@ -53,25 +46,14 @@ class MemoryManager:
         root_cause: str = None,
         metadata: dict = None
     ) -> str:
-        if self.mode == "vector" and self.vector_store:
-            return await self.vector_store.store_incident(
-                content=content,
-                incident_type=incident_type,
-                title=title,
-                resolution=resolution,
-                root_cause=root_cause,
-                metadata=metadata,
-            )
-        elif self._sqlite_store:
-            return self._sqlite_store.store_incident(
-                content=content,
-                incident_type=incident_type,
-                title=title,
-                resolution=resolution,
-                root_cause=root_cause,
-                metadata=metadata,
-            )
-        return ""
+        return self._store.store_incident(
+            content=content,
+            incident_type=incident_type,
+            title=title,
+            resolution=resolution,
+            root_cause=root_cause,
+            metadata=metadata,
+        )
 
     async def recall_similar_incidents(
         self,
@@ -80,16 +62,11 @@ class MemoryManager:
         incident_type: str = None,
         threshold: float = 0.7
     ) -> List[Dict]:
-        if self.mode == "vector" and self.vector_store:
-            return await self.vector_store.search_similar_incidents(
-                query=query,
-                top_k=top_k,
-                incident_type=incident_type,
-                threshold=threshold,
-            )
-        elif self._sqlite_store:
-            return self._sqlite_store.search_incidents(query=query, top_k=top_k, incident_type=incident_type, threshold=threshold)
-        return []
+        return self._store.search_incidents(
+            query=query,
+            top_k=top_k,
+            incident_type=incident_type
+        )
 
     # ==================== 知识库 ====================
 
@@ -102,25 +79,14 @@ class MemoryManager:
         source: str = None,
         metadata: dict = None
     ) -> str:
-        if self.mode == "vector" and self.vector_store:
-            return await self.vector_store.store_knowledge(
-                title=title,
-                content=content,
-                category=category,
-                tags=tags,
-                source=source,
-                metadata=metadata,
-            )
-        elif self._sqlite_store:
-            return self._sqlite_store.store_knowledge(
-                title=title,
-                content=content,
-                category=category,
-                tags=tags,
-                source=source,
-                metadata=metadata,
-            )
-        return ""
+        return self._store.store_knowledge(
+            title=title,
+            content=content,
+            category=category,
+            tags=tags,
+            source=source,
+            metadata=metadata,
+        )
 
     async def query_knowledge(
         self,
@@ -129,18 +95,11 @@ class MemoryManager:
         top_k: int = 5,
         threshold: float = 0.7
     ) -> List[Dict]:
-        filters = {"category": category} if category else None
-        if self.mode == "vector" and self.vector_store:
-            return await self.vector_store.search_similar(
-                query=query,
-                table="knowledge_memories",
-                top_k=top_k,
-                threshold=threshold,
-                filters=filters,
-            )
-        elif self._sqlite_store:
-            return self._sqlite_store.search_knowledge(query=query, category=category, top_k=top_k, threshold=threshold)
-        return []
+        return self._store.search_knowledge(
+            query=query,
+            category=category,
+            top_k=top_k
+        )
 
     # ==================== 会话记忆 ====================
 
@@ -151,15 +110,8 @@ class MemoryManager:
         content: str,
         importance: float = 0.5
     ) -> str:
-        if self.mode == "vector" and self.vector_store:
-            return await self.vector_store.store_session_message(
-                session_id=session_id,
-                role=role,
-                content=content,
-                importance=importance,
-            )
-        elif self._sqlite_store:
-            return self._sqlite_store.store_message(session_id=session_id, role=role, content=content, importance=importance)
+        # SQLite FTS5 模式下，会话消息由 checkpointer 管理
+        # 这里只存储摘要
         return ""
 
     async def recall_session_context(
@@ -168,16 +120,7 @@ class MemoryManager:
         query: str,
         top_k: int = 10
     ) -> List[Dict]:
-        if self.mode == "vector" and self.vector_store:
-            return await self.vector_store.search_similar(
-                query=query,
-                table="session_memories",
-                top_k=top_k,
-                threshold=0.5,
-                filters={"session_id": session_id},
-            )
-        elif self._sqlite_store:
-            return self._sqlite_store.search_messages(session_id=session_id, query=query, top_k=top_k)
+        # SQLite FTS5 模式下，会话上下文由 checkpointer 的 messages 管理
         return []
 
     async def summarize_session(
@@ -187,15 +130,7 @@ class MemoryManager:
         existing_summary: str = None,
     ) -> str:
         """
-        为会话生成（增量）摘要，并存储到向量库。
-
-        Args:
-            session_id: 会话 ID
-            messages: 消息列表，每条为 {"role": ..., "content": ...}
-            existing_summary: 上次已有的摘要（实现增量摘要）
-
-        Returns:
-            生成的摘要文本
+        为会话生成（增量）摘要，并存储到 FTS5 数据库。
         """
         if not messages:
             return existing_summary or ""
@@ -232,24 +167,8 @@ class MemoryManager:
             ])
             summary = response.content.strip()
 
-            # 存储摘要到向量库（固定 doc_id，实现覆盖更新）
-            doc_id = f"summary_{session_id}"
-            # 先删除旧摘要（如果存在）
-            try:
-                self.vector_store.collection_sessions.delete(ids=[doc_id])
-            except Exception:
-                pass  # 旧摘要不存在，忽略
-            self.vector_store.collection_sessions.add(
-                documents=[summary],
-                metadatas=[{
-                    "session_id": session_id,
-                    "role": "summary",
-                    "type": "summary",
-                    "importance": 1.0,
-                    "created_at": datetime.now().isoformat(),
-                }],
-                ids=[doc_id],
-            )
+            # 存储摘要到 FTS5 数据库（覆盖更新）
+            self._store.store_summary(session_id, summary)
             logger.info(f"🧠 会话摘要已生成并存储: session={session_id}, len={len(summary)}")
             return summary
 
@@ -264,30 +183,9 @@ class MemoryManager:
     ) -> str:
         """
         检索最近的会话摘要。
-
-        Args:
-            session_id: 会话 ID
-            top_k: 返回摘要数量
-
-        Returns:
-            摘要文本（合并多条时用换行分隔）
         """
         try:
-            if self.mode == "vector" and self.vector_store:
-                results = self.vector_store.collection_sessions.get(
-                    where={"$and": [{"session_id": {"$eq": session_id}}, {"type": {"$eq": "summary"}}]},
-                    include=["documents", "metadatas"],
-                    limit=top_k,
-                )
-            elif self._sqlite_store:
-                results = self._sqlite_store.get_session_summary(session_id, top_k=top_k)
-            else:
-                return ""
-            docs = results.get("documents", [])
-            if not docs:
-                return ""
-            # 取最后一条（最新摘要）
-            return docs[-1] if isinstance(docs[-1], str) else ""
+            return self._store.get_summary(session_id) or ""
         except Exception as e:
             logger.warning(f"⚠️ 会话摘要检索失败: {e}")
             return ""
@@ -310,15 +208,14 @@ class MemoryManager:
         context_parts = []
         current_tokens = 0
 
-        # keyword 模式下扩展查询关键词
+        # 扩展查询关键词
         search_query = user_query
-        if self.mode == "keyword":
-            try:
-                from app.memory.query_expander import expand_query
-                search_query = await expand_query(user_query)
-            except Exception as e:
-                logger.warning(f"⚠️ 查询扩展失败，使用原始查询: {e}")
-                search_query = user_query
+        try:
+            from app.memory.query_expander import expand_query
+            search_query = await expand_query(user_query)
+        except Exception as e:
+            logger.warning(f"⚠️ 查询扩展失败，使用原始查询: {e}")
+            search_query = user_query
 
         # 优先注入会话摘要（若有），作为长期记忆补充
         if include_summary and session_id:
@@ -415,8 +312,8 @@ class MemoryManager:
     # ==================== 统计 ====================
 
     async def get_stats(self) -> Dict[str, Any]:
-        stats = await self.vector_store.get_memory_stats()
-        return {"vector_store": stats, "timestamp": datetime.now().isoformat()}
+        stats = self._store.get_stats()
+        return {"sqlite_fts5": stats, "timestamp": datetime.now().isoformat()}
 
     # ==================== 内部工具 ====================
 

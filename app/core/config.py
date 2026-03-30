@@ -185,7 +185,7 @@ class Settings(BaseSettings):
     SUBAGENT_FORMAT_MODEL: str = Field(default="glm-4-flash", description="响应格式化子智能体使用的模型")
 
     # ========== 记忆系统配置 ==========
-    ENABLE_VECTOR_MEMORY: bool = Field(default=True, description="是否启用向量记忆（ChromaDB），False 则使用 SQLite FTS5 关键词记忆")
+    # 使用 SQLite FTS5 全文搜索（零外部依赖）
 
     # ========== Mem0 记忆系统配置 ==========
     MEM0_ENABLED: bool = Field(default=True, description="是否启用 Mem0 通用对话记忆")

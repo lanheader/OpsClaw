@@ -478,7 +478,7 @@ def build_formatted_reply_card(
 
     # 如果没有提供标题，使用默认标题
     if not title:
-        title = "🤖 Ops Agent"
+        title = "🤖 OpsClaw"
 
     # 根据状态添加表情符号
     if status:
