@@ -142,6 +142,28 @@ async def lifespan(app: FastAPI):
     logger.info(f"LLM Provider: {settings.DEFAULT_LLM_PROVIDER}")
     logger.info("ℹ️  DeepAgents 懒加载模式：Agent 将在第一次请求时动态创建")
 
+    # ========== 安全检查：检测默认凭据 ==========
+    if settings.SECURITY_ENVIRONMENT != "dev":
+        # 检查 JWT Secret
+        default_jwt_secrets = [
+            "your-secret-key-here-change-in-production",
+            "change-me-in-production",
+            "secret",
+            "jwt-secret",
+        ]
+        if settings.JWT_SECRET_KEY in default_jwt_secrets:
+            logger.critical("🔥 安全错误：检测到默认 JWT_SECRET_KEY！")
+            logger.critical("   请在环境变量中设置安全的 JWT_SECRET_KEY（至少 32 字符）")
+            raise RuntimeError(
+                "安全策略：生产环境禁止使用默认 JWT_SECRET_KEY。"
+                "请设置环境变量 JWT_SECRET_KEY"
+            )
+
+        # 检查管理员默认凭据
+        if settings.INITIAL_ADMIN_PASSWORD == "admin123":
+            logger.warning("⚠️  警告：检测到默认管理员密码 'admin123'")
+            logger.warning("   建议通过环境变量 INITIAL_ADMIN_PASSWORD 设置强密码")
+
     # Start Feishu long connection if enabled
     if settings.FEISHU_ENABLED and settings.FEISHU_CONNECTION_MODE in ["longconn", "auto"]:
         logger.info("🔌 Starting Feishu long connection...")
@@ -211,7 +233,27 @@ async def global_exception_handler(request: Request, exc: Exception):
     logger.error(f"   异常信息: {str(exc)}")
     logger.error(f"   堆栈跟踪:", exc_info=True)
 
-    return JSONResponse(status_code=500, content={"detail": f"Internal server error: {str(exc)}"})
+    # 根据 DEBUG 配置决定是否返回详细错误
+    if settings.DEBUG:
+        # 开发环境：返回详细错误信息
+        return JSONResponse(
+            status_code=500,
+            content={
+                "detail": f"Internal server error: {str(exc)}",
+                "error_type": type(exc).__name__,
+                "path": request.url.path,
+            }
+        )
+    else:
+        # 生产环境：返回通用错误信息，避免泄露敏感信息
+        return JSONResponse(
+            status_code=500,
+            content={
+                "detail": "Internal server error",
+                "error_type": "ServerError",
+                "request_id": request.headers.get("X-Request-ID", "unknown"),
+            }
+        )
 
 
 # Configure CORS
