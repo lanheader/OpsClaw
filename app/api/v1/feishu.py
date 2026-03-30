@@ -8,7 +8,10 @@
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Request, HTTPException, Header, BackgroundTasks
+from fastapi import APIRouter, Request, HTTPException, Header, BackgroundTasks, Depends
+from sqlalchemy.orm import Session
+
+from app.models.database import get_db
 
 from app.utils.logger import get_logger
 from app.core.config import get_settings
@@ -102,14 +105,21 @@ def _get_status_message(enabled: bool, mode: str, longconn_healthy: bool) -> str
 
 
 @router.post("/test-message")
-async def send_test_message(text: str):
+async def send_test_message(
+    text: str,
+    chat_id: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
     """
     发送测试消息到飞书
 
     用于测试飞书集成是否正常工作
+
+    Args:
+        text: 要发送的测试消息内容
+        chat_id: 目标会话ID（可选，如果不提供则使用最近的飞书会话）
     """
     try:
-        settings = get_settings()
         adapter = get_channel_adapter("feishu")
 
         if not adapter or not adapter.enabled:
@@ -118,14 +128,31 @@ async def send_test_message(text: str):
                 detail="飞书渠道未启用或配置错误"
             )
 
-        # 获取测试用的 chat_id（从环境变量或配置中获取）
-        test_chat_id = settings.FEISHU_TEST_CHAT_ID if hasattr(settings, 'FEISHU_TEST_CHAT_ID') else None
+        # 如果没有提供 chat_id，从数据库获取最近的飞书会话
+        target_chat_id = chat_id
+        if not target_chat_id:
+            from app.models.chat_session import ChatSession
+            from sqlalchemy import desc
 
-        if not test_chat_id:
-            raise HTTPException(
-                status_code=400,
-                detail="未配置测试 chat_id，请在 .env 中设置 FEISHU_TEST_CHAT_ID"
-            )
+            # 查找最近的飞书会话
+            recent_session = db.query(ChatSession).filter(
+                ChatSession.source == 'feishu'
+            ).order_by(desc(ChatSession.updated_at)).first()
+
+            if recent_session:
+                # 使用飞书会话的 external_chat_id
+                target_chat_id = recent_session.external_chat_id
+                logger.info(f"📱 使用最近的飞书会话: {target_chat_id}")
+            else:
+                # 降级：尝试从配置文件获取
+                settings = get_settings()
+                target_chat_id = settings.FEISHU_TEST_CHAT_ID if hasattr(settings, 'FEISHU_TEST_CHAT_ID') else None
+
+                if not target_chat_id:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="未找到飞书会话，请先发送一条消息给机器人，或配置 FEISHU_TEST_CHAT_ID"
+                    )
 
         # 构造测试消息
         from app.integrations.messaging.base_channel import OutgoingMessage, MessageType
@@ -133,17 +160,18 @@ async def send_test_message(text: str):
 
         card = build_formatted_reply_card(content=text)
         outgoing = OutgoingMessage(
-            chat_id=test_chat_id,
+            chat_id=target_chat_id,
             message_type=MessageType.CARD,
             content=card,
         )
 
-        # 发送消息
+        # 发送消息（会自动选择长连接或 webhook 方式）
         result = await adapter.send_message(outgoing)
 
         return {
             "success": True,
             "message": "测试消息已发送",
+            "chat_id": target_chat_id,
             "result": result
         }
 
