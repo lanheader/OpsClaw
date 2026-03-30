@@ -1,97 +1,86 @@
-"""告警工具集"""
+"""告警工具集
+
+通过 AlertManager API 获取和管理告警。
+当 AlertManager 未配置时，返回空列表并记录警告。
+"""
 
 from typing import Dict, Any, List
-from datetime import datetime, timedelta
 
 
-def get_active_alerts() -> List[Dict[str, Any]]:
+async def get_active_alerts() -> List[Dict[str, Any]]:
     """获取当前活跃的告警"""
-    return [
-        {
-            "name": "HighMemoryUsage",
-            "severity": "warning",
-            "status": "firing",
-            "duration": "5m",
-            "labels": {
-                "service": "app-service",
-                "namespace": "default",
-            },
-            "annotations": {
-                "summary": "Memory usage is above 80%",
-                "description": "Current memory usage: 85%",
-            },
-            "started_at": (datetime.now() - timedelta(minutes=5)).isoformat(),
-        },
-        {
-            "name": "HighCPUUsage",
-            "severity": "warning",
-            "status": "firing",
-            "duration": "3m",
-            "labels": {
-                "service": "app-service",
-                "namespace": "default",
-            },
-            "annotations": {
-                "summary": "CPU usage is above 70%",
-                "description": "Current CPU usage: 78%",
-            },
-            "started_at": (datetime.now() - timedelta(minutes=3)).isoformat(),
-        },
-    ]
+    from app.integrations.alertmanager import get_alertmanager_client
+    client = get_alertmanager_client()
+    return await client.get_alerts(active=True)
 
 
-def get_resolved_alerts(duration: str = "1h") -> List[Dict[str, Any]]:
+async def get_resolved_alerts(duration: str = "1h") -> List[Dict[str, Any]]:
     """获取已解决的告警"""
-    return [
+    from app.integrations.alertmanager import get_alertmanager_client
+    client = get_alertmanager_client()
+    return await client.get_alerts(active=False)
+
+
+async def get_alert_statistics(duration: str = "24h") -> Dict[str, Any]:
+    """获取告警统计"""
+    from app.integrations.alertmanager import get_alertmanager_client
+    client = get_alertmanager_client()
+
+    active = await client.get_alerts(active=True)
+    silenced = await client.get_silences()
+
+    # 按严重级别统计
+    by_severity = {}
+    by_service = {}
+    top_alerts = {}
+
+    for alert in active:
+        severity = alert.get("labels", {}).get("severity", "unknown")
+        by_severity[severity] = by_severity.get(severity, 0) + 1
+
+        alert_name = alert.get("labels", {}).get("alertname", "unknown")
+        top_alerts[alert_name] = top_alerts.get(alert_name, 0) + 1
+
+        # 尝试提取 service
+        service = (
+            alert.get("labels", {}).get("service")
+            or alert.get("labels", {}).get("job")
+            or "unknown"
+        )
+        by_service[service] = by_service.get(service, 0) + 1
+
+    # 排序 top_alerts
+    sorted_top = sorted(top_alerts.items(), key=lambda x: x[1], reverse=True)[:10]
+
+    return {
+        "duration": duration,
+        "total_active": len(active),
+        "total_silenced": len(silenced),
+        "by_severity": by_severity,
+        "by_service": by_service,
+        "top_alerts": [{"name": name, "count": count} for name, count in sorted_top],
+    }
+
+
+async def silence_alert(
+    alert_name: str,
+    duration: str = "1h",
+    comment: str = "",
+) -> Dict[str, Any]:
+    """静默告警"""
+    from app.integrations.alertmanager import get_alertmanager_client
+    client = get_alertmanager_client()
+
+    matchers = [
         {
-            "name": "PodCrashLooping",
-            "severity": "critical",
-            "status": "resolved",
-            "duration": "15m",
-            "labels": {
-                "pod": "app-pod-2",
-                "namespace": "default",
-            },
-            "annotations": {
-                "summary": "Pod is crash looping",
-                "description": "Pod has restarted 5 times in 10 minutes",
-            },
-            "started_at": (datetime.now() - timedelta(hours=1)).isoformat(),
-            "resolved_at": (datetime.now() - timedelta(minutes=45)).isoformat(),
+            "name": "alertname",
+            "value": alert_name,
+            "isRegex": False,
         }
     ]
 
-
-def get_alert_statistics(duration: str = "24h") -> Dict[str, Any]:
-    """获取告警统计"""
-    return {
-        "duration": duration,
-        "total_alerts": 45,
-        "active_alerts": 2,
-        "resolved_alerts": 43,
-        "by_severity": {
-            "critical": 5,
-            "warning": 28,
-            "info": 12,
-        },
-        "by_service": {
-            "app-service": 23,
-            "db-service": 12,
-            "cache-service": 10,
-        },
-        "top_alerts": [
-            {"name": "HighMemoryUsage", "count": 15},
-            {"name": "HighCPUUsage", "count": 12},
-            {"name": "SlowResponse", "count": 8},
-        ],
-    }
-
-
-def silence_alert(alert_name: str, duration: str = "1h") -> Dict[str, Any]:
-    """静默告警"""
-    return {
-        "success": True,
-        "message": f"Alert {alert_name} silenced for {duration}",
-        "alert_name": alert_name,
-        "duration": duration,
-    }
+    return await client.create_silence(
+        matchers=matchers,
+        duration=duration,
+        comment=comment or f"Silenced by OpsAgent: {alert_name}",
+    )
