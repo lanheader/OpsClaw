@@ -20,7 +20,6 @@ from app.utils.logger import get_logger
 from app.deepagents.subagents import get_all_subagents
 from app.tools.registry import get_tool_registry
 from app.middleware.error_filtering_middleware import ErrorFilteringMiddleware
-from app.middleware.message_trimming_middleware import MessageTrimmingMiddleware
 from app.middleware.logging_middleware import LoggingMiddleware
 
 logger = get_logger(__name__)
@@ -100,7 +99,6 @@ class ComponentCache:
 
             cls._middleware_cache = [
                 ErrorFilteringMiddleware(),
-                MessageTrimmingMiddleware(max_messages=40),
                 LoggingMiddleware(),
             ]
             logger.info(f"✅ 已缓存 {len(cls._middleware_cache)} 个中间件")

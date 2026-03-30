@@ -3,21 +3,20 @@
 
 DeepAgents 中间件系统
 
-实际使用的中间件（必须继承 langchain_core.agent.AgentMiddleware）：
+实际使用的中间件（必须继承 langchain.agents.middleware.types.AgentMiddleware）：
 - LoggingMiddleware: 记录 LLM 和工具调用
-- MessageTrimmingMiddleware: 截断消息历史防止 token 溢出
+- ErrorFilteringMiddleware: 过滤错误信息
+- DynamicPermissionMiddleware: 动态权限检查（运行时）
+- DynamicApprovalMiddleware: 动态审批检查（运行时）
 
-注意：已删除的中间件（使用自定义 BaseMiddleware，与 DeepAgents 不兼容）：
-- ApprovalMiddleware: DeepAgents 使用 interrupt_on 机制实现批准流程
-- RoutingMiddleware: 路由功能已被主智能体吸收
-- SecurityMiddleware: 使用静态权限过滤即可
-- BaseMiddleware: 自定义基类，不兼容 DeepAgents
+已移除：
+- MessageTrimmingMiddleware: 被 deepagents 内置 SummarizationMiddleware 替代
 """
 
 from .logging_middleware import LoggingMiddleware
-from .message_trimming_middleware import MessageTrimmingMiddleware
+from .error_filtering_middleware import ErrorFilteringMiddleware
 
 __all__ = [
     "LoggingMiddleware",
-    "MessageTrimmingMiddleware",
+    "ErrorFilteringMiddleware",
 ]
