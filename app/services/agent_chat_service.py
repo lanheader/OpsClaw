@@ -434,7 +434,12 @@ class AgentChatService:
             yield StreamEvent(type=EventType.ERROR, data={"message": str(e)})
 
     async def process_message(self, request: ChatRequest) -> ChatResponse:
-        """非流式处理消息（用于飞书等）"""
+        """
+        非流式处理消息（用于飞书等）
+
+        注意：调用者（如 agent_invoker）应该已经获取了会话锁，
+        这里不再重复获取锁，避免死锁。
+        """
         logger.info(
             f"🚀 [AgentChatService] 开始非流式处理: "
             f"session={request.session_id}, channel={request.channel.value}"
@@ -444,34 +449,31 @@ class AgentChatService:
         workflow_completed = False
 
         try:
-            async with SessionLockContext(request.session_id, timeout=AGENT_TIMEOUT):
-                logger.info(f"🔒 获取会话锁成功: {request.session_id}")
+            # 注意：会话锁由调用者（agent_invoker）管理，这里不重复获取
 
-                # 准备并执行
-                agent, input_state, config = await self._prepare_agent(request)
+            # 准备并执行
+            agent, input_state, config = await self._prepare_agent(request)
 
-                async for event_type, event_data, state_update in _execute_agent_stream(
-                    agent, input_state, config, request.session_id
-                ):
-                    # 处理审批中断
-                    if event_type == EventType.APPROVAL_REQUEST:
-                        return ChatResponse(
-                            reply=event_data.get("message", "等待审批"),
-                            session_id=request.session_id,
-                            workflow_status="awaiting_approval",
-                            needs_approval=True,
-                            approval_data=event_data
-                        )
+            async for event_type, event_data, state_update in _execute_agent_stream(
+                agent, input_state, config, request.session_id
+            ):
+                # 处理审批中断
+                if event_type == EventType.APPROVAL_REQUEST:
+                    return ChatResponse(
+                        reply=event_data.get("message", "等待审批"),
+                        session_id=request.session_id,
+                        workflow_status="awaiting_approval",
+                        needs_approval=True,
+                        approval_data=event_data
+                    )
 
-                    # 更新 final_state
-                    if state_update:
-                        final_state.update(state_update)
-                        workflow_completed = True
+                # 更新 final_state
+                if state_update:
+                    final_state.update(state_update)
+                    workflow_completed = True
 
-                # 提取最终回复
-                reply = _extract_reply(final_state, workflow_completed)
-
-            logger.info(f"🔓 释放会话锁: {request.session_id}")
+            # 提取最终回复
+            reply = _extract_reply(final_state, workflow_completed)
 
             return ChatResponse(
                 reply=reply or "未能生成有效回复",
