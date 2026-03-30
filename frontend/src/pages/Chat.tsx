@@ -2,7 +2,7 @@
 /**
  * AI 对话页面 - 深度美化版
  */
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Layout,
@@ -77,6 +77,7 @@ const Chat: React.FC = () => {
 
   useEffect(() => {
     scrollToBottom();
+    console.log('📝 Messages updated:', messages.length, messages.map(m => ({ id: m.id, role: m.role, content: m.content.substring(0, 30) })));
   }, [messages, streamingContent]);
 
   // 加载会话列表
@@ -91,18 +92,33 @@ const Chat: React.FC = () => {
   };
 
   // 加载消息历史
-  const loadMessages = async (sid: string) => {
+  const loadMessages = useCallback(async (sid: string) => {
     try {
       setIsLoading(true);
       const data = await chatApi.getMessages(sid);
+      console.log('📢 Loaded messages:', data.length, 'for session:', sid);
       setMessages(data);
+
+      // 🔧 检查最后一条助手消息是否是审批请求
+      // 如果会话状态是 awaiting_approval，从消息中恢复审批数据
+      const lastAssistantMessage = [...data].reverse().find(m => m.role === 'assistant');
+      if (lastAssistantMessage?.metadata?.type === 'approval_request') {
+        const approvalData = lastAssistantMessage.metadata;
+        setApprovalRequest({
+          message: approvalData.message || lastAssistantMessage.content.replace(/## 📋 命令规划\n\n/, '').replace(/\n\n$/, ''),
+          commands: approvalData.commands || [],
+          sessionId: sid
+        });
+        setIsStreaming(false);
+        setStatusMessage('⏸️ 等待您的确认...');
+      }
     } catch (error) {
       console.error('Failed to load messages:', error);
       antMessage.error('加载消息历史失败');
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
 
   // 创建新会话
   const handleCreateSession = async () => {
@@ -185,6 +201,7 @@ const Chat: React.FC = () => {
           setStatusMessage('');
 
           if (streamingContentRef.current) {
+            // 如果有流式内容，直接添加
             const assistantMessage: ChatMessage = {
               id: messageId || Date.now(),
               role: 'assistant',
@@ -192,6 +209,10 @@ const Chat: React.FC = () => {
               created_at: new Date().toISOString()
             };
             setMessages(prev => [...prev, assistantMessage]);
+          } else {
+            // 如果没有流式内容，从服务器重新加载消息
+            // 这确保即使后端没有发送 chunk 事件，消息也能正确显示
+            loadMessages(sessionId);
           }
           setStreamingContent('');
           streamingContentRef.current = '';
@@ -247,6 +268,7 @@ const Chat: React.FC = () => {
           setStatusMessage('');
 
           if (streamingContentRef.current) {
+            // 如果有流式内容，直接添加
             const assistantMessage: ChatMessage = {
               id: Date.now(),
               role: 'assistant',
@@ -254,6 +276,11 @@ const Chat: React.FC = () => {
               created_at: new Date().toISOString()
             };
             setMessages(prev => [...prev, assistantMessage]);
+          } else {
+            // 如果没有流式内容，从服务器重新加载消息
+            if (sessionId) {
+              loadMessages(sessionId);
+            }
           }
           setStreamingContent('');
           streamingContentRef.current = '';
@@ -300,6 +327,7 @@ const Chat: React.FC = () => {
 
   // 当 sessionId 变化时加载消息
   useEffect(() => {
+    console.log('🔄 Session useEffect triggered, sessionId:', sessionId);
     if (sessionId) {
       loadMessages(sessionId);
 
@@ -307,6 +335,29 @@ const Chat: React.FC = () => {
       chatApi.getSession(sessionId)
         .then(session => {
           setCurrentSession(session);
+
+          // 🔧 恢复会话状态
+          if (session.state === 'awaiting_approval' && session.pending_approval_data) {
+            // 恢复审批请求状态
+            const approvalData = session.pending_approval_data;
+            setApprovalRequest({
+              message: approvalData.message || '需要您的确认',
+              commands: approvalData.commands || [],
+              sessionId: session.session_id
+            });
+            setIsStreaming(false);
+            setStatusMessage('⏸️ 等待您的确认...');
+          } else if (session.state === 'processing') {
+            // 恢复处理中状态
+            setIsStreaming(true);
+            setStatusMessage('⏳ 处理中...');
+          } else {
+            // 正常状态，清除任何残留状态
+            setApprovalRequest(null);
+            setIsStreaming(false);
+            setStatusMessage('');
+          }
+
           // 更新 sessions 列表中的该会话
           setSessions(currentSessions => {
             const exists = currentSessions.some(s => s.session_id === sessionId);
@@ -330,19 +381,18 @@ const Chat: React.FC = () => {
     } else {
       setMessages([]);
       setCurrentSession(null);
+      setApprovalRequest(null);
+      setIsStreaming(false);
+      setStatusMessage('');
     }
-  }, [sessionId]);
+  }, [sessionId, loadMessages]);
 
   // 格式化时间
-  const formatTime = (dateString: string | Date) => {
+  const formatTime = (dateString: string | Date): string => {
     let date: Date;
 
-    // 处理不同的日期格式
     if (typeof dateString === 'string') {
-      // 处理 ISO 格式（如 "2026-03-23T02:25:38.293554"）
-      // 注意：这种格式缺少时区信息，需要添加 Z 或手动处理
       if (dateString.includes('T') && !dateString.includes('Z')) {
-        // 添加 UTC 时区标记
         dateString = dateString + 'Z';
       }
       date = new Date(dateString);
@@ -352,7 +402,6 @@ const Chat: React.FC = () => {
       return '未知时间';
     }
 
-    // 检查日期是否有效
     if (isNaN(date.getTime())) {
       return '时间解析失败';
     }
@@ -365,12 +414,10 @@ const Chat: React.FC = () => {
     if (diffMins < 60) return `${diffMins}分钟前`;
     if (diffMins < 1440) return `${Math.floor(diffMins / 60)}小时前`;
 
-    // 超过一天显示具体时间
     const year = date.getFullYear();
     const nowYear = now.getFullYear();
 
     if (year !== nowYear) {
-      // 不同年份，显示完整日期
       return date.toLocaleDateString('zh-CN', {
         year: 'numeric',
         month: 'short',
@@ -380,7 +427,6 @@ const Chat: React.FC = () => {
       });
     }
 
-    // 同一年，显示月日和时分
     return date.toLocaleDateString('zh-CN', {
       month: 'short',
       day: 'numeric',
@@ -390,28 +436,17 @@ const Chat: React.FC = () => {
   };
 
   // 渲染消息气泡
-  const renderMessage = (msg: ChatMessage, index: number) => {
+  const renderMessage = (msg: ChatMessage, _index: number) => {
     const isUser = msg.role === 'user';
 
     return (
       <div
         key={msg.id}
         className={`chat-message ${isUser ? 'user-message' : 'assistant-message'}`}
-        style={{
-          opacity: 0,
-          animation: `messageSlideIn 0.4s ease-out ${index * 0.05}s forwards`
-        }}
       >
         <div className="message-bubble-wrapper">
           <div className={`message-avatar ${isUser ? 'user-avatar' : 'assistant-avatar'}`}>
-            {isUser ? (
-              <UserOutlined />
-            ) : (
-              <>
-                <RobotOutlined />
-                <span className="avatar-badge">OPS</span>
-              </>
-            )}
+            {isUser ? <UserOutlined /> : <RobotOutlined />}
           </div>
           <div className={`message-bubble ${isUser ? 'user-bubble' : 'assistant-bubble'}`}>
             <div className="message-content">
@@ -422,22 +457,16 @@ const Chat: React.FC = () => {
                   remarkPlugins={[remarkGfm]}
                   components={
                     {
-                      // 代码块和内联代码
                       code: (props: any) => {
-                        // 内联代码：props.inline 为 true 或没有语言标记
                         if (props.inline || !props.className) {
                           return <code className="inline-code">{props.children}</code>;
                         }
-                        // 代码块：返回 code 元素，让外部 pre 包装
                         return <code className={props.className}>{props.children}</code>;
                       },
-                      // 代码块容器：使用 div 而不是 pre，避免 HTML 嵌套警告
                       pre: ({ children }: any) => (
                         <div className="code-block-wrapper">{children}</div>
                       ),
-                      // 段落：检查是否包含代码块
                       p: ({ children }: any) => {
-                        // 检查子元素是否包含代码块包装器
                         const hasCodeBlock = React.Children.toArray(children).some(
                           (child: any) =>
                             child?.props?.className?.includes('code-block-wrapper') ||
@@ -477,7 +506,7 @@ const Chat: React.FC = () => {
         <div className="sider-header">
           <div className="header-title">
             <ThunderboltOutlined />
-            <span>Ops Agent</span>
+            <span>OpsClaw</span>
           </div>
           <Button
             type="primary"
@@ -556,7 +585,7 @@ const Chat: React.FC = () => {
             styles={{ body: { padding: 0, height: '100%', display: 'flex', flexDirection: 'column' } }}
           >
             {/* 消息列表 */}
-            <div className="messages-container">
+            <div className="messages-container" style={{ backgroundColor: '#fafafa', minHeight: '200px' }}>
               {isLoading ? (
                 <div className="loading-state">
                   <Spin size="large" />
@@ -564,6 +593,10 @@ const Chat: React.FC = () => {
                 </div>
               ) : (
                 <>
+                  {/* Debug: 消息数量 */}
+                  <div style={{ padding: '10px', backgroundColor: '#fff', marginBottom: '10px', borderRadius: '8px' }}>
+                    📊 当前会话: {currentSession?.session_id} | 消息数量: {messages.length}
+                  </div>
                   {messages.map((msg, idx) => renderMessage(msg, idx))}
 
                   {/* 状态消息 */}
@@ -685,7 +718,7 @@ const Chat: React.FC = () => {
               description={
                 <div className="empty-description">
                   <RobotOutlined className="empty-icon" />
-                  <h3>欢迎使用 Ops Agent</h3>
+                  <h3>欢迎使用 OpsClaw</h3>
                   <p>选择一个会话或创建新对话开始</p>
                 </div>
               }

@@ -80,3 +80,9 @@ class TokenPayload(BaseModel):
     is_superuser: bool = Field(..., description="是否超级管理员")
     exp: int = Field(..., description="过期时间")
     iat: int = Field(..., description="签发时间")
+
+
+class ResetPasswordRequest(BaseModel):
+    """重置密码请求模型"""
+
+    new_password: str = Field(..., min_length=8, description="新密码（最少8个字符）")

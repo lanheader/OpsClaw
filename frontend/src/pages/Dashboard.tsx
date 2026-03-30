@@ -34,7 +34,7 @@ export const Dashboard: React.FC = () => {
   const handleTestFeishu = async () => {
     try {
       setRefreshing(true);
-      await feishuAPI.sendTestMessage('测试消息来自 Ops Agent Web');
+      await feishuAPI.sendTestMessage('测试消息来自 OpsClaw Web');
       message.success('测试消息已发送');
       await refetchFeishu();
     } catch (error) {

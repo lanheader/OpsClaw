@@ -14,7 +14,6 @@ import {
   TeamOutlined,
   SafetyOutlined,
   MessageOutlined,
-  FileTextOutlined,
 } from '@ant-design/icons';
 import { BrowserRouter, Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';

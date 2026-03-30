@@ -27,19 +27,64 @@ class FinalReportEnrichedAgent:
         return result
 
     async def astream(self, input_data: Any, config: Optional[dict] = None, **kwargs: Any):
+        """
+        流式处理，确保最后一个事件包含 final_report
+
+        LangGraph astream 返回格式: {node_name: state}
+        最后一个节点事件通常包含完整的最终状态
+        """
+        last_event = None
+        last_node_name = None
+        event_count = 0
+
         async for event in self._agent.astream(input_data, config=config, **kwargs):
+            event_count += 1
+
+            # 处理自定义 complete 事件（如果存在）
             if (
                 isinstance(event, dict)
-                and event.get("type") == "complete"  # 修复：使用 "type" 而不是 "event"
+                and event.get("type") == "complete"
                 and isinstance(event.get("state"), dict)
             ):
                 yield {
                     **event,
                     "state": ensure_final_report_in_state(event["state"]),
                 }
+                last_event = None  # 已经处理过了
                 continue
 
+            # 处理 __interrupt__ 事件（审批中断）
+            if isinstance(event, dict) and "__interrupt__" in event:
+                yield event
+                last_event = None  # 中断不需要后续处理
+                continue
+
+            # 记录最后一个节点事件
+            if isinstance(event, dict):
+                # 提取节点名（跳过内部字段）
+                for key in event.keys():
+                    if not key.startswith("__"):
+                        last_event = event
+                        last_node_name = key
+                        break
+
             yield event
+
+        # 流结束后，如果最后一个事件是节点事件，确保包含 final_report
+        if last_event and last_node_name:
+            node_state = last_event.get(last_node_name, {})
+            if isinstance(node_state, dict) and "messages" in node_state:
+                # 尝试确保 final_report 存在
+                enriched_state = ensure_final_report_in_state(node_state)
+
+                # 如果生成了 final_report，发送一个 complete 事件
+                if enriched_state.get("formatted_response") or enriched_state.get("final_report"):
+                    logger.info(f"📝 流结束后生成 final_report (长度: {len(enriched_state.get('formatted_response', '') or enriched_state.get('final_report', ''))})")
+                    yield {
+                        "type": "complete",
+                        "state": enriched_state,
+                        "node": last_node_name,
+                    }
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._agent, name)

@@ -1,9 +1,7 @@
 # app/api/v2/chat.py
 """聊天 API 端点"""
 
-import asyncio
 import json
-import logging
 import time
 import uuid
 from typing import List, Optional
@@ -12,8 +10,6 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
-from app.deepagents.factory import create_agent_for_session
-from app.core.state import OpsState
 from app.models.database import get_db
 from app.models.user import User
 from app.models.chat_session import ChatSession
@@ -27,9 +23,19 @@ from app.schemas.chat import (
     ChatMessageCreate,
     ChatMessageResponse,
 )
-from app.utils.llm_helper import ensure_final_report_in_state
 from app.utils.logger import set_request_context, clear_request_context, get_logger
 from app.memory.memory_manager import get_memory_manager
+from app.deepagents.factory import create_agent_for_session
+from app.utils.llm_helper import ensure_final_report_in_state
+
+# 导入统一的消息处理服务
+from app.services.agent_chat_service import (
+    AgentChatService,
+    ChatRequest,
+    MessageChannel,
+    EventType,
+    get_agent_chat_service
+)
 
 router = APIRouter(prefix="/v2/chat", tags=["chat"])
 logger = get_logger(__name__)
@@ -66,6 +72,9 @@ async def create_session(
         updated_at=new_session.updated_at,
         message_count=0,
         last_message=None,
+        # 新建会话默认为正常状态
+        state=new_session.state or "normal",
+        pending_approval_data=None,
     )
 
 
@@ -138,6 +147,9 @@ async def get_sessions(
                     if last_message and len(last_message.content) > 50
                     else (last_message.content if last_message else None)
                 ),
+                # 添加会话状态信息
+                state=session.state or "normal",
+                pending_approval_data=session.pending_approval_data,
             )
         )
 
@@ -199,6 +211,9 @@ async def get_session(
             if last_message and len(last_message.content) > 50
             else (last_message.content if last_message else None)
         ),
+        # 添加会话状态信息
+        state=session.state or "normal",
+        pending_approval_data=session.pending_approval_data,
     )
 
 
@@ -290,9 +305,9 @@ async def send_message(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """发送消息并通过 Agent 工作流处理（SSE）"""
+    """发送消息并通过 Agent 工作流处理（SSE）- 使用统一的 AgentChatService"""
     # 设置请求上下文（用于日志追踪）
-    request_id = set_request_context(
+    set_request_context(
         session_id=session_id,
         user_id=str(current_user.id),
         channel="web"
@@ -300,7 +315,6 @@ async def send_message(
     logger.info(f"📥 收到 Web 聊天请求: session={session_id}, user={current_user.username}")
 
     # 验证会话所有权
-    # 注意：飞书会话对所有用户可见，Web 会话只对创建者可见
     session = (
         db.query(ChatSession)
         .filter(
@@ -316,7 +330,7 @@ async def send_message(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="会话不存在")
 
     async def generate_stream():
-        """生成 SSE 流式响应"""
+        """生成 SSE 流式响应 - 使用统一的 AgentChatService"""
         try:
             # 1. 保存用户消息
             user_message = ChatMessage(
@@ -328,290 +342,155 @@ async def send_message(
             db.add(user_message)
             db.commit()
             db.refresh(user_message)
-
             logger.info(f"用户消息已保存: message_id={user_message.id}")
 
-            # 2. 调用 DeepAgents 工作流处理消息（流式）
-
-            logger.info(f"🚀 调用 DeepAgents 工作流处理消息: {message_data.content}")
-
-            # 获取用户权限
+            # 2. 获取用户权限
             permission_codes = get_user_permission_codes(db, current_user.id)
-            user_permissions = set(permission_codes)
+            user_permissions = list(set(permission_codes))
             logger.info(
-                f"🔐 用户 {current_user.username} 的权限: {', '.join(sorted(user_permissions)) if user_permissions else '无'}"
+                f"🔐 用户 {current_user.username} 的权限: "
+                f"{', '.join(sorted(user_permissions)) if user_permissions else '无'}"
             )
 
-            # 创建 Agent
-            agent = await create_agent_for_session(
+            # 3. 构建请求
+            request = ChatRequest(
                 session_id=session_id,
-                enable_approval=True,
-                enable_security=True,
+                user_id=current_user.id,
+                content=message_data.content,
+                channel=MessageChannel.WEB,
                 user_permissions=user_permissions,
+                enable_security=True,
             )
 
-            # ========== 记忆系统：检索相关记忆并增强输入 ==========
-            memory_manager = get_memory_manager(user_id=str(current_user.id))
-            enhanced_user_input = message_data.content
-
-            try:
-                # 检索相关记忆（Mem0 + 运维领域）
-                context = await memory_manager.build_context(
-                    user_query=message_data.content,
-                    session_id=session_id,
-                    include_incidents=True,   # 故障记忆
-                    include_knowledge=True,   # 知识库
-                    include_session=True,     # 会话记忆
-                    include_mem0=True         # Mem0 通用对话记忆
-                )
-
-                if context:
-                    # 将记忆注入到用户输入中
-                    enhanced_user_input = f"""{message_data.content}
-
----
-**参考资料**（来自历史对话和知识库）：
-{context}
----
-"""
-                    logger.info(f"🧠 [Chat] 记忆已注入 | context 长度: {len(context)} 字符")
-            except Exception as e:
-                logger.warning(f"⚠️ 记忆检索失败: {e}，使用原始输入")
-
-            # ========== 构建输入状态 ==========
-            # DeepAgents 使用 LangGraph 的 messages channel 来管理对话历史
-            # 我们传入当前用户消息，LangGraph 会自动从 checkpoint 加载历史消息
-            from langchain_core.messages import HumanMessage
-
-            input_state = {
-                "messages": [HumanMessage(content=enhanced_user_input)],
-            }
-
-            # 注意：不再使用 OpsState 的完整结构
-            # DeepAgents 会自动管理其他内部字段
-
-            # 【调试】增强日志
-            logger.info(f"🚀 开始执行 DeepAgents 工作流")
-            logger.info(f"   会话ID: {session_id}")
-            logger.info(f"   用户输入: {message_data.content[:100]}")
-            logger.info(
-                f"   输入消息: {enhanced_user_input[:100]}..."
-            )
-
-            # 发送状态事件：开始处理
-            status_data = json.dumps(
-                {
-                    "type": "status",
-                    "status": "processing",
-                    "message": "🤖 Agent 正在分析您的请求...",
-                },
-                ensure_ascii=False,
-            )
-            yield f"data: {status_data}\n\n"
-
-            # 执行工作流（流式）
+            # 4. 使用统一的 AgentChatService 处理
+            service = get_agent_chat_service()
             full_response = ""
-            workflow_completed = False
             final_state = None
 
-            # 【调试】添加超时检测
-            start_time = time.time()
-            timeout = 300  # 5 分钟超时
+            async for event in service.process_message_stream(request):
+                # 将 StreamEvent 转换为 SSE 格式
+                event_data = {"type": event.type.value, **event.data}
 
-            # 【重要】LangGraph checkpointer 需要 config 中的 thread_id
-            # 用于区分不同会话的状态
-            config = {
-                "configurable": {
-                    "thread_id": session_id
-                }
-            }
+                if event.type == EventType.STATUS:
+                    # 状态更新
+                    yield f"data: {json.dumps(event_data, ensure_ascii=False)}\n\n"
 
-            async for event in agent.astream(input_state, config=config):
-                # 检查超时
-                elapsed = time.time() - start_time
-                if elapsed > timeout:
-                    logger.error(f"⏰ 工作流执行超时: {elapsed:.2f}s")
-                    error_data = json.dumps(
-                        {"type": "error", "message": f"工作流执行超时（{elapsed:.2f}s）"},
-                        ensure_ascii=False,
-                    )
-                    yield f"data: {error_data}\n\n"
-                    break
+                elif event.type == EventType.CHUNK:
+                    # 回复内容
+                    full_response = event.data.get("content", "")
+                    yield f"data: {json.dumps(event_data, ensure_ascii=False)}\n\n"
 
-                event_type = event.get("type")
-                logger.info(f"📨 收到事件: type={event_type}, elapsed={elapsed:.2f}s")
+                elif event.type == EventType.APPROVAL_REQUEST:
+                    # 审批请求
+                    approval_msg = event.data.get("message", "")
+                    commands = event.data.get("commands", [])
 
-                if event_type == "interrupt":
-                    # 工作流暂停，需要用户批准
-                    interrupt_data = event.get("data", {})
-                    approval_message = interrupt_data.get("message", "")
-                    commands = interrupt_data.get("commands", [])
-
-                    logger.info(f"⏸️ 工作流暂停，等待用户批准")
-                    logger.info(f"批准消息: {approval_message}")
-
-                    # 发送 approval_request 事件给前端
-                    approval_data = json.dumps(
-                        {
-                            "type": "approval_request",
-                            "message": approval_message,
-                            "commands": commands,
-                            "session_id": session_id,
-                        },
-                        ensure_ascii=False,
-                    )
-                    yield f"data: {approval_data}\n\n"
-
-                    # 暂时保存部分响应
-                    full_response += f"## 📋 命令规划\n\n{approval_message}\n\n"
-
-                    # 工作流暂停，等待用户通过 resume 端点继续
-                    # 不发送 done 事件，因为工作流还没完成
-                    return
-
-                elif event_type == "node":
-                    # 节点执行事件
-                    node_name = event.get("node")
-                    node_state = event.get("state", {})
-
-                    logger.info(f"📍 节点执行: {node_name}")
-
-                    # 可以根据节点名称发送不同的状态更新
-                    if node_name == "intent_analysis":
-                        status_msg = "🔍 正在分析意图..."
-                    elif node_name == "command_planning":
-                        status_msg = "📋 正在规划命令..."
-                    elif node_name == "execute_diagnosis":
-                        status_msg = "🔧 正在执行诊断..."
-                    elif node_name == "analyze_result":
-                        status_msg = "📊 正在分析结果..."
-                    else:
-                        status_msg = f"⚙️ 正在执行: {node_name}"
-
-                    status_data = json.dumps(
-                        {"type": "status", "status": "processing", "message": status_msg},
-                        ensure_ascii=False,
-                    )
-                    yield f"data: {status_data}\n\n"
-
-                elif event_type == "complete":
-                    # 工作流完成
-                    final_state = ensure_final_report_in_state(event.get("state", {}))
-                    workflow_completed = True
-
-                    logger.info(f"✅ 工作流执行完成")
-
-                    # 构建最终响应
-                    final_report = final_state.get("formatted_response", "") or final_state.get(
-                        "final_report", ""
-                    )
-                    if final_report:
-                        full_response += final_report
-
-                        # 发送最终报告
-                        chunk_data = json.dumps(
-                            {"type": "chunk", "content": final_report}, ensure_ascii=False
+                    # 保存审批请求到数据库
+                    try:
+                        approval_content = f"## 📋 命令规划\n\n{approval_msg}\n\n"
+                        existing_approval = (
+                            db.query(ChatMessage)
+                            .filter(
+                                ChatMessage.session_id == session_id,
+                                ChatMessage.role == MessageRole.ASSISTANT,
+                                ChatMessage.content.contains("📋 命令规划")
+                            )
+                            .first()
                         )
-                        yield f"data: {chunk_data}\n\n"
-                    else:
-                        # 生成状态摘要
-                        workflow_status = final_state.get("workflow_status", "unknown")
-                        intent_type = final_state.get("intent_type", "unknown")
 
-                        status_msg = f"""## ✅ 工作流执行完成
+                        if not existing_approval:
+                            approval_db_msg = ChatMessage(
+                                session_id=session_id,
+                                role=MessageRole.ASSISTANT,
+                                content=approval_content,
+                                meta_data=json.dumps({
+                                    "type": "approval_request",
+                                    "message": approval_msg,
+                                    "commands": commands,
+                                }),
+                            )
+                            db.add(approval_db_msg)
+                            session.updated_at = datetime.now(timezone.utc)
+                            db.commit()
+                            logger.info(f"✅ 审批请求消息已保存到数据库: session={session_id}")
+                    except Exception as e:
+                        logger.warning(f"⚠️ 保存审批请求消息失败: {e}")
 
-**意图类型**: {intent_type}
-**诊断轮次**: {final_state.get('diagnosis_round', 0)}
-**数据充足**: {'是' if final_state.get('data_sufficient') else '否'}
-"""
-                        full_response += status_msg
+                    yield f"data: {json.dumps(event_data, ensure_ascii=False)}\n\n"
+                    return  # 等待用户审批
 
-                        chunk_data = json.dumps(
-                            {"type": "chunk", "content": status_msg}, ensure_ascii=False
+                elif event.type == EventType.DONE:
+                    # 完成事件
+                    final_state = event.data.get("final_state", {})
+                    workflow_completed = event.data.get("workflow_completed", False)
+
+                    # 保存 AI 回复到数据库
+                    if full_response:
+                        assistant_message = ChatMessage(
+                            session_id=session_id,
+                            role=MessageRole.ASSISTANT,
+                            content=full_response,
+                            meta_data=json.dumps({
+                                "workflow_status": (
+                                    final_state.get("workflow_status")
+                                    if final_state else ("completed" if workflow_completed else "interrupted")
+                                ),
+                                "intent_type": (
+                                    final_state.get("intent_type", "unknown")
+                                    if final_state else "unknown"
+                                ),
+                                "diagnosis_round": (
+                                    final_state.get("diagnosis_round", 0)
+                                    if final_state else 0
+                                ),
+                            }),
                         )
-                        yield f"data: {chunk_data}\n\n"
+                        db.add(assistant_message)
 
-                elif event_type == "error":
-                    # 工作流错误
-                    error_msg = event.get("error", "未知错误")
-                    logger.error(f"❌ 工作流执行失败: {error_msg}")
+                        # 更新会话
+                        session.updated_at = datetime.now(timezone.utc)
+                        if not session.title:
+                            session.title = message_data.content[:30] + (
+                                "..." if len(message_data.content) > 30 else ""
+                            )
 
-                    error_data = json.dumps(
-                        {"type": "error", "message": f"工作流执行失败: {error_msg}"},
-                        ensure_ascii=False,
-                    )
-                    yield f"data: {error_data}\n\n"
-                    return
+                        db.commit()
+                        db.refresh(assistant_message)
+                        logger.info(
+                            f"✅ Assistant message saved: session={session_id}, "
+                            f"message_id={assistant_message.id}"
+                        )
 
-            # 3. 保存 AI 回复（只有在工作流完成时才保存）
-            if workflow_completed and full_response:
-                assistant_message = ChatMessage(
-                    session_id=session_id,
-                    role=MessageRole.ASSISTANT,
-                    content=full_response,
-                    meta_data=json.dumps(
-                        {
-                            "workflow_status": (
-                                final_state.get("workflow_status") if final_state else "unknown"
-                            ),
-                            "intent_type": (
-                                final_state.get("intent_type") if final_state else "unknown"
-                            ),
-                            "diagnosis_round": (
-                                final_state.get("diagnosis_round", 0) if final_state else 0
-                            ),
-                        }
-                    ),
-                )
-                db.add(assistant_message)
+                        # 自动学习
+                        try:
+                            memory_manager = get_memory_manager(user_id=str(current_user.id))
+                            await memory_manager.auto_learn_from_result(
+                                user_query=message_data.content,
+                                result={"messages": [{"content": full_response}]},
+                                session_id=session_id,
+                                messages=[
+                                    {"role": "user", "content": message_data.content},
+                                    {"role": "assistant", "content": full_response}
+                                ],
+                            )
+                            logger.info(f"🧠 [Chat] 自动学习完成")
+                        except Exception as e:
+                            logger.warning(f"⚠️ 记忆自动学习失败: {e}")
 
-                # 更新会话
-                session.updated_at = datetime.now(timezone.utc)
-                if not session.title:
-                    session.title = message_data.content[:30] + (
-                        "..." if len(message_data.content) > 30 else ""
-                    )
+                        # 更新完成事件中的 message_id
+                        event_data["message_id"] = assistant_message.id
 
-                db.commit()
-                db.refresh(assistant_message)
+                    yield f"data: {json.dumps(event_data, ensure_ascii=False)}\n\n"
 
-                logger.info(
-                    f"Assistant message saved: session={session_id}, message_id={assistant_message.id}"
-                )
-
-                # ========== 记忆系统：自动学习 ==========
-                try:
-                    # 构建对话消息列表（用于 Mem0 学习）
-                    conversation_messages = [
-                        {"role": "user", "content": message_data.content},
-                        {"role": "assistant", "content": full_response}
-                    ]
-
-                    # 自动学习（包含 Mem0 和 MemoryManager）
-                    await memory_manager.auto_learn_from_result(
-                        user_query=message_data.content,
-                        result={"messages": [{"content": full_response}]},
-                        session_id=session_id,
-                        messages=conversation_messages  # 传递完整对话给 Mem0
-                    )
-
-                    logger.info(f"🧠 [Chat] 自动学习完成")
-                except Exception as e:
-                    logger.warning(f"⚠️ 记忆自动学习失败: {e}")
-
-                # 发送完成事件
-                done_data = json.dumps(
-                    {"type": "done", "message_id": assistant_message.id}, ensure_ascii=False
-                )
-                yield f"data: {done_data}\n\n"
+                elif event.type == EventType.ERROR:
+                    # 错误事件
+                    yield f"data: {json.dumps(event_data, ensure_ascii=False)}\n\n"
 
         except Exception as e:
             logger.error(f"流式响应生成错误: {e}", exc_info=True)
-            # 发送错误事件
             error_data = json.dumps({"type": "error", "message": str(e)}, ensure_ascii=False)
             yield f"data: {error_data}\n\n"
         finally:
-            # 清除请求上下文
             clear_request_context()
 
     return StreamingResponse(
@@ -620,7 +499,7 @@ async def send_message(
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",  # 禁用 Nginx 缓冲
+            "X-Accel-Buffering": "no",
         },
     )
 
@@ -677,7 +556,7 @@ async def resume_workflow(
             )
 
             # 构造恢复状态（包含批准决定）
-            resume_state: OpsState = {
+            resume_state = {
                 "session_id": session_id,
                 "user_id": str(current_user.id),
                 "user_role": "admin" if current_user.is_superuser else "user",

@@ -14,7 +14,7 @@ from app.core.security import hash_password
 from app.core.deps import get_current_user, get_current_admin
 from app.core.permission_checker import check_user_permission
 from app.schemas.user import UserCreate, UserUpdate, UserResponse
-from app.schemas.user import FeishuBindRequest
+from app.schemas.user import FeishuBindRequest, ResetPasswordRequest
 from app.schemas.rbac import UserRoleAssign, UserRoleResponse, RoleResponse
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -161,7 +161,7 @@ async def delete_user(
 @router.post("/{user_id}/reset-password")
 async def reset_user_password(
     user_id: int,
-    new_password: str,
+    request: ResetPasswordRequest,
     current_user: User = Depends(get_current_admin),
     db: Session = Depends(get_db),
 ):
@@ -170,7 +170,7 @@ async def reset_user_password(
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
 
-    user.hashed_password = hash_password(new_password)
+    user.hashed_password = hash_password(request.new_password)
     db.commit()
 
     logger.info(f"Admin {current_user.username} reset password for user {user.username}")
