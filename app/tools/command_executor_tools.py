@@ -1,10 +1,18 @@
 # app/tools/command_executor_tools.py
-"""命令执行工具 - 用于执行系统命令并返回结果"""
+"""
+命令执行工具 - 用于执行系统命令并返回结果
+
+安全加固说明（v3.4）：
+1. 移除 shell=True，使用参数列表防止命令注入
+2. 敏感信息（密码）通过环境变量传递，避免在 ps 中泄露
+3. 收紧 /proc/ 访问白名单，防止密钥泄露
+"""
 from typing import Dict, Any, Optional, List
 from langchain_core.tools import tool
 import asyncio
 import os
 import re
+import shlex
 
 from app.utils.logger import get_logger, get_request_context
 
@@ -101,21 +109,24 @@ async def execute_redis_command(
                 "needs_fallback": False
             }
 
-    # 构建 redis-cli 命令
-    full_command = f"redis-cli -h {host} -p {port}"
+    # 构建参数列表（避免 shell=True 命令注入）
+    cmd_args = ["redis-cli", "-h", host, "-p", str(port)]
+
+    # 环境变量传递密码（避免在 ps 中泄露）
+    env = os.environ.copy()
     if password:
-        full_command += f" -a {password}"
-    full_command += f" {command}"
+        env["REDISCLI_AUTH"] = password
+
+    # 解析 Redis 命令为参数列表
+    # 例如 "INFO memory" -> ["INFO", "memory"]
+    command_parts = shlex.split(command)
+    cmd_args.extend(command_parts)
 
     try:
-        # 获取当前环境变量
-        env = os.environ.copy()
-
-        process = await asyncio.create_subprocess_shell(
-            full_command,
+        process = await asyncio.create_subprocess_exec(
+            *cmd_args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            shell=True,
             env=env
         )
 
@@ -251,23 +262,24 @@ async def execute_mysql_query(
             "needs_fallback": False
         }
 
-    # 构建 mysql 命令
-    full_command = f"mysql -h {host} -P {port} -u {user}"
+    # 构建参数列表（避免 shell=True 命令注入）
+    cmd_args = ["mysql", "-h", host, "-P", str(port), "-u", user]
+
+    # 环境变量传递密码（避免在 ps 中泄露）
+    env = os.environ.copy()
     if password:
-        full_command += f" -p{password}"
+        env["MYSQL_PWD"] = password
+
     if database:
-        full_command += f" {database}"
-    full_command += f" -e \"{query}\""
+        cmd_args.append(database)
+
+    cmd_args.extend(["-e", query])
 
     try:
-        # 获取当前环境变量
-        env = os.environ.copy()
-
-        process = await asyncio.create_subprocess_shell(
-            full_command,
+        process = await asyncio.create_subprocess_exec(
+            *cmd_args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            shell=True,
             env=env
         )
 
@@ -384,21 +396,94 @@ async def execute_safe_shell_command(
         'uptime', 'df', 'free', 'top', 'ps', 'netstat',
         'ss', 'lsof', 'vmstat', 'iostat', 'sar',
         'systemctl status', 'journalctl', 'dmesg',
-        'cat /proc/', 'ls', 'pwd', 'whoami', 'hostname',
+        'ls', 'pwd', 'whoami', 'hostname',
         'date', 'uname', 'which', 'whereis'
+    ]
+
+    # /proc/ 允许的安全路径白名单（防止泄露密钥）
+    PROC_SAFE_PATHS = [
+        '/proc/cpuinfo',
+        '/proc/meminfo',
+        '/proc/loadavg',
+        '/proc/uptime',
+        '/proc/version',
+        '/proc/filesystems',
+        '/proc/mounts',
+        '/proc/diskstats',
+        '/proc/net/dev',
+        '/proc/net/tcp',
+        '/proc/sys/',
+    ]
+
+    # 危险的 /proc/ 路径模式（绝对禁止）
+    DANGEROUS_PROC_PATTERNS = [
+        r'/proc/self/',           # 当前进程信息，可能泄露 environ
+        r'/proc/\d+/environ',     # 任意进程的环境变量
+        r'/proc/\d+/fd/',         # 文件描述符
+        r'/proc/\d+/cmdline',     # 命令行参数
+        r'/proc/\d+/maps',        # 内存映射
     ]
 
     if allowed_commands is None:
         allowed_commands = default_allowed
 
-    # 检查命令是否在白名单中
-    command_base = command.split()[0] if command else ""
-    is_allowed = False
+    # 解析命令，检查是否是 cat /proc/ 类型的命令
+    command_parts = command.split()
+    command_base = command_parts[0] if command_parts else ""
 
-    for allowed in allowed_commands:
-        if command.startswith(allowed):
+    # 特殊处理 cat /proc/ 类命令
+    if command_base == 'cat' and len(command_parts) > 1:
+        proc_path = command_parts[1]
+
+        # 检查是否是危险的 /proc/ 路径
+        for pattern in DANGEROUS_PROC_PATTERNS:
+            if re.search(pattern, proc_path):
+                error_msg = f"禁止访问敏感 /proc/ 路径: {proc_path}"
+                _log_tool_error("execute_safe_shell_command", error_msg)
+                return {
+                    "success": False,
+                    "output": "",
+                    "error": error_msg,
+                    "error_type": "SecurityViolation",
+                    "suggestion": "只允许访问 /proc/cpuinfo, /proc/meminfo 等安全路径",
+                    "exit_code": -1,
+                    "execution_mode": "cli",
+                    "needs_fallback": False
+                }
+
+        # 检查是否在安全白名单中
+        is_safe_proc = False
+        for safe_path in PROC_SAFE_PATHS:
+            if proc_path.startswith(safe_path):
+                is_safe_proc = True
+                break
+
+        if proc_path.startswith('/proc/') and not is_safe_proc:
+            error_msg = f"/proc/ 路径不在白名单中: {proc_path}"
+            _log_tool_error("execute_safe_shell_command", error_msg)
+            return {
+                "success": False,
+                "output": "",
+                "error": error_msg,
+                "error_type": "SecurityViolation",
+                "suggestion": f"允许的 /proc/ 路径: {', '.join(PROC_SAFE_PATHS[:5])}...",
+                "exit_code": -1,
+                "execution_mode": "cli",
+                "needs_fallback": False
+            }
+
+        # 如果是安全的 /proc/ 路径，允许执行
+        if is_safe_proc:
             is_allowed = True
-            break
+        else:
+            is_allowed = False
+    else:
+        # 普通命令检查白名单
+        is_allowed = False
+        for allowed in allowed_commands:
+            if command.startswith(allowed):
+                is_allowed = True
+                break
 
     if not is_allowed:
         error_msg = f"命令 '{command_base}' 不在允许列表中"
@@ -437,14 +522,16 @@ async def execute_safe_shell_command(
             }
 
     try:
+        # 使用参数列表执行命令（避免 shell=True 命令注入）
+        cmd_args = shlex.split(command)
+
         # 获取当前环境变量
         env = os.environ.copy()
 
-        process = await asyncio.create_subprocess_shell(
-            command,
+        process = await asyncio.create_subprocess_exec(
+            *cmd_args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            shell=True,
             env=env
         )
 
