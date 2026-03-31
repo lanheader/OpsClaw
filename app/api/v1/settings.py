@@ -153,7 +153,7 @@ async def batch_update_settings(
 
     return {
         "message": f"成功更新 {updated_count} 个设置",
-        "errors": ", ".join(errors) if errors else None,
+        "errors": ", ".join(errors) if errors else "",
     }
 
 

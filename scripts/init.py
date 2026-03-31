@@ -300,8 +300,8 @@ def init_admin_user():
             db.commit()
             logger.info("  ✅ 创建管理员权限: admin")
 
-        # 分配角色和权限
-        if admin and admin_role and admin_perm:
+        # 分配角色和所有权限给 admin 角色
+        if admin and admin_role:
             user_role = db.query(UserRole).filter(
                 UserRole.user_id == admin.id,
                 UserRole.role_id == admin_role.id
@@ -312,18 +312,33 @@ def init_admin_user():
                 db.commit()
                 logger.info(f"  ✅ 分配管理员角色: {admin_role.name}")
 
-            role_perm = db.query(RolePermission).filter(
-                RolePermission.role_id == admin_role.id,
-                RolePermission.permission_id == admin_perm.id
-            ).first()
-            if not role_perm:
-                role_perm = RolePermission(
-                    role_id=admin_role.id,
-                    permission_id=admin_perm.id
-                )
-                db.add(role_perm)
-                db.commit()
-                logger.info(f"  ✅ 分配管理员权限: {admin_perm.code}")
+            # 确保所有定义的菜单权限已入库
+            from app.core.permissions import MENU_PERMISSIONS, PermissionCategory
+            for perm_def in MENU_PERMISSIONS:
+                exists = db.query(Permission).filter(Permission.code == perm_def.code).first()
+                if not exists:
+                    db.add(Permission(
+                        code=perm_def.code,
+                        name=perm_def.name,
+                        category=perm_def.category.value,
+                        resource=perm_def.resource,
+                        description=perm_def.description,
+                    ))
+            db.commit()
+
+            # 获取数据库中所有权限，全部分配给 admin 角色
+            all_perms = db.query(Permission).all()
+            assigned_count = 0
+            for perm in all_perms:
+                exists = db.query(RolePermission).filter(
+                    RolePermission.role_id == admin_role.id,
+                    RolePermission.permission_id == perm.id
+                ).first()
+                if not exists:
+                    db.add(RolePermission(role_id=admin_role.id, permission_id=perm.id))
+                    assigned_count += 1
+            db.commit()
+            logger.info(f"  ✅ 分配管理员权限: {assigned_count} 个新权限，共 {len(all_perms)} 个")
 
         logger.info("✅ 管理员用户初始化完成")
 
@@ -345,6 +360,25 @@ def sync_tools_and_approval():
     try:
         synced_count = ApprovalConfigService.sync_tools_to_db(db)
         logger.info(f"  ✅ 同步了 {synced_count} 个新工具")
+
+        # 同步所有权限定义到 Permission 表
+        from app.core.permissions import get_all_permissions, PermissionCategory
+        all_perm_defs = get_all_permissions()
+        added_perm_count = 0
+        for perm_def in all_perm_defs:
+            exists = db.query(Permission).filter(Permission.code == perm_def.code).first()
+            if not exists:
+                db.add(Permission(
+                    code=perm_def.code,
+                    name=perm_def.name,
+                    category=perm_def.category.value,
+                    resource=perm_def.resource,
+                    description=perm_def.description,
+                ))
+                added_perm_count += 1
+        db.commit()
+        if added_perm_count > 0:
+            logger.info(f"  ✅ 同步了 {added_perm_count} 个新权限到权限表")
 
         total_count = db.query(ApprovalConfig).count()
         logger.info(f"  📊 总工具数: {total_count}")
@@ -482,11 +516,11 @@ def main():
         # 步骤 1: 创建数据库表
         create_tables(reset=args.reset)
 
-        # 步骤 2: 初始化管理员用户
-        init_admin_user()
-
-        # 步骤 3: 同步工具到审批配置表
+        # 步骤 2: 同步工具到审批配置表（先同步，确保所有权限已入库）
         sync_tools_and_approval()
+
+        # 步骤 3: 初始化管理员用户（分配全部权限）
+        init_admin_user()
 
         # 步骤 4: 初始化系统设置
         init_system_settings()

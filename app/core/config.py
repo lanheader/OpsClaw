@@ -155,7 +155,7 @@ class Settings(BaseSettings):
     # ========== 初始管理员账号 ==========
     INITIAL_ADMIN_USERNAME: str = "admin"
     INITIAL_ADMIN_PASSWORD: str = "admin123"
-    INITIAL_ADMIN_EMAIL: str = "admin@ops-agent.local"
+    INITIAL_ADMIN_EMAIL: str = "admin@example.com"
 
     # ========== Feature Flags ==========
     DEFAULT_WORKFLOW_VERSION: str = "v1"
