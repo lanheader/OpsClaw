@@ -23,6 +23,7 @@ from app.core.deps import get_current_user
 from app.core.permission_checker import get_user_permission_codes
 from app.deepagents.factory import create_agent_for_session
 from app.memory.memory_manager import get_memory_manager
+from app.utils.timezone import get_beijing_now
 from app.models.chat_message import ChatMessage, MessageRole
 from app.models.chat_session import ChatSession
 from app.models.database import get_db
@@ -165,7 +166,7 @@ def _save_approval_request(
             }),
         )
         db.add(message)
-        session.updated_at = datetime.now(timezone.utc)
+        session.updated_at = get_beijing_now()
         db.commit()
         logger.info(f"✅ 审批请求消息已保存: session={session_id}")
         return True
@@ -213,7 +214,7 @@ def _save_assistant_message(
     if not session.title:
         session.title = user_query[:30] + ("..." if len(user_query) > 30 else "")
 
-    session.updated_at = datetime.now(timezone.utc)
+    session.updated_at = get_beijing_now()
     db.commit()
     db.refresh(message)
 
@@ -353,7 +354,7 @@ def _append_to_last_assistant_message(
         )
         db.add(message)
 
-    session.updated_at = datetime.now(timezone.utc)
+    session.updated_at = get_beijing_now()
     db.commit()
     logger.info(f"AI 回复已更新/保存: session={session_id}")
 

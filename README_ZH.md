@@ -20,12 +20,12 @@
 
 Ops Agent 是一个基于 **DeepAgents 框架**的智能运维自动化平台，通过主智能体和多个专业化子智能体协同工作，实现从监控、诊断到自愈的全流程自动化。
 
-**当前版本**: v3.5 | **子智能体**: 3 个 | **中间件**: 3 个 | **K8s 工具**: 28 个
+**当前版本**: v4.0 | **子智能体**: 6 个 | **中间件**: 3 个 | **K8s 工具**: 28 个
 
 ### ✨ 核心特性
 
 #### 🤖 DeepAgents 架构
-- **主智能体 + 3 个专业子智能体**协同工作
+- **主智能体 + 6 个专业子智能体**协同工作
 - **智能任务规划**：使用 `write_todos` 自动分解复杂任务
 - **子智能体委派**：通过 `task()` 工具委派专业任务
 - **智能路由**：根据意图和上下文自动决策工作流
@@ -122,9 +122,14 @@ JWT_SECRET_KEY=your-secret-key-here-change-in-production
 # 创建数据目录
 mkdir -p data
 
-# 初始化数据库（包含 RBAC 表和初始管理员账号）
-uv run python scripts/init_auth_db.py
+# 一键初始化（推荐）
+uv run python scripts/init.py
+
+# 或跳过知识库初始化（更快）
+uv run python scripts/init.py --skip-kb
 ```
+
+> **说明**: `init.py` 整合了所有初始化步骤，包括数据库表、管理员账号、工具配置、系统设置和提示词。详见 [scripts/README.md](scripts/README.md)。
 
 #### 6. 启动服务
 
@@ -148,40 +153,56 @@ npm run dev
 
 ### 方式二：Docker 部署（推荐生产环境）
 
-#### 1. 构建和启动
+#### 1. 配置环境变量
+
+```bash
+# 复制环境变量示例
+cp .env.example .env
+
+# 编辑 .env，配置必要的参数
+vim .env
+```
+
+**必须配置的环境变量**：
+```bash
+# LLM 配置（选择一个）
+DEFAULT_LLM_PROVIDER=openai  # 或 claude, zhipu, openrouter
+OPENAI_API_KEY=your_key_here
+
+# JWT 密钥（生产环境必须修改）
+JWT_SECRET_KEY=your-secret-key-change-in-production
+```
+
+#### 2. 构建和启动
 
 ```bash
 # 构建镜像
 docker-compose build
 
-# 启动服务
+# 启动服务（首次启动会自动初始化数据库）
 docker-compose up -d
 
 # 查看日志
-docker-compose logs -f
+docker-compose logs -f ops-agent
 
 # 停止服务
 docker-compose down
 ```
 
-#### 2. 初始化数据库（首次启动）
-
-```bash
-# 进入容器
-docker-compose exec ops-agent bash
-
-# 初始化数据库
-uv run python scripts/init_auth_db.py
-
-# 退出容器
-exit
-```
+> **说明**: 容器启动时会自动执行数据库初始化，无需手动操作。
 
 #### 3. 访问应用
 
 - **Web UI**: http://localhost:8000
-- **API 文档**: http://localhost:8000/docs（需要在 .env 中设置 `ENABLE_DOCS=true`）
+- **API 文档**: http://localhost:8000/docs（需要设置 `ENABLE_DOCS=true`）
 - **默认账号**: `admin` / `admin123`
+
+#### 4. 生产环境部署
+
+```bash
+# 使用生产配置启动
+docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+```
 
 ---
 
@@ -217,10 +238,14 @@ exit
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
-│              子智能体层 (Subagents Layer) - 3 个                 │
+│              子智能体层 (Subagents Layer) - 6 个                 │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐         │
 │  │  data-agent  │  │analyze-agent │  │execute-agent │         │
 │  │  (数据采集)  │  │  (分析决策)  │  │  (执行操作)  │         │
+│  └──────────────┘  └──────────────┘  └──────────────┘         │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐         │
+│  │network-agent │  │security-agent│  │storage-agent │         │
+│  │  (网络诊断)  │  │  (安全巡检)  │  │  (存储排查)  │         │
 │  └──────────────┘  └──────────────┘  └──────────────┘         │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
@@ -289,6 +314,24 @@ MessageProcessor (统一消息处理编排器)
 **文件**：`app/deepagents/subagents/execute_agent.py`
 **职责**：执行修复命令，监控执行结果
 **工具**：command_executor_tools, k8s_tools
+
+### 4. network-agent（网络诊断子智能体）
+**文件**：`app/deepagents/subagents/network_agent.py`
+**职责**：诊断网络连通性问题，排查 Service、Ingress、DNS 问题
+**工具**：k8s_tools, 网络诊断工具
+**触发场景**：Service 不可达、DNS 解析失败、网络延迟高
+
+### 5. security-agent（安全巡检子智能体）
+**文件**：`app/deepagents/subagents/security_agent.py`
+**职责**：RBAC 审计、安全策略检查、权限分析
+**工具**：k8s_tools
+**触发场景**：权限异常、安全漏洞扫描、合规检查
+
+### 6. storage-agent（存储排查子智能体）
+**文件**：`app/deepagents/subagents/storage_agent.py`
+**职责**：PVC/PV 问题排查、磁盘空间分析、存储性能诊断
+**工具**：k8s_tools
+**触发场景**：PVC Pending、磁盘满、IO 性能问题
 
 ---
 
@@ -617,13 +660,16 @@ MAX_RETRY=1  # 最多重试 1 次
 ops-agent-langgraph/
 ├── app/                         # 应用主目录
 │   ├── main.py                  # FastAPI 应用入口
-│   ├── deepagents/              # DeepAgents 主智能体和子智能体（3 个）
+│   ├── deepagents/              # DeepAgents 主智能体和子智能体（6 个）
 │   │   ├── main_agent.py        # 主智能体
 │   │   ├── factory.py           # Agent 工厂
 │   │   └── subagents/           # 子智能体
 │   │       ├── data_agent.py    # 数据采集
 │   │       ├── analyze_agent.py # 分析决策
-│   │       └── execute_agent.py # 执行操作
+│   │       ├── execute_agent.py # 执行操作
+│   │       ├── network_agent.py # 网络诊断
+│   │       ├── security_agent.py# 安全巡检
+│   │       └── storage_agent.py # 存储排查
 │   ├── middleware/              # 中间件层（3 个）
 │   │   ├── error_filtering_middleware.py  # 错误消息过滤
 │   │   ├── message_trimming_middleware.py # 消息截断
@@ -805,7 +851,7 @@ uv run python scripts/init_auth_db.py
 
 <div align="center">
 
-**最后更新**: 2026-03-30 | **版本**: v3.5
+**最后更新**: 2026-03-31 | **版本**: v4.0
 
 Made with ❤️ by Ops Team
 

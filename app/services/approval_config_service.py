@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_
 
 from app.models.approval_config import ApprovalConfig
-from app.tools.registry import ToolRegistry
+from app.tools.registry import ToolRegistry, get_tool_registry
 from app.tools.base import RiskLevel
 
 logger = logging.getLogger(__name__)
@@ -24,16 +24,18 @@ class ApprovalConfigService:
         同步逻辑：
         - 新工具：创建记录，默认 HIGH 风险需要审批
         - 现有工具：更新基础信息（保留手动配置的 requires_approval）
-        - 缺失工具：仅更新（不删除数据库中已存在但代码中已删除的工具）
+        - 缺失工具：删除数据库中已存在但代码中已删除的工具
 
         Returns:
             同步的工具数量（新增数量）
         """
-        registry = ToolRegistry()
+        # 使用全局单例，确保工具已扫描注册
+        registry = get_tool_registry()
         tool_classes = registry.list_tools()
 
         synced_count = 0
         updated_count = 0
+        deleted_count = 0
 
         # 获取数据库中所有已存在的工具
         existing_tools = {
@@ -41,12 +43,16 @@ class ApprovalConfigService:
             for config in db.query(ApprovalConfig).all()
         }
 
+        # 获取注册表中所有工具名称
+        registry_tool_names = set()
+
         for tool_class in tool_classes:
             metadata = tool_class.get_metadata()
             if not metadata:
                 continue
 
             tool_name = metadata.name
+            registry_tool_names.add(tool_name)
             tool_group = metadata.group or "default"
             risk_level = metadata.risk_level.value if metadata.risk_level else "unknown"
             description = metadata.description or ""
@@ -82,9 +88,18 @@ class ApprovalConfigService:
                 db.add(new_config)
                 synced_count += 1
 
+        # 删除代码中已不存在的工具
+        tools_to_delete = set(existing_tools.keys()) - registry_tool_names
+        if tools_to_delete:
+            db.query(ApprovalConfig).filter(
+                ApprovalConfig.tool_name.in_(tools_to_delete)
+            ).delete(synchronize_session=False)
+            deleted_count = len(tools_to_delete)
+            logger.info(f"删除已不存在的工具: {tools_to_delete}")
+
         db.commit()
         logger.info(
-            f"同步工具到审批配置表: 新增 {synced_count} 个工具, 更新 {updated_count} 个工具"
+            f"同步工具到审批配置表: 新增 {synced_count} 个, 更新 {updated_count} 个, 删除 {deleted_count} 个"
         )
         return synced_count
 

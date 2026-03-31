@@ -20,12 +20,12 @@ English | [简体中文](README_ZH.md)
 
 Ops Agent is an intelligent operations automation platform built on the **DeepAgents Framework**. It achieves full-process automation from monitoring, diagnosis to self-healing through the collaboration of a main agent and specialized sub-agents.
 
-**Current Version**: v3.5 | **Subagents**: 3 | **Middleware**: 3 | **K8s Tools**: 28
+**Current Version**: v4.0 | **Subagents**: 6 | **Middleware**: 3 | **K8s Tools**: 28
 
 ### ✨ Key Features
 
 #### 🤖 DeepAgents Architecture
-- **Main Agent + 3 Specialized Subagents** working together
+- **Main Agent + 6 Specialized Subagents** working together
 - **Intelligent Task Planning**: Automatic decomposition of complex tasks using `write_todos`
 - **Subagent Delegation**: Delegate professional tasks via `task()` tool
 - **Intelligent Routing**: Automatically decide workflow based on intent and context
@@ -105,15 +105,76 @@ JWT_SECRET_KEY=your-secret-key-here-change-in-production
 
 ```bash
 mkdir -p data
-uv run python scripts/init_auth_db.py
+
+# One-click initialization (recommended)
+uv run python scripts/init.py
+
+# Or skip knowledge base initialization
+uv run python scripts/init.py --skip-kb
+
+# Start server
 uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
+
+> **Note**: `init.py` replaces multiple individual scripts. See [scripts/README.md](scripts/README.md) for details.
 
 ### Access
 
 - **Web UI**: http://localhost:5173
 - **API Docs**: http://localhost:8000/docs
 - **Default Account**: `admin` / `admin123`
+
+---
+
+### Docker Deployment (Recommended for Production)
+
+#### 1. Configure Environment
+
+```bash
+cp .env.example .env
+vim .env  # Configure required variables
+```
+
+**Required Variables**:
+```bash
+# LLM (choose one)
+DEFAULT_LLM_PROVIDER=openai  # or claude, zhipu, openrouter
+OPENAI_API_KEY=your_key_here
+
+# JWT Secret (change in production!)
+JWT_SECRET_KEY=your-secret-key-change-in-production
+```
+
+#### 2. Build and Run
+
+```bash
+# Build image
+docker-compose build
+
+# Start service (auto-initializes on first run)
+docker-compose up -d
+
+# View logs
+docker-compose logs -f ops-agent
+
+# Stop service
+docker-compose down
+```
+
+> **Note**: The container automatically initializes the database on first startup.
+
+#### 3. Access
+
+- **Web UI**: http://localhost:8000
+- **API Docs**: http://localhost:8000/docs (requires `ENABLE_DOCS=true`)
+- **Default Account**: `admin` / `admin123`
+
+#### 4. Production Deployment
+
+```bash
+# Use production configuration
+docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+```
 
 ---
 
@@ -148,10 +209,14 @@ uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
-│              Subagents Layer (3 Subagents)                       │
+│              Subagents Layer (6 Subagents)                       │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐         │
 │  │  data-agent  │  │analyze-agent │  │execute-agent │         │
 │  │  (Data)      │  │  (Analysis)  │  │  (Execute)   │         │
+│  └──────────────┘  └──────────────┘  └──────────────┘         │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐         │
+│  │network-agent │  │security-agent│  │storage-agent │         │
+│  │  (Network)   │  │  (Security)  │  │  (Storage)   │         │
 │  └──────────────┘  └──────────────┘  └──────────────┘         │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
@@ -301,11 +366,14 @@ Session summaries use overwrite strategy (fixed doc_id) to avoid storage bloat.
 
 ## 🤖 Subagents
 
-| Subagent | 文件 | 职责 | 工具 |
-|----------|------|------|------|
-| **data-agent** | `subagents/data_agent.py` | 数据采集 | k8s_tools, prometheus_tools, loki_tools |
-| **analyze-agent** | `subagents/analyze_agent.py` | 分析决策 | 无（纯推理） |
-| **execute-agent** | `subagents/execute_agent.py` | 执行操作 | command_executor, k8s_tools |
+| Subagent | File | Responsibility | Tools |
+|----------|------|----------------|-------|
+| **data-agent** | `subagents/data_agent.py` | Data collection | k8s_tools, prometheus_tools, loki_tools |
+| **analyze-agent** | `subagents/analyze_agent.py` | Analysis & diagnosis | None (pure reasoning) |
+| **execute-agent** | `subagents/execute_agent.py` | Execute operations | command_executor, k8s_tools |
+| **network-agent** | `subagents/network_agent.py` | Network diagnosis | k8s_tools, network diagnostic tools |
+| **security-agent** | `subagents/security_agent.py` | Security audit | k8s_tools |
+| **storage-agent** | `subagents/storage_agent.py` | Storage troubleshooting | k8s_tools |
 
 ---
 
@@ -379,10 +447,13 @@ OpsClaw/
 │   ├── deepagents/
 │   │   ├── main_agent.py            # 主智能体 (单例 + Checkpointer)
 │   │   ├── factory.py               # Agent 工厂
-│   │   └── subagents/               # 子智能体
-│   │       ├── data_agent.py
-│   │       ├── analyze_agent.py
-│   │       └── execute_agent.py
+│   │   └── subagents/               # 子智能体 (6 个)
+│   │       ├── data_agent.py        # 数据采集
+│   │       ├── analyze_agent.py     # 分析决策
+│   │       ├── execute_agent.py     # 执行操作
+│   │       ├── network_agent.py     # 网络诊断
+│   │       ├── security_agent.py    # 安全巡检
+│   │       └── storage_agent.py     # 存储排查
 │   ├── middleware/                   # 中间件 (3 个)
 │   │   ├── error_filtering_middleware.py
 │   │   ├── message_trimming_middleware.py
@@ -442,6 +513,6 @@ MIT License
 
 <div align="center">
 
-**Last Updated**: 2026-03-30 | **Version**: v3.5 | **Maintainer**: lanjiaxuan
+**Last Updated**: 2026-03-31 | **Version**: v4.0 | **Maintainer**: lanjiaxuan
 
 </div>

@@ -60,8 +60,14 @@ async def sync_tools(
 
     从 ToolRegistry 扫描所有工具并同步到 approval_configs 表。
     新工具会被添加，现有工具会被更新（保留手动配置的审批状态）。
+    会强制重新扫描工具目录以发现新工具。
     """
     try:
+        # 强制重新扫描工具目录
+        from app.tools.registry import get_tool_registry
+        registry = get_tool_registry()
+        registry.scan_and_register()
+
         synced_count = ApprovalConfigService.sync_tools_to_db(db)
 
         # 获取总工具数

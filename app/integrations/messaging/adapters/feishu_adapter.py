@@ -289,7 +289,7 @@ class FeishuChannelAdapter(BaseChannelAdapter):
     async def add_reaction(
         self,
         message_id: str,
-        emoji: str = "ok"
+        emoji: str = "SaluteFace"
     ) -> bool:
         """
         添加飞书表情回复

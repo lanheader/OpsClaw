@@ -152,6 +152,45 @@ def get_available_packages() -> List[str]:
     return sorted(packages)
 
 
+def scan_all_tools() -> List[dict]:
+    """
+    扫描并返回所有工具的详细信息
+
+    用于前端页面动态获取工具列表并同步到数据库。
+    此方法会触发工具注册表的初始化（如果尚未初始化）。
+
+    Returns:
+        工具信息列表，包含：
+        - name: 工具名称
+        - group: 工具分组
+        - operation_type: 操作类型
+        - risk_level: 风险等级
+        - permissions: 所需权限
+        - description: 描述
+        - enabled: 是否启用
+    """
+    registry = get_tool_registry()
+    tools_info = []
+
+    for tool_class in registry.list_tools():
+        metadata = tool_class.get_metadata()
+        if not metadata:
+            continue
+
+        tools_info.append({
+            "name": metadata.name,
+            "group": metadata.group or "default",
+            "operation_type": metadata.operation_type.value if metadata.operation_type else "unknown",
+            "risk_level": metadata.risk_level.value if metadata.risk_level else "unknown",
+            "permissions": metadata.permissions or [],
+            "description": metadata.description or "",
+            "enabled": metadata.enabled,
+            "expose_to_agent": metadata.expose_to_agent,
+        })
+
+    return tools_info
+
+
 __all__ = [
     "get_all_tools",
     "get_tools_by_group",
@@ -159,4 +198,5 @@ __all__ = [
     "get_available_packages",
     "list_groups",
     "list_permissions",
+    "scan_all_tools",
 ]

@@ -1,0 +1,47 @@
+version: '3.8'
+
+# 生产环境 Docker Compose 配置
+# 使用方法：
+#   docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+services:
+  ops-agent:
+    # 生产环境使用预构建镜像
+    image: lanjiaxuan/ops-agent:v4.0
+    restart: always
+
+    # 生产环境资源限制
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 1G
+      replicas: 2
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+
+    # 日志配置
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+
+    # 环境变量覆盖
+    environment:
+      - DEBUG=false
+      - LOG_LEVEL=WARNING
+      - ENABLE_DOCS=false
+
+    # 健康检查（更严格）
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
