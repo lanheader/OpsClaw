@@ -73,7 +73,10 @@ async def get_feishu_status():
             "healthy": adapter.enabled and (
                 connection_mode == "webhook" or longconn_healthy
             ),
-            "longconn_healthy": longconn_healthy if connection_mode == "long_connection" else None,
+            "longconn": {
+                "connected": longconn_healthy if connection_mode == "long_connection" else False,
+                "mode": connection_mode,
+            },
             "app_id": settings.FEISHU_APP_ID[:10] + "..." if settings.FEISHU_APP_ID else None,
             "webhook_require_mention": settings.FEISHU_WEBHOOK_REQUIRE_MENTION,
             "reply_with_mention": settings.FEISHU_REPLY_WITH_MENTION,

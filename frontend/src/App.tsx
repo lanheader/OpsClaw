@@ -15,6 +15,7 @@ import {
   MessageOutlined,
   EditOutlined,
 } from '@ant-design/icons';
+import { ClockCircleOutlined } from '@ant-design/icons';
 import { BrowserRouter, Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Dashboard } from './pages/Dashboard';
@@ -28,6 +29,7 @@ import SystemSettings from './pages/SystemSettings';
 import Chat from './pages/Chat';
 import Profile from './pages/Profile';
 import PromptManagement from './pages/PromptManagement';
+import ScheduledTasksPage from './pages/ScheduledTasks';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { PermissionProvider, usePermission } from './contexts/PermissionContext';
 import { PrivateRoute } from './components/PrivateRoute';
@@ -84,6 +86,11 @@ const AppLayout: React.FC = () => {
       key: '/execute',
       icon: <RocketOutlined />,
       label: <Link to="/execute">执行工作流</Link>,
+    },
+    {
+      key: '/scheduled-tasks',
+      icon: <ClockCircleOutlined />,
+      label: <Link to="/scheduled-tasks">定时任务</Link>,
     },
     {
       key: '/chat',
@@ -183,6 +190,7 @@ const AppLayout: React.FC = () => {
               <Route path="/profile" element={<Profile />} />
               <Route path="/settings" element={<SystemSettings />} />
               <Route path="/prompts" element={<PromptManagement />} />
+              <Route path="/scheduled-tasks" element={<ScheduledTasksPage />} />
             </Routes>
           </div>
         </Content>

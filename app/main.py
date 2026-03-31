@@ -168,6 +168,15 @@ async def lifespan(app: FastAPI):
     else:
         logger.info(f"ℹ️  Feishu long connection not enabled")
 
+    # Start scheduler service
+    try:
+        from app.services.scheduler_service import get_scheduler_service
+        scheduler = get_scheduler_service()
+        scheduler.start()
+        logger.info("✅ Scheduler service started")
+    except Exception as e:
+        logger.warning(f"⚠️ Failed to start scheduler service: {e}")
+
     yield
 
     # Shutdown
@@ -187,6 +196,15 @@ async def lifespan(app: FastAPI):
     # Close checkpointer connection
     from app.core.checkpointer import shutdown_checkpointer
     await shutdown_checkpointer()
+
+    # Shutdown scheduler service
+    try:
+        from app.services.scheduler_service import get_scheduler_service
+        scheduler = get_scheduler_service()
+        scheduler.shutdown()
+        logger.info("✅ Scheduler service stopped")
+    except Exception as e:
+        logger.warning(f"⚠️ Failed to stop scheduler service: {e}")
 
 
 # Create FastAPI application
@@ -258,6 +276,9 @@ app.include_router(approval_config.router, prefix="/api/v1")
 # 提示词管理 API
 from app.api.v1 import prompts
 app.include_router(prompts.router, prefix="/api/v1")
+# 定时任务管理 API
+from app.api.v1 import scheduled_tasks
+app.include_router(scheduled_tasks.router, prefix="/api/v1")
 
 
 @app.get("/")

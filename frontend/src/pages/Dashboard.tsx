@@ -9,7 +9,6 @@ import {
   CheckCircleOutlined,
   CloseCircleOutlined,
   SyncOutlined,
-  RocketOutlined,
   MessageOutlined,
   UserOutlined,
   ClockCircleOutlined,
@@ -19,6 +18,7 @@ import { workflowAPI } from '@/api/workflow';
 import { feishuAPI } from '@/api/feishu';
 import { llmAPI, LLMTestResponse } from '@/api/llm';
 import { chatApi, ChatSession } from '@/api/chat';
+import { scheduledTasksApi } from '@/api/scheduledTasks';
 
 const { Text, Paragraph } = Typography;
 
@@ -48,6 +48,13 @@ export const Dashboard: React.FC = () => {
   const { data: sessionsData, isLoading: sessionsLoading } = useQuery({
     queryKey: ['recent-sessions'],
     queryFn: () => chatApi.getSessions(0, 10),
+    refetchInterval: 30000,
+  });
+
+  // 查询定时任务统计
+  const { data: taskStatsData } = useQuery({
+    queryKey: ['task-stats'],
+    queryFn: () => scheduledTasksApi.getStats(),
     refetchInterval: 30000,
   });
 
@@ -199,9 +206,9 @@ export const Dashboard: React.FC = () => {
         <Col xs={24} sm={12} md={6} lg={6}>
           <Card>
             <Statistic
-              title="总工作流数"
-              value={0}
-              prefix={<RocketOutlined />}
+              title="总任务数"
+              value={taskStatsData?.total || 0}
+              prefix={<ClockCircleOutlined />}
               valueStyle={{ color: '#1890ff' }}
             />
           </Card>
@@ -210,7 +217,7 @@ export const Dashboard: React.FC = () => {
           <Card>
             <Statistic
               title="执行中"
-              value={0}
+              value={taskStatsData?.running || 0}
               prefix={<SyncOutlined spin />}
               valueStyle={{ color: '#faad14' }}
             />
@@ -220,7 +227,7 @@ export const Dashboard: React.FC = () => {
           <Card>
             <Statistic
               title="成功完成"
-              value={0}
+              value={taskStatsData?.completed || 0}
               prefix={<CheckCircleOutlined />}
               valueStyle={{ color: '#52c41a' }}
             />
@@ -230,7 +237,7 @@ export const Dashboard: React.FC = () => {
           <Card>
             <Statistic
               title="执行失败"
-              value={0}
+              value={taskStatsData?.failed || 0}
               prefix={<CloseCircleOutlined />}
               valueStyle={{ color: '#ff4d4f' }}
             />
