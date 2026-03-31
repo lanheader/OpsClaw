@@ -10,7 +10,7 @@ AlertManager API 客户端
 
 import httpx
 from typing import Optional, Dict, Any, List
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from app.core.config import get_settings
 from app.utils.logger import get_logger
@@ -142,19 +142,19 @@ class AlertManagerClient:
             return {"success": False, "message": "AlertManager 未配置"}
 
         if not starts_at:
-            starts_at = datetime.utcnow().isoformat() + "Z"
+            starts_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
         if not ends_at:
             unit = duration[-1]
             value = int(duration[:-1])
             seconds = {"h": 3600, "m": 60, "d": 86400}.get(unit, 3600) * value
-            ends_at = (datetime.utcnow() + timedelta(seconds=seconds)).isoformat() + "Z"
+            ends_at = (datetime.now(timezone.utc) + timedelta(seconds=seconds)).isoformat().replace("+00:00", "Z")
 
         payload = {
             "matchers": matchers,
             "startsAt": starts_at,
             "endsAt": ends_at,
-            "createdAt": datetime.utcnow().isoformat() + "Z",
+            "createdAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "createdBy": created_by,
             "comment": comment,
         }
