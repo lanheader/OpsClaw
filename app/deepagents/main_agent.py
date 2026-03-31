@@ -27,12 +27,7 @@ from app.core.llm_factory import LLMFactory
 from app.core.checkpointer import get_checkpointer
 from app.prompts.main_agent import MAIN_AGENT_SYSTEM_PROMPT
 from app.tools.registry import get_tool_registry
-from app.tools.base import RiskLevel
 from app.utils.logger import get_logger
-from app.services.approval_config_service import ApprovalConfigService
-from app.models.database import SessionLocal
-from app.models.role import Role
-from app.models.user_role import UserRole
 from app.memory import get_langgraph_store
 
 logger = get_logger(__name__)
@@ -468,49 +463,6 @@ def get_thread_config(session_id: str) -> dict:
     return {"configurable": {"thread_id": session_id}}
 
 
-# ========== 增强主智能体配置 ==========
-
-MAIN_AGENT_ENHANCED_CONFIG = {
-    "enable_cot": True,
-    "enable_plan_evaluation": True,
-    "enable_reasoning_log": True,
-    "max_reasoning_depth": 5,
-    "plan_evaluation_threshold": 0.7,
-    "enable_reflection": True,
-}
-
-
-async def enhanced_main_agent_process(
-    user_query: str,
-    context: dict = None,
-    enable_cot: bool = True,
-    enable_plan_evaluation: bool = True
-) -> dict:
-    """
-    增强主智能体处理入口函数
-    """
-    from app.services.enhanced_main_agent_service import get_enhanced_main_agent_service
-
-    service = get_enhanced_main_agent_service()
-    result = await service.process_user_request(
-        user_query=user_query,
-        context=context or {},
-        enable_cot=enable_cot,
-        enable_plan_evaluation=enable_plan_evaluation
-    )
-
-    return {
-        "plan_id": result.plan_id,
-        "user_query": result.user_query,
-        "total_duration": result.total_duration,
-        "subtasks_completed": result.subtasks_completed,
-        "subtasks_failed": result.subtasks_failed,
-        "final_result": result.final_result,
-        "reasoning_summary": result.reasoning_summary,
-        "lessons_learned": result.lessons_learned
-    }
-
-
 __all__ = [
     "get_ops_agent",
     "get_thread_config",
@@ -518,6 +470,4 @@ __all__ = [
     "get_cached_base_agent",
     "invalidate_base_agent",
     "DynamicAgentWrapper",
-    "MAIN_AGENT_ENHANCED_CONFIG",
-    "enhanced_main_agent_process",
 ]
