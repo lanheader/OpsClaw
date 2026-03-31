@@ -23,7 +23,13 @@ _request_context: ContextVar[Dict[str, Any]] = ContextVar('request_context', def
 USE_LOGURU = os.getenv("USE_LOGURU", "true").lower() == "true"
 
 
-def set_request_context(session_id: str, request_id: str = None, user_id: str = None, channel: str = None) -> str:
+def set_request_context(
+    session_id: str,
+    request_id: str = None,
+    user_id: str = None,
+    channel: str = None,
+    user_permissions: list = None,
+) -> str:
     """
     设置当前请求的上下文信息
 
@@ -32,6 +38,7 @@ def set_request_context(session_id: str, request_id: str = None, user_id: str = 
         request_id: 请求 ID（可选，不传则自动生成）
         user_id: 用户 ID（可选）
         channel: 渠道（web/feishu，可选）
+        user_permissions: 用户权限列表（可选，供 middleware 使用）
 
     Returns:
         生成的 request_id
@@ -42,6 +49,7 @@ def set_request_context(session_id: str, request_id: str = None, user_id: str = 
         'request_id': request_id,
         'user_id': user_id,
         'channel': channel,
+        'user_permissions': user_permissions or [],
     }
     _request_context.set(ctx)
     return request_id

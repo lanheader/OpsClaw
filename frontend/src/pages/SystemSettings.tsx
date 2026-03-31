@@ -12,11 +12,10 @@ import {
   Spin,
   Typography,
   Divider,
-  Tag,
 } from 'antd';
-import { SaveOutlined, ReloadOutlined, ApiOutlined, CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
+import { SaveOutlined, ReloadOutlined } from '@ant-design/icons';
 import { settingsApi, GroupedSettings, SystemSetting } from '../api/settings';
-import { integrationsAPI, IntegrationTestResponse } from '../api/integrations';
+import KubernetesConfigForm from '../components/KubernetesConfigForm';
 
 const { Text } = Typography;
 const { TextArea } = Input;
@@ -28,26 +27,34 @@ const SystemSettings: React.FC = () => {
   const [settings, setSettings] = useState<GroupedSettings>({});
   const [activeCategory, setActiveCategory] = useState<string>('');
 
-  // 连接测试状态
-  const [testResults, setTestResults] = useState<Record<string, IntegrationTestResponse>>({});
-  const [testLoading, setTestLoading] = useState<Record<string, boolean>>({});
-
   // 加载系统设置
   const loadSettings = async () => {
     setLoading(true);
     try {
       const data = await settingsApi.getAll();
-      setSettings(data);
+      // 过滤掉不需要在页面显示的分类
+      // - integration: K8s/Prometheus/Loki/飞书使用专用组件或配置文件
+      // - llm: 不需要
+      // - feishu: 移动到配置文件中
+      // - testing: 不需要
+      const excludedCategories = ['integration', 'kubernetes', 'llm', 'feishu', 'testing'];
+      const filteredData: GroupedSettings = {};
+      Object.entries(data).forEach(([category, categorySettings]) => {
+        if (!excludedCategories.includes(category)) {
+          filteredData[category] = categorySettings;
+        }
+      });
+      setSettings(filteredData);
 
       // 设置默认激活的分类
-      const categories = Object.keys(data);
+      const categories = Object.keys(filteredData);
       if (categories.length > 0 && !activeCategory) {
         setActiveCategory(categories[0]);
       }
 
       // 填充表单
       const formValues: Record<string, any> = {};
-      Object.values(data).flat().forEach((setting: SystemSetting) => {
+      Object.values(filteredData).flat().forEach((setting: SystemSetting) => {
         if (setting.value_type === 'boolean') {
           formValues[setting.key] = setting.value === 'True' || setting.value === 'true';
         } else {
@@ -106,96 +113,9 @@ const SystemSettings: React.FC = () => {
     message.info('已重置为当前保存的值');
   };
 
-  // 测试连接
-  const testConnection = async (service: 'kubernetes' | 'prometheus' | 'loki' | 'feishu') => {
-    setTestLoading({ ...testLoading, [service]: true });
-    try {
-      let result: IntegrationTestResponse;
-
-      switch (service) {
-        case 'kubernetes':
-          result = await integrationsAPI.testKubernetes();
-          break;
-        case 'prometheus':
-          result = await integrationsAPI.testPrometheus();
-          break;
-        case 'loki':
-          result = await integrationsAPI.testLoki();
-          break;
-        case 'feishu':
-          result = await integrationsAPI.testFeishu();
-          break;
-      }
-
-      setTestResults({ ...testResults, [service]: result });
-
-      if (result.success) {
-        message.success(`${service} 连接测试成功`);
-      } else {
-        message.error(`${service} 连接测试失败: ${result.error}`);
-      }
-    } catch (error: any) {
-      console.error(`${service} test error:`, error);
-      message.error(`${service} 连接测试失败: ${error.message}`);
-    } finally {
-      setTestLoading({ ...testLoading, [service]: false });
-    }
-  };
-
-  // 渲染连接测试按钮和结果
-  const renderConnectionTest = (service: 'kubernetes' | 'prometheus' | 'loki' | 'feishu') => {
-    const result = testResults[service];
-    const loading = testLoading[service];
-
-    return (
-      <Space direction="vertical" style={{ width: '100%', marginTop: 8 }}>
-        <Button
-          size="small"
-          icon={<ApiOutlined />}
-          onClick={() => testConnection(service)}
-          loading={loading}
-        >
-          测试连接
-        </Button>
-
-        {result && (
-          <div>
-            {result.success ? (
-              <Tag icon={<CheckCircleOutlined />} color="success">
-                连接成功 {result.response_time_ms && `(${result.response_time_ms.toFixed(0)}ms)`}
-              </Tag>
-            ) : (
-              <Tag icon={<CloseCircleOutlined />} color="error">
-                连接失败: {result.error}
-              </Tag>
-            )}
-            {result.version && (
-              <div style={{ marginTop: 4, fontSize: 12, color: '#666' }}>
-                版本: {result.version}
-              </div>
-            )}
-          </div>
-        )}
-      </Space>
-    );
-  };
-
   // 渲染设置项
   const renderSettingField = (setting: SystemSetting) => {
-    const { key, name, description, value_type, is_sensitive, is_readonly, category } = setting;
-
-    // 判断是否需要显示连接测试按钮
-    const needsConnectionTest =
-      (category === 'kubernetes' && key === 'k8s.kubeconfig') ||
-      (category === 'prometheus' && key === 'prometheus.url') ||
-      (category === 'loki' && key === 'loki.url') ||
-      (category === 'feishu' && key === 'feishu.reject_message');
-
-    const connectionTestService =
-      category === 'kubernetes' ? 'kubernetes' :
-      category === 'prometheus' ? 'prometheus' :
-      category === 'loki' ? 'loki' :
-      category === 'feishu' ? 'feishu' : null;
+    const { key, name, description, value_type, is_sensitive, is_readonly } = setting;
 
     if (value_type === 'boolean') {
       return (
@@ -246,31 +166,25 @@ const SystemSettings: React.FC = () => {
     }
 
     return (
-      <div key={key}>
-        <Form.Item
-          name={key}
-          label={name}
-          tooltip={description}
-        >
-          <Input
-            placeholder={`请输入${name}`}
-            disabled={is_readonly}
-          />
-        </Form.Item>
-        {needsConnectionTest && connectionTestService && renderConnectionTest(connectionTestService)}
-      </div>
+      <Form.Item
+        key={key}
+        name={key}
+        label={name}
+        tooltip={description}
+      >
+        <Input
+          placeholder={`请输入${name}`}
+          disabled={is_readonly}
+        />
+      </Form.Item>
     );
   };
 
   // 分类名称映射
   const categoryNames: Record<string, string> = {
-    llm: 'LLM 参数',
-    feishu: '飞书配置',
     features: '功能开关',
-    kubernetes: 'Kubernetes',
     prometheus: 'Prometheus',
     loki: 'Loki',
-    testing: '测试配置',
   };
 
   if (loading) {
@@ -280,6 +194,28 @@ const SystemSettings: React.FC = () => {
       </div>
     );
   }
+
+  // 构建 Tabs items
+  const tabItems = [
+    // Kubernetes 专用 Tab
+    {
+      key: 'kubernetes',
+      label: 'Kubernetes',
+      children: <KubernetesConfigForm />,
+    },
+    // 其他分类的 Tabs
+    ...Object.entries(settings).map(([category, categorySettings]) => ({
+      key: category,
+      label: categoryNames[category] || category,
+      children: (
+        <div style={{ maxWidth: 800 }}>
+          {categorySettings.map((setting: SystemSetting) =>
+            renderSettingField(setting)
+          )}
+        </div>
+      ),
+    })),
+  ];
 
   return (
     <Space direction="vertical" size="large" style={{ width: '100%' }}>
@@ -320,17 +256,7 @@ const SystemSettings: React.FC = () => {
             activeKey={activeCategory}
             onChange={setActiveCategory}
             type="card"
-            items={Object.entries(settings).map(([category, categorySettings]) => ({
-              key: category,
-              label: categoryNames[category] || category,
-              children: (
-                <div style={{ maxWidth: 800 }}>
-                  {categorySettings.map((setting: SystemSetting) =>
-                    renderSettingField(setting)
-                  )}
-                </div>
-              ),
-            }))}
+            items={tabItems}
           />
         </Form>
       </Card>

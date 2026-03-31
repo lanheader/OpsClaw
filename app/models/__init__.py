@@ -13,6 +13,8 @@ from app.models.chat_session import ChatSession
 from app.models.chat_message import ChatMessage, MessageRole
 from app.models.approval_config import ApprovalConfig
 from app.models.system_setting import SystemSetting
+from app.models.agent_prompt import AgentPrompt, PromptVersion
+from app.models.scheduled_task import ScheduledTask, TaskExecutionLog, TaskStatus, TaskType
 
 __all__ = [
     "Base",
@@ -29,4 +31,10 @@ __all__ = [
     "MessageRole",
     "ApprovalConfig",
     "SystemSetting",
+    "AgentPrompt",
+    "PromptVersion",
+    "ScheduledTask",
+    "TaskExecutionLog",
+    "TaskStatus",
+    "TaskType",
 ]

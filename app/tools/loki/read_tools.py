@@ -5,8 +5,10 @@ Loki 工具（新架构示例）
 支持 SDK → CLI 降级机制。
 """
 
+from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
 
+from app.integrations.loki.client import get_loki_client
 from app.tools.base import (
     BaseOpTool,
     register_tool,
@@ -103,21 +105,79 @@ class QueryLogsTool(BaseOpTool):
         start: Optional[str],
         end: Optional[str],
     ) -> Dict[str, Any]:
-        """使用 SDK 执行"""
-        # TODO: 实现真实的 Loki SDK 调用
-        # 这里提供简化的实现
+        """使用 SDK 执行 Loki 查询"""
+        try:
+            client = get_loki_client()
 
-        return tool_success_response(
-            {
-                "query": query,
-                "logs": [],  # 实际应从 SDK 获取
-                "limit": limit,
-                "start": start,
-                "end": end,
-            },
-            "query_logs",
-            source="loki-sdk"
-        )
+            # 解析时间参数
+            end_time = datetime.now()
+            start_time = end_time - timedelta(hours=1)  # 默认查询最近 1 小时
+
+            if end:
+                # 支持相对时间如 "-1h", "-30m" 或绝对时间
+                end_time = self._parse_time(end, end_time)
+            if start:
+                start_time = self._parse_time(start, end_time)
+
+            # 调用 Loki 客户端
+            result = await client.query_range(
+                query=query,
+                start=start_time,
+                end=end_time,
+                limit=limit,
+            )
+
+            if result.get("status") == "error":
+                raise Exception(result.get("error", "Loki query failed"))
+
+            # 提取日志行
+            logs = client._extract_log_lines(result)
+
+            return tool_success_response(
+                {
+                    "query": query,
+                    "logs": logs,
+                    "log_count": len(logs),
+                    "limit": limit,
+                    "start": start_time.isoformat(),
+                    "end": end_time.isoformat(),
+                },
+                "query_logs",
+                source="loki-sdk"
+            )
+
+        except Exception as e:
+            logger.error(f"Loki SDK 查询失败: {e}")
+            raise
+
+    def _parse_time(self, time_str: str, reference: datetime) -> datetime:
+        """解析时间字符串"""
+        if time_str == "now":
+            return datetime.now()
+
+        # 相对时间格式: -1h, -30m, -2d
+        if time_str.startswith("-"):
+            try:
+                value = int(time_str[1:-1])
+                unit = time_str[-1]
+                if unit == "h":
+                    return reference - timedelta(hours=value)
+                elif unit == "m":
+                    return reference - timedelta(minutes=value)
+                elif unit == "d":
+                    return reference - timedelta(days=value)
+            except (ValueError, IndexError):
+                pass
+
+        # ISO 格式时间
+        try:
+            return datetime.fromisoformat(time_str.replace("Z", "+00:00"))
+        except ValueError:
+            pass
+
+        # 无法解析，返回默认值
+        logger.warning(f"无法解析时间字符串: {time_str}, 使用默认值")
+        return reference - timedelta(hours=1)
 
 
 @register_tool(
@@ -187,18 +247,40 @@ class QueryErrorLogsTool(BaseOpTool):
         query: str,
         limit: int,
     ) -> Dict[str, Any]:
-        """使用 SDK 执行"""
-        # TODO: 实现真实的 Loki SDK 调用
+        """使用 SDK 执行错误日志查询"""
+        try:
+            client = get_loki_client()
+            end_time = datetime.now()
+            start_time = end_time - timedelta(hours=1)  # 默认查询最近 1 小时
 
-        return tool_success_response(
-            {
-                "query": query,
-                "logs": [],  # 实际应从 SDK 获取
-                "limit": limit,
-            },
-            "query_error_logs",
-            source="loki-sdk"
-        )
+            # 调用 Loki 客户端
+            result = await client.query_range(
+                query=query,
+                start=start_time,
+                end=end_time,
+                limit=limit,
+            )
+
+            if result.get("status") == "error":
+                raise Exception(result.get("error", "Loki query failed"))
+
+            # 提取日志行
+            logs = client._extract_log_lines(result)
+
+            return tool_success_response(
+                {
+                    "query": query,
+                    "logs": logs,
+                    "log_count": len(logs),
+                    "limit": limit,
+                },
+                "query_error_logs",
+                source="loki-sdk"
+            )
+
+        except Exception as e:
+            logger.error(f"Loki SDK 查询失败: {e}")
+            raise
 
 
 @register_tool(
@@ -271,19 +353,41 @@ class SearchLogsTool(BaseOpTool):
         limit: int,
         pattern: str,
     ) -> Dict[str, Any]:
-        """使用 SDK 执行"""
-        # TODO: 实现真实的 Loki SDK 调用
+        """使用 SDK 执行日志搜索"""
+        try:
+            client = get_loki_client()
+            end_time = datetime.now()
+            start_time = end_time - timedelta(hours=1)  # 默认查询最近 1 小时
 
-        return tool_success_response(
-            {
-                "query": query,
-                "pattern": pattern,
-                "logs": [],  # 实际应从 SDK 获取
-                "limit": limit,
-            },
-            "search_logs",
-            source="loki-sdk"
-        )
+            # 调用 Loki 客户端
+            result = await client.query_range(
+                query=query,
+                start=start_time,
+                end=end_time,
+                limit=limit,
+            )
+
+            if result.get("status") == "error":
+                raise Exception(result.get("error", "Loki query failed"))
+
+            # 提取日志行
+            logs = client._extract_log_lines(result)
+
+            return tool_success_response(
+                {
+                    "query": query,
+                    "pattern": pattern,
+                    "logs": logs,
+                    "log_count": len(logs),
+                    "limit": limit,
+                },
+                "search_logs",
+                source="loki-sdk"
+            )
+
+        except Exception as e:
+            logger.error(f"Loki SDK 搜索失败: {e}")
+            raise
 
 
 __all__ = [

@@ -26,7 +26,7 @@ class SQLiteMemoryStore:
     - session_summaries: 会话摘要
     """
 
-    def __init__(self, db_path: str = "./data/memory.db"):
+    def __init__(self, db_path: str = "./workspace/data/memory.db"):
         os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
         self.db_path = db_path
         self._init_tables()

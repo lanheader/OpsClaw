@@ -12,6 +12,7 @@ import asyncio
 import logging
 import os
 import re
+import shlex
 from typing import Dict, Any, Optional, List
 from sqlalchemy.orm import Session
 
@@ -101,12 +102,11 @@ class CommandExecutor:
         logger.info(f"Executing command: {command}")
 
         try:
-            # 执行命令
-            process = await asyncio.create_subprocess_shell(
-                command,
+            # 执行命令（使用 shlex.split 避免 shell=True 注入风险）
+            process = await asyncio.create_subprocess_exec(
+                *shlex.split(command),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                shell=True,
                 env=command_env
             )
 

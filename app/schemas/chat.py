@@ -2,7 +2,7 @@
 """聊天相关的 Pydantic schemas"""
 
 from pydantic import BaseModel, Field, ConfigDict
-from typing import Optional, List
+from typing import Optional, List, Any
 from datetime import datetime
 
 
@@ -44,6 +44,10 @@ class ChatSessionResponse(BaseModel):
     updated_at: datetime
     message_count: int = 0
     last_message: Optional[str] = None
+
+    # 会话状态（用于前端恢复 UI 状态）
+    state: str = "normal"  # normal, awaiting_approval, processing
+    pending_approval_data: Optional[dict] = None  # 待审批数据
 
 
 class ChatSessionListResponse(BaseModel):

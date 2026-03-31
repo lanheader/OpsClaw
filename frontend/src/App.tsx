@@ -5,23 +5,19 @@
 import { Layout, Menu, Typography, Button, Dropdown, Space } from 'antd';
 import {
   DashboardOutlined,
-  RocketOutlined,
   HistoryOutlined,
   SettingOutlined,
-  BugOutlined,
   UserOutlined,
   LogoutOutlined,
   TeamOutlined,
   SafetyOutlined,
   MessageOutlined,
-  FileTextOutlined,
+  EditOutlined,
 } from '@ant-design/icons';
+import { ClockCircleOutlined } from '@ant-design/icons';
 import { BrowserRouter, Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Dashboard } from './pages/Dashboard';
-import { WorkflowExecute } from './pages/WorkflowExecute';
-import { WorkflowDetail } from './pages/WorkflowDetail';
-import { Diagnostics } from './pages/Diagnostics';
 import { Login } from './pages/Login';
 import { UserManagement } from './pages/UserManagement';
 import { RoleManagement } from './pages/RoleManagement';
@@ -29,6 +25,8 @@ import { ApprovalConfigManagement } from './pages/ApprovalConfigManagement';
 import SystemSettings from './pages/SystemSettings';
 import Chat from './pages/Chat';
 import Profile from './pages/Profile';
+import PromptManagement from './pages/PromptManagement';
+import ScheduledTasksPage from './pages/ScheduledTasks';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { PermissionProvider, usePermission } from './contexts/PermissionContext';
 import { PrivateRoute } from './components/PrivateRoute';
@@ -81,10 +79,10 @@ const AppLayout: React.FC = () => {
       icon: <DashboardOutlined />,
       label: <Link to="/">仪表盘</Link>,
     },
-    hasPermission('execute_workflow') && {
-      key: '/execute',
-      icon: <RocketOutlined />,
-      label: <Link to="/execute">执行工作流</Link>,
+    {
+      key: '/scheduled-tasks',
+      icon: <ClockCircleOutlined />,
+      label: <Link to="/scheduled-tasks">定时任务</Link>,
     },
     {
       key: '/chat',
@@ -95,11 +93,6 @@ const AppLayout: React.FC = () => {
       key: '/history',
       icon: <HistoryOutlined />,
       label: <Link to="/history">执行历史</Link>,
-    },
-    hasPermission('view_diagnostics') && {
-      key: '/diagnostics',
-      icon: <BugOutlined />,
-      label: <Link to="/diagnostics">API 诊断</Link>,
     },
     hasPermission('manage_users') && {
       key: '/users',
@@ -120,6 +113,11 @@ const AppLayout: React.FC = () => {
       key: '/settings',
       icon: <SettingOutlined />,
       label: <Link to="/settings">系统设置</Link>,
+    },
+    hasPermission('manage_roles') && {
+      key: '/prompts',
+      icon: <EditOutlined />,
+      label: <Link to="/prompts">提示词管理</Link>,
     },
   ].filter((item): item is { key: string; icon: JSX.Element; label: JSX.Element } => Boolean(item));
 
@@ -173,17 +171,16 @@ const AppLayout: React.FC = () => {
           }}>
             <Routes>
               <Route path="/" element={<Dashboard />} />
-              <Route path="/execute" element={<WorkflowExecute />} />
-              <Route path="/workflow/:taskId" element={<WorkflowDetail />} />
               <Route path="/chat" element={<Chat />} />
               <Route path="/chat/:sessionId" element={<Chat />} />
               <Route path="/history" element={<div>执行历史（待实现）</div>} />
-              <Route path="/diagnostics" element={<Diagnostics />} />
               <Route path="/users" element={<UserManagement />} />
               <Route path="/roles" element={<RoleManagement />} />
               <Route path="/approval-config" element={<ApprovalConfigManagement />} />
               <Route path="/profile" element={<Profile />} />
               <Route path="/settings" element={<SystemSettings />} />
+              <Route path="/prompts" element={<PromptManagement />} />
+              <Route path="/scheduled-tasks" element={<ScheduledTasksPage />} />
             </Routes>
           </div>
         </Content>

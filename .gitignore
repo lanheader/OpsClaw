@@ -7,6 +7,14 @@ dist/
 build/
 .eggs/
 
+# Test coverage
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.cover
+docs/*
+
 # Virtual env
 .venv/
 venv/
@@ -14,10 +22,23 @@ venv/
 # Environment
 .env
 
-# Data & logs
-data/
+# Logs
 *.log
-*.db
+
+# Workspace runtime data (keep structure, ignore contents)
+workspace/data/*
+!workspace/data/.gitkeep
+workspace/checkpoints/*
+!workspace/checkpoints/.gitkeep
+workspace/reports/*
+!workspace/reports/.gitkeep
+workspace/runbooks/*
+!workspace/runbooks/.gitkeep
+workspace/exports/*
+!workspace/exports/.gitkeep
+
+# Skills directory - keep structure but allow skills to be tracked
+# workspace/skills/ content can be committed if needed
 
 # IDE
 .vscode/

@@ -269,16 +269,52 @@ def synthesize_final_report_from_state(state: Dict[str, Any]) -> str:
     return ""
 
 
+def _safe_merge_state(state: Dict[str, Any], new_key: str, new_value: Any) -> Dict[str, Any]:
+    """
+    安全地合并状态，处理 LangGraph 内部对象（如 Overwrite）不可序列化的问题。
+
+    LangGraph 的 state 可能包含 Overwrite 等内部对象，直接使用 {**state, ...} 会失败。
+    这个函数先尝试直接合并，失败时则构建一个新的可序列化字典。
+    """
+    try:
+        return {**state, new_key: new_value}
+    except (TypeError, ValueError) as e:
+        logger.debug(f"直接合并状态失败（可能包含不可序列化对象）: {e}")
+        # 构建一个新的可序列化字典
+        safe_state: Dict[str, Any] = {}
+        for key, value in state.items():
+            try:
+                # 尝试复制值
+                if isinstance(value, (str, int, float, bool, type(None))):
+                    safe_state[key] = value
+                elif isinstance(value, (list, dict)):
+                    safe_state[key] = value
+                elif hasattr(value, '__dict__'):
+                    # 对于复杂对象，只保存字符串表示
+                    safe_state[key] = str(value)
+                else:
+                    safe_state[key] = value
+            except Exception:
+                safe_state[key] = f"<non-serializable: {type(value).__name__}>"
+
+        safe_state[new_key] = new_value
+        return safe_state
+
+
 def ensure_final_report_in_state(state: Dict[str, Any]) -> Dict[str, Any]:
     """在状态中补齐 final_report，已存在时保持原值。"""
+    # 如果 state 为空或不是字典，直接返回
+    if not state or not isinstance(state, dict):
+        return state
+
     synthesized_report = synthesize_final_report_from_state(state)
     if synthesized_report:
-        return {**state, "final_report": synthesized_report}
+        return _safe_merge_state(state, "final_report", synthesized_report)
 
     existing_report = _normalize_message_content(state.get("final_report"))
     if existing_report:
         if existing_report != state.get("final_report"):
-            state = {**state, "final_report": existing_report}
+            return _safe_merge_state(state, "final_report", existing_report)
         return state
 
     messages = state.get("messages", [])
@@ -286,7 +322,7 @@ def ensure_final_report_in_state(state: Dict[str, Any]) -> Dict[str, Any]:
     if not final_report:
         return state
 
-    return {**state, "final_report": final_report}
+    return _safe_merge_state(state, "final_report", final_report)
 
 
 def extract_json_from_llm_response(

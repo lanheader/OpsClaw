@@ -93,7 +93,6 @@ LOGGING_LEVELS = {
     "httpcore": "WARNING",
     "openai": "WARNING",
     "anthropic": "WARNING",
-    "chromadb": "INFO",
     "sqlalchemy": "WARNING",
     "alembic": "WARNING",
     # 抑制 LiteLLM 的 DEBUG 日志

@@ -7,7 +7,7 @@
 """
 
 from langchain_core.language_models import BaseChatModel
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_openai import ChatOpenAI
 from typing import Any, Dict, Optional, List, cast
 import logging
 import httpx
@@ -459,39 +459,6 @@ class LLMFactory:
         client = cast(Any, ChatOpenAI)(**openrouter_kwargs)
         return LLMFactory._annotate_llm_client(client, "openrouter", model_name)
 
-    @staticmethod
-    def create_embeddings():
-        """
-        创建 Embedding 模型客户端用于向量检索
-
-        返回：
-            支持异步嵌入的客户端
-
-        注意：
-            当前使用 OpenAI 的 text-embedding-3-small 模型
-            如果 OpenAI 不可用，将返回模拟的零向量生成器
-        """
-        settings = get_settings()
-
-        # 尝试使用 OpenAI Embeddings
-        try:
-            if settings.OPENAI_API_KEY:
-                logger.info("Creating OpenAI embeddings client")
-                return OpenAIEmbeddings(
-                    model="text-embedding-3-small",
-                    api_key=settings.OPENAI_API_KEY,
-                    openai_api_base=settings.OPENAI_BASE_URL
-                )
-        except Exception as e:
-            logger.warning(f"无法创建 OpenAI embeddings: {e}")
-
-        # 尝试使用其他 embedding 模型...
-        # TODO: 支持其他 embedding 提供商
-
-        # 返回模拟的 embedding 生成器（用于测试）
-        logger.warning("使用模拟 embedding 生成器（向量检索功能受限）")
-        return MockEmbeddings()
-
 
 # LLM 客户端单例
 _llm_instance: Optional[Any] = None
@@ -550,29 +517,9 @@ def reset_llm():
     LLMFactory._client_cache.clear()
 
 
-class MockEmbeddings:
-    """模拟 Embeddings - 用于测试和降级"""
-
-    def __init__(self, dimension: int = 1536):
-        self.dimension = dimension
-
-    async def aembed_query(self, text: str) -> List[float]:
-        """异步生成（模拟）向量"""
-        return [0.0] * self.dimension
-
-    def embed_documents(self, texts: List[str]) -> List[List[float]]:
-        """批量生成（模拟）向量"""
-        return [[0.0] * self.dimension for _ in texts]
-
-    def embed_query(self, text: str) -> List[float]:
-        """生成（模拟）向量"""
-        return [0.0] * self.dimension
-
-
-# 导出新的功能
+# 导出
 __all__ = [
     "LLMFactory",
     "reset_llm",
     "get_llm",
-    "MockEmbeddings",
 ]

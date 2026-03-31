@@ -209,7 +209,6 @@
 .chat-message {
   display: flex;
   margin-bottom: 16px;
-  animation: messageSlideIn 0.3s ease-out;
 }
 
 @keyframes messageSlideIn {

@@ -270,6 +270,50 @@ class BaseOpTool(ABC):
         """获取工具元数据"""
         return cls._metadata
 
+    # ==================== 日志工具方法 ====================
+
+    def _log_tool_start(self, tool_name: str, **kwargs) -> None:
+        """
+        记录工具开始执行的日志
+
+        Args:
+            tool_name: 工具名称
+            **kwargs: 工具参数
+        """
+        ctx = get_request_context()
+        session_id = ctx.get('session_id', 'no-sess')
+        params = {k: v for k, v in kwargs.items() if v is not None}
+        logger.info(f"🔧 [{session_id}] 执行工具: {tool_name} | 参数: {params}")
+
+    def _log_tool_success(self, tool_name: str, result_count: int = None) -> None:
+        """
+        记录工具执行成功的日志
+
+        Args:
+            tool_name: 工具名称
+            result_count: 返回结果数量（可选）
+        """
+        ctx = get_request_context()
+        session_id = ctx.get('session_id', 'no-sess')
+        if result_count is not None:
+            logger.info(f"✅ [{session_id}] 工具完成: {tool_name} | 返回 {result_count} 条记录")
+        else:
+            logger.info(f"✅ [{session_id}] 工具完成: {tool_name}")
+
+    def _log_tool_error(self, tool_name: str, error_msg: str) -> None:
+        """
+        记录工具执行失败的日志
+
+        Args:
+            tool_name: 工具名称
+            error_msg: 错误信息
+        """
+        ctx = get_request_context()
+        session_id = ctx.get('session_id', 'no-sess')
+        logger.error(f"❌ [{session_id}] 工具失败: {tool_name} | 错误: {error_msg}")
+
+    # ==================== 抽象方法 ====================
+
     @abstractmethod
     async def execute(self, **kwargs) -> Dict[str, Any]:
         """

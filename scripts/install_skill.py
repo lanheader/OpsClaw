@@ -19,7 +19,7 @@ import argparse
 
 # 项目根目录
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SKILLS_DIR = os.path.join(PROJECT_ROOT, "skills")
+SKILLS_DIR = os.path.join(PROJECT_ROOT, "workspace", "skills")
 
 
 def get_skill_dir(skill_name: str) -> str:

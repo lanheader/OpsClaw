@@ -4,11 +4,15 @@
 实现飞书特定的消息处理逻辑。
 """
 
+import base64
+import gzip
 import hashlib
 import json
 from typing import Dict, Any, Optional, List
-from app.utils.logger import get_logger
 
+from Crypto.Cipher import AES
+
+from app.utils.logger import get_logger
 from app.integrations.messaging.base_channel import (
     BaseChannelAdapter,
     IncomingMessage,
@@ -17,6 +21,8 @@ from app.integrations.messaging.base_channel import (
     MessageAction,
 )
 from app.integrations.feishu.client import get_feishu_client
+from app.integrations.feishu.message_formatter import clean_xml_tags
+from app.integrations.feishu.message import build_formatted_reply_card
 
 logger = get_logger(__name__)
 
@@ -96,10 +102,6 @@ class FeishuChannelAdapter(BaseChannelAdapter):
         Returns:
             解密后的消息字典
         """
-        import base64
-        import gzip
-        from Crypto.Cipher import AES
-
         encrypt_key = self.config.get("encrypt_key", "")
 
         try:
@@ -277,9 +279,9 @@ class FeishuChannelAdapter(BaseChannelAdapter):
         """
         if message_type == MessageType.CARD:
             # 格式化为卡片
-            from app.integrations.feishu.message_formatter import format_tool_output
-            formatted = await format_tool_output(content)
-            return {"card": formatted.get("card", {})}
+            cleaned = clean_xml_tags(content)
+            card = build_formatted_reply_card(content=cleaned)
+            return {"card": card.get("card", {})}
         else:
             # 文本消息
             return {"text": content}

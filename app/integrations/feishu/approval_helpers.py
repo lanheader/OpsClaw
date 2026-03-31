@@ -17,11 +17,12 @@ from langgraph.types import Command
 
 from app.utils.logger import get_logger
 from app.deepagents.factory import create_agent_for_session
+from app.deepagents.main_agent import get_thread_config
 from app.services.session_state_manager import SessionStateManager
 from app.integrations.messaging.base_channel import OutgoingMessage, MessageType
 from app.integrations.feishu.message import build_formatted_reply_card
 from app.integrations.feishu.message_formatter import clean_xml_tags
-from app.utils.llm_helper import ensure_final_report_in_state
+from app.utils.llm_helper import ensure_final_report_in_state, extract_final_report_from_messages
 
 logger = get_logger(__name__)
 
@@ -97,7 +98,6 @@ def _extract_response_from_state(state: Dict[str, Any]) -> str:
     # 如果上述字段都为空，尝试从 messages 中提取
     messages = state.get("messages", [])
     if messages:
-        from app.utils.llm_helper import extract_final_report_from_messages
         return extract_final_report_from_messages(messages)
 
     return ""
@@ -141,7 +141,6 @@ async def handle_approval_response(
         )
 
         # 获取线程配置
-        from app.deepagents.main_agent import get_thread_config
         config = get_thread_config(session_id)
 
         # 根据决策构建恢复命令（使用正确的 HITLResponse 格式）

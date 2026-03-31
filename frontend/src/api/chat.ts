@@ -8,6 +8,19 @@ import { getToken } from '@/utils/auth';
 // 使用与 client.ts 相同的配置
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 
+export interface ApprovalCommand {
+  type: string;
+  action: string;
+  params?: any;
+  reason?: string;
+}
+
+export interface PendingApprovalData {
+  message?: string;
+  commands?: ApprovalCommand[];
+  [key: string]: any;
+}
+
 export interface ChatSession {
   session_id: string;
   title: string | null;
@@ -18,6 +31,9 @@ export interface ChatSession {
   updated_at: string;
   message_count: number;
   last_message?: string;
+  // 会话状态
+  state: 'normal' | 'awaiting_approval' | 'processing';
+  pending_approval_data?: PendingApprovalData | null;
 }
 
 export interface ChatMessage {

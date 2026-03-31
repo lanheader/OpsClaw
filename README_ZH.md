@@ -20,20 +20,19 @@
 
 Ops Agent 是一个基于 **DeepAgents 框架**的智能运维自动化平台，通过主智能体和多个专业化子智能体协同工作，实现从监控、诊断到自愈的全流程自动化。
 
-**当前版本**: v3.3 | **子智能体**: 6 个 | **中间件**: 5 个 | **K8s 工具**: 19 个
+**当前版本**: v3.5 | **子智能体**: 3 个 | **中间件**: 3 个 | **K8s 工具**: 28 个
 
 ### ✨ 核心特性
 
 #### 🤖 DeepAgents 架构
-- **主智能体 + 6 个专业子智能体**协同工作
+- **主智能体 + 3 个专业子智能体**协同工作
 - **智能任务规划**：使用 `write_todos` 自动分解复杂任务
 - **子智能体委派**：通过 `task()` 工具委派专业任务
 - **智能路由**：根据意图和上下文自动决策工作流
 
 #### 🛡️ 工具与集成
 - **工具降级机制**：SDK 优先，自动降级到 CLI（kubectl/prometheus/loki）
-- **19 个 K8s 读工具**：覆盖 Pod、Deployment、Service、ConfigMap 等
-- **3 个 K8s 写工具**：重启、扩容、更新镜像
+- **28 个 K8s 工具**：19 读 + 3 写 + 6 删除
 - **Prometheus/Loki 集成**：指标查询和日志检索
 
 #### 📨 多渠道消息架构（v3.3 新增）
@@ -41,18 +40,16 @@ Ops Agent 是一个基于 **DeepAgents 框架**的智能运维自动化平台，
 - **飞书长连接模式**：实时消息推送，支持卡片交互
 - **可扩展设计**：轻松接入 Slack、钉钉等新渠道
 - **AgentInvoker 链路增强**：
-  - ⏰ 超时保护（300 秒）
+  - ⏰ 超时保护（600 秒）
   - 🧠 记忆注入（历史对话和知识库）
   - 🔄 自我验证重试（质量检查 + 自动重试）
   - 💾 空回复兜底（确保用户收到友好提示）
   - 📚 自动学习（对话写入长期记忆）
 
-#### 🔧 中间件层（5 个）
+#### 🔧 中间件层（3 个）
 - **ErrorFilteringMiddleware**：过滤工具调用错误，防止 LLM 响应错误消息
-- **ContextCompressionMiddleware**：压缩早期历史消息为摘要（≥30 条触发）
 - **MessageTrimmingMiddleware**：智能截断消息（保留最近 40 条）
 - **LoggingMiddleware**：记录模型调用、工具执行和耗时
-- **MemoryEnhancedAgent**：从 SQLite FTS5 检索相关历史知识，增强上下文
 
 #### 🧠 记忆系统（v3.5 SQLite FTS5）
 - **零外部依赖**：无需 embedding 模型，可部署到任何服务器
@@ -206,38 +203,41 @@ exit
 │  │  • task(subagent, task): 委派任务给子智能体             │    │
 │  │  • request_approval(action): 请求用户批准               │    │
 │  │  • 智能路由: 根据意图和上下文决策工作流                 │    │
-│  │  • 37 个工具: K8s(22) + Prometheus(3) + Loki(3) + 其他  │    │
+│  │  • 工具: K8s(28) + Prometheus(3) + Loki(3) + 其他       │    │
 │  └────────────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
-│                中间件层 (Middleware Layer) - 5 个中间件           │
+│              中间件层 (Middleware Layer) - 3 个中间件            │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐         │
-│  │  Error       │  │  Context     │  │  Message     │         │
-│  │  Filtering   │  │  Compression │  │  Trimming    │         │
-│  │  (错误过滤)  │  │  (上下文压缩)│  │  (消息截断)  │         │
+│  │  Error       │  │  Message     │  │  Logging     │         │
+│  │  Filtering   │  │  Trimming    │  │              │         │
+│  │  (错误过滤)  │  │  (消息截断)  │  │  (日志记录)  │         │
 │  └──────────────┘  └──────────────┘  └──────────────┘         │
-│  ┌──────────────┐  ┌──────────────┐                            │
-│  │  Logging     │  │  Memory      │                            │
-│  │  (日志记录)  │  │  Enhanced    │                            │
-│  └──────────────┘  └──────────────┘                            │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
-│              子智能体层 (Subagents Layer) - 6 个                 │
+│              子智能体层 (Subagents Layer) - 3 个                 │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐         │
-│  │intent-agent  │  │  data-agent  │  │analyze-agent │         │
-│  │  (意图识别)  │  │  (数据采集)  │  │  (分析决策)  │         │
+│  │  data-agent  │  │analyze-agent │  │execute-agent │         │
+│  │  (数据采集)  │  │  (分析决策)  │  │  (执行操作)  │         │
 │  └──────────────┘  └──────────────┘  └──────────────┘         │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐         │
-│  │execute-agent │  │ report-agent │  │ format-agent │         │
-│  │  (执行操作)  │  │  (报告生成)  │  │  (格式化)    │         │
-│  └──────────────┘  └──────────────┘  └──────────────┘         │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│              记忆系统 (SQLite FTS5)                              │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │  SQLiteMemoryStore + SQLiteFTSStore                       │  │
+│  │  • 零外部依赖（无需 embedding 模型）                       │  │
+│  │  • FTS5 全文搜索 + BM25 排序                              │  │
+│  │  • LLM 查询扩展提升召回率                                 │  │
+│  │  • LangGraph BaseStore 集成                               │  │
+│  └──────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
 │                    工具层 (Tools Layer)                          │
-│  K8s Tools (22) / Prometheus Tools (3) / Loki Tools (3)         │
+│  K8s Tools (28) / Prometheus Tools (3) / Loki Tools (3)         │
 │  Command Executor / Alert Tools / Chat History Tools            │
 │  (所有工具支持 SDK 优先，自动降级到 CLI)                         │
 └─────────────────────────────────────────────────────────────────┘
@@ -254,7 +254,7 @@ MessageProcessor (统一消息处理编排器)
   3. CommandHandler: 处理特殊命令（/new, /end, /help）
   4. ApprovalHandler: 检查审批状态
   5. AgentInvoker: 调用 Agent 处理（增强版）
-     ├── 超时保护（300 秒）
+     ├── 超时保护（600 秒）
      ├── 记忆注入（历史对话 + 知识库）
      ├── 自我验证重试（质量检查 + 自动重试）
      ├── 空回复兜底（确保友好提示）
@@ -265,39 +265,30 @@ MessageProcessor (统一消息处理编排器)
 
 ## 🤖 子智能体说明
 
-### 1. intent-agent（意图识别子智能体）
-**文件**：`app/deepagents/subagents/__init__.py`
-**职责**：识别用户意图，分类为查询、诊断、执行等类型
-**输出**：intent_type, confidence, suggested_workflow
-
-### 2. data-agent（数据采集子智能体）
+### 1. data-agent（数据采集子智能体）
 **文件**：`app/deepagents/subagents/data_agent.py`
 **职责**：执行数据采集命令，调用 K8s/Prometheus/Loki 工具
 **工具**：
 - k8s_tools - K8s 资源查询（SDK → CLI 降级）
   - 19 个读工具：get_pods, get_pod, get_pod_logs, get_pod_events, get_deployments, get_services, get_nodes, get_namespaces, get_events, get_config_maps, get_secrets, get_ingress, get_daemon_sets, get_stateful_sets, get_p_vs, get_p_v_cs, get_resource_quotas 等
   - 3 个写工具：restart_deployment, scale_deployment, update_deployment_image
+  - 6 个删除工具：delete_pod, delete_deployment, delete_service 等
 - prometheus_tools - 指标查询（SDK → CLI 降级）
 - loki_tools - 日志查询（SDK → CLI 降级）
 
-### 3. analyze-agent（分析决策子智能体）
+### 2. analyze-agent（分析决策子智能体）
 **文件**：`app/deepagents/subagents/analyze_agent.py`
 **职责**：分析采集的数据，诊断问题根因，规划修复方案
+**工具**：无（纯推理）
 **输出**：
 - `root_cause`: 根本原因
 - `severity`: 严重程度
 - `remediation_plan`: 修复方案
 
-### 4. execute-agent（执行操作子智能体）
+### 3. execute-agent（执行操作子智能体）
 **文件**：`app/deepagents/subagents/execute_agent.py`
 **职责**：执行修复命令，监控执行结果
 **工具**：command_executor_tools, k8s_tools
-
-### 5. report-agent（报告生成子智能体）
-**职责**：生成结构化报告，包含诊断结果和建议
-
-### 6. format-agent（格式化子智能体）
-**职责**：格式化输出，适配不同渠道（飞书卡片、Web UI、纯文本）
 
 ---
 
@@ -312,16 +303,7 @@ MessageProcessor (统一消息处理编排器)
 - `"Tool execution failed"`
 - `"tool not found"`
 
-### 2. ContextCompressionMiddleware（上下文压缩中间件）
-**文件**：`app/middleware/context_compression_middleware.py`
-**职责**：压缩早期历史消息为摘要，保留最近完整消息
-**触发条件**：消息数 >= 30 条时触发
-**策略**：
-- 保留最近 20 条完整消息
-- 对更早的消息生成压缩摘要
-- 摘要包含：用户需求、关键结论
-
-### 3. MessageTrimmingMiddleware（消息截断中间件）
+### 2. MessageTrimmingMiddleware（消息截断中间件）
 **文件**：`app/middleware/message_trimming_middleware.py`
 **职责**：智能截断消息，避免 token 数量暴增
 **配置**：
@@ -329,21 +311,13 @@ MessageProcessor (统一消息处理编排器)
 - `MIN_MESSAGES_TO_KEEP = 10` - 最少保留 10 条消息
 **策略**：优先保留完整的对话轮次
 
-### 4. LoggingMiddleware（日志中间件）
+### 3. LoggingMiddleware（日志中间件）
 **文件**：`app/middleware/logging_middleware.py`
 **职责**：记录模型调用、工具执行和耗时
 **功能**：
 - 记录 LLM 调用开始/结束
 - 记录工具调用参数和结果
 - 支持请求追踪（session_id, request_id）
-
-### 5. MemoryEnhancedAgent（记忆增强中间件）
-**文件**：`app/middleware/memory_middleware.py`
-**职责**：为 Agent 注入长期记忆上下文，增强跨会话知识检索
-**功能**：
-- 从 SQLite FTS5 检索相关历史知识
-- 将记忆上下文注入到系统提示词
-- 支持自动学习（将新对话写入记忆）
 
 ---
 
@@ -621,17 +595,13 @@ FEISHU_LONG_CONNECTION_ENABLED=true  # 启用长连接模式
 # 消息截断配置
 MAX_MESSAGES_TO_KEEP=40  # 保留最近 40 条消息
 MIN_MESSAGES_TO_KEEP=10  # 最少保留 10 条消息
-
-# 上下文压缩配置
-COMPRESSION_THRESHOLD=30  # 超过 30 条消息触发压缩
-MAX_FULL_MESSAGES=20      # 保留最近 20 条完整消息
 ```
 
 #### AgentInvoker 配置
 
 ```bash
 # 超时配置
-AGENT_TIMEOUT=300  # 5 分钟超时
+AGENT_TIMEOUT=600  # 10 分钟超时
 
 # 重试配置
 MAX_RETRY=1  # 最多重试 1 次
@@ -647,24 +617,22 @@ MAX_RETRY=1  # 最多重试 1 次
 ops-agent-langgraph/
 ├── app/                         # 应用主目录
 │   ├── main.py                  # FastAPI 应用入口
-│   ├── deepagents/              # DeepAgents 主智能体和子智能体
+│   ├── deepagents/              # DeepAgents 主智能体和子智能体（3 个）
 │   │   ├── main_agent.py        # 主智能体
-│   │   ├── factory.py           # Agent 工厂（FinalReportEnrichedAgent）
+│   │   ├── factory.py           # Agent 工厂
 │   │   └── subagents/           # 子智能体
 │   │       ├── data_agent.py    # 数据采集
 │   │       ├── analyze_agent.py # 分析决策
 │   │       └── execute_agent.py # 执行操作
-│   ├── middleware/              # 中间件层
+│   ├── middleware/              # 中间件层（3 个）
 │   │   ├── error_filtering_middleware.py  # 错误消息过滤
-│   │   ├── context_compression_middleware.py  # 上下文压缩
-│   │   ├── message_trimming_middleware.py     # 消息截断
-│   │   ├── logging_middleware.py              # 日志记录
-│   │   └── memory_middleware.py               # 记忆增强
-│   ├── tools/                   # Agent 工具集
+│   │   ├── message_trimming_middleware.py # 消息截断
+│   │   └── logging_middleware.py          # 日志记录
+│   ├── tools/                   # Agent 工具集（28 个 K8s 工具）
 │   │   ├── k8s/
 │   │   │   ├── read_tools.py    # K8s 读工具（19 个）
 │   │   │   ├── write_tools.py   # K8s 写工具（3 个）
-│   │   │   └── delete_tools.py  # K8s 删除工具
+│   │   │   └── delete_tools.py  # K8s 删除工具（6 个）
 │   │   ├── prometheus/
 │   │   │   └── read_tools.py    # Prometheus 查询工具
 │   │   ├── loki/
@@ -837,7 +805,7 @@ uv run python scripts/init_auth_db.py
 
 <div align="center">
 
-**最后更新**: 2026-03-27 | **版本**: v3.3
+**最后更新**: 2026-03-30 | **版本**: v3.5
 
 Made with ❤️ by Ops Team
 

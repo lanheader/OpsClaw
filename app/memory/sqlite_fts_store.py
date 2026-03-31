@@ -105,7 +105,7 @@ class SQLiteFTSStore(BaseStore):
         """
         if db_path is None:
             settings = get_settings()
-            db_path = getattr(settings, "MEMORY_DB_PATH", "./data/memory_fts.db")
+            db_path = getattr(settings, "MEMORY_DB_PATH", "./workspace/data/memory_fts.db")
 
         # 确保目录存在
         os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)

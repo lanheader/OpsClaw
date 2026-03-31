@@ -2,15 +2,14 @@
 """Kubernetes 客户端 - 只负责连接管理
 
 支持两种认证模式：
-1. config 模式：使用 kubeconfig 文件或内容
+1. kubeconfig 模式：使用 kubeconfig 内容（存储在数据库中）
 2. token 模式：使用 ServiceAccount Token
 """
 
 import logging
 import os
 import tempfile
-from typing import Optional, Dict, Any
-from urllib3.exceptions import InsecureRequestWarning
+from typing import Optional
 from app.core.integration_config import IntegrationConfig
 
 try:
@@ -34,14 +33,13 @@ class KubernetesClient:
     具体操作由 tools 层使用暴露的 API 客户端执行。
 
     支持两种认证模式：
-    - config: 使用 kubeconfig 文件或内容
+    - kubeconfig: 使用 kubeconfig 内容（从数据库加载）
     - token: 使用 ServiceAccount Token
     """
 
     def __init__(
         self,
-        auth_mode: str = "config",
-        kubeconfig_path: Optional[str] = None,
+        auth_mode: str = "kubeconfig",
         kubeconfig_content: Optional[str] = None,
         token: Optional[str] = None,
         api_host: Optional[str] = None,
@@ -51,12 +49,11 @@ class KubernetesClient:
         初始化 Kubernetes 客户端
 
         参数：
-            auth_mode: 认证模式 ("config" 或 "token")
-            kubeconfig_path: kubeconfig 文件路径
-            kubeconfig_content: kubeconfig 文件内容
+            auth_mode: 认证模式 ("kubeconfig" 或 "token")
+            kubeconfig_content: kubeconfig 文件内容（YAML 格式）
             token: ServiceAccount Token（token 模式）
             api_host: API Server 地址（token 模式）
-            ca_cert: CA 证书内容（token 模式）
+            ca_cert: CA 证书内容（token 模式，可选）
         """
         if not KUBERNETES_AVAILABLE:
             raise RuntimeError(
@@ -65,7 +62,6 @@ class KubernetesClient:
             )
 
         self.auth_mode = auth_mode
-        self.kubeconfig_path = kubeconfig_path
         self.kubeconfig_content = kubeconfig_content
         self.token = token
         self.api_host = api_host
@@ -73,6 +69,7 @@ class KubernetesClient:
 
         self._core_v1 = None
         self._apps_v1 = None
+        self._api_client = None
         self._initialized = False
 
     def _initialize(self):
@@ -84,7 +81,7 @@ class KubernetesClient:
             if self.auth_mode == "token":
                 self._init_token_mode()
             else:
-                self._init_config_mode()
+                self._init_kubeconfig_mode()
 
             self._initialized = True
             logger.info(f"K8s client initialized (mode={self.auth_mode})")
@@ -93,20 +90,19 @@ class KubernetesClient:
             logger.error(f"Failed to initialize Kubernetes client: {e}")
             raise RuntimeError(f"Kubernetes initialization failed: {e}")
 
-    def _init_config_mode(self):
+    def _init_kubeconfig_mode(self):
         """
-        使用 kubeconfig 初始化
+        使用 kubeconfig 内容初始化
 
         优先级：
-        1. kubeconfig_content
-        2. kubeconfig_path
-        3. 环境变量 KUBECONFIG
-        4. 默认 kubeconfig 位置
-        5. 集内配置
+        1. kubeconfig_content（从数据库加载）
+        2. 环境变量 KUBECONFIG
+        3. 默认 kubeconfig 位置
+        4. 集内配置
         """
         loaded = False
 
-        # 1. 尝试使用 kubeconfig_content
+        # 1. 尝试使用 kubeconfig_content（从数据库加载）
         if self.kubeconfig_content:
             try:
                 with tempfile.NamedTemporaryFile(
@@ -119,20 +115,11 @@ class KubernetesClient:
                 config.load_kube_config(config_file=temp_path)
                 os.unlink(temp_path)
                 loaded = True
-                logger.info("Loaded K8s config from content")
+                logger.info("Loaded K8s config from database content")
             except Exception as e:
                 logger.warning(f"Failed to load kubeconfig content: {e}")
 
-        # 2. 尝试使用 kubeconfig_path
-        if not loaded and self.kubeconfig_path:
-            try:
-                config.load_kube_config(config_file=self.kubeconfig_path)
-                loaded = True
-                logger.info(f"Loaded K8s config from file: {self.kubeconfig_path}")
-            except Exception as e:
-                logger.warning(f"Failed to load kubeconfig file: {e}")
-
-        # 3. 尝试使用环境变量 KUBECONFIG
+        # 2. 尝试使用环境变量 KUBECONFIG（开发环境降级）
         if not loaded:
             kubeconfig_env = os.getenv("KUBECONFIG")
             if kubeconfig_env and os.path.exists(kubeconfig_env):
@@ -143,7 +130,7 @@ class KubernetesClient:
                 except Exception as e:
                     logger.warning(f"Failed to load KUBECONFIG: {e}")
 
-        # 4. 尝试默认 kubeconfig 位置
+        # 3. 尝试默认 kubeconfig 位置（开发环境降级）
         if not loaded:
             try:
                 config.load_kube_config()
@@ -152,7 +139,7 @@ class KubernetesClient:
             except Exception as e:
                 logger.debug(f"No default kubeconfig found: {e}")
 
-        # 5. 尝试集内配置
+        # 4. 尝试集内配置（K8s Pod 内运行时）
         if not loaded:
             try:
                 config.load_incluster_config()
@@ -164,12 +151,13 @@ class KubernetesClient:
         if not loaded:
             raise RuntimeError(
                 "Failed to load Kubernetes config. "
-                "Please provide kubeconfig or run inside a Kubernetes cluster."
+                "Please configure K8s in System Settings or run inside a Kubernetes cluster."
             )
 
         # 初始化 API 客户端
-        self._core_v1 = client.CoreV1Api()
-        self._apps_v1 = client.AppsV1Api()
+        self._api_client = client.ApiClient()
+        self._core_v1 = client.CoreV1Api(api_client=self._api_client)
+        self._apps_v1 = client.AppsV1Api(api_client=self._api_client)
 
     def _init_token_mode(self):
         """
@@ -190,7 +178,7 @@ class KubernetesClient:
             # 设置 API Host
             configuration.host = self.api_host
 
-            # 设置 Token
+            # 设置 Token（直接拼接 Bearer 前缀）
             configuration.api_key = {"authorization": f"Bearer {self.token}"}
 
             # 设置 CA 证书（可选）
@@ -208,35 +196,49 @@ class KubernetesClient:
                 configuration.verify_ssl = True
                 logger.info("Using custom CA certificate")
             else:
-                # 不提供 CA 证书时，使用系统默认 CA 信任链
-                # 这适用于使用公网信任证书的 API Server
-                configuration.verify_ssl = True
-                logger.info("Using system default CA certificates (verify_ssl=True)")
+                # 不提供 CA 证书时，跳过 SSL 验证
+                # 这适用于使用自签名证书的 API Server
+                configuration.verify_ssl = False
+                logger.warning("No CA certificate provided, SSL verification disabled")
 
             # 创建 API 客户端
-            self._core_v1 = client.CoreV1Api(api_client=client.ApiClient(configuration))
-            self._apps_v1 = client.AppsV1Api(api_client=client.ApiClient(configuration))
+            self._api_client = client.ApiClient(configuration)
+            self._core_v1 = client.CoreV1Api(api_client=self._api_client)
+            self._apps_v1 = client.AppsV1Api(api_client=self._api_client)
 
             logger.info(f"Loaded K8s config from token (api_host={self.api_host})")
 
         except Exception as e:
             raise RuntimeError(f"Failed to initialize token mode: {e}")
 
-    async def check_kubernetes_health(self) -> bool:
+    async def check_kubernetes_health(self) -> dict:
         """
         检查 Kubernetes API 是否健康且可访问
 
         返回：
-            如果 K8s API 可访问则返回 True，否则返回 False
+            包含健康状态和集群信息的字典
         """
         try:
             self._initialize()
+
+            # 获取集群版本信息（使用正确的 api_client）
+            version = client.VersionApi(api_client=self._api_client).get_code()
+
             # 尝试列出命名空间作为健康检查
-            self._core_v1.list_namespace(limit=1)
-            return True
+            namespaces = self._core_v1.list_namespace(limit=1)
+
+            return {
+                "healthy": True,
+                "server_version": f"{version.major}.{version.minor}",
+                "git_version": version.git_version,
+                "platform": version.platform,
+            }
         except Exception as e:
             logger.error(f"Kubernetes health check failed: {e}")
-            return False
+            return {
+                "healthy": False,
+                "error": str(e),
+            }
 
     @property
     def core_v1(self) -> "client.CoreV1Api":
@@ -268,19 +270,19 @@ class KubernetesClient:
     def batch_v1(self) -> "client.BatchV1Api":
         """获取 BatchV1Api 客户端"""
         self._initialize()
-        return client.BatchV1Api()
+        return client.BatchV1Api(api_client=self._api_client)
 
     @property
     def networking_v1(self) -> "client.NetworkingV1Api":
         """获取 NetworkingV1Api 客户端"""
         self._initialize()
-        return client.NetworkingV1Api()
+        return client.NetworkingV1Api(api_client=self._api_client)
 
     @property
     def custom_objects(self) -> "client.CustomObjectsApi":
         """获取 CustomObjectsApi 客户端"""
         self._initialize()
-        return client.CustomObjectsApi()
+        return client.CustomObjectsApi(api_client=self._api_client)
 
 
 # 单例实例（已弃用 - 推荐使用 create_client 从数据库配置创建）
@@ -290,7 +292,6 @@ _kubernetes_client: Optional[KubernetesClient] = None
 def create_client(
     db=None,
     auth_mode: Optional[str] = None,
-    kubeconfig_path: Optional[str] = None,
     kubeconfig_content: Optional[str] = None,
     token: Optional[str] = None,
     api_host: Optional[str] = None,
@@ -302,7 +303,6 @@ def create_client(
     参数：
         db: 数据库会话（用于从 SystemSetting 读取配置）
         auth_mode: 认证模式（如果为 None，从数据库读取）
-        kubeconfig_path: kubeconfig 文件路径
         kubeconfig_content: kubeconfig 文件内容
         token: ServiceAccount Token
         api_host: API Server 地址
@@ -318,7 +318,7 @@ def create_client(
 
         auth_mode = IntegrationConfig.get_k8s_auth_mode(db)
 
-        if auth_mode == "config":
+        if auth_mode == "kubeconfig":
             kubeconfig_content = IntegrationConfig.get_k8s_kubeconfig(db)
         else:  # token
             token = IntegrationConfig.get_k8s_token(db)
@@ -327,11 +327,10 @@ def create_client(
 
     # 降级：如果没有提供任何配置，尝试使用默认 kubeconfig
     if auth_mode is None:
-        auth_mode = "config"
+        auth_mode = "kubeconfig"
 
     return KubernetesClient(
         auth_mode=auth_mode,
-        kubeconfig_path=kubeconfig_path,
         kubeconfig_content=kubeconfig_content,
         token=token,
         api_host=api_host,
@@ -339,14 +338,11 @@ def create_client(
     )
 
 
-def get_kubernetes_client(kubeconfig_path: Optional[str] = None) -> KubernetesClient:
+def get_kubernetes_client() -> KubernetesClient:
     """
     获取单例 Kubernetes 客户端实例（已弃用）
 
     注意：此方法仅用于向后兼容，推荐使用 create_client()
-
-    参数：
-        kubeconfig_path: 可选的 kubeconfig 路径
 
     返回：
         KubernetesClient 实例
@@ -354,12 +350,6 @@ def get_kubernetes_client(kubeconfig_path: Optional[str] = None) -> KubernetesCl
     global _kubernetes_client
 
     if _kubernetes_client is None:
-        if kubeconfig_path is None:
-            kubeconfig_path = os.getenv("KUBECONFIG")
-
-        _kubernetes_client = KubernetesClient(
-            auth_mode="config",
-            kubeconfig_path=kubeconfig_path
-        )
+        _kubernetes_client = KubernetesClient(auth_mode="kubeconfig")
 
     return _kubernetes_client

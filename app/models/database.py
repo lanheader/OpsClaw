@@ -11,7 +11,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 # 从环境变量获取数据库 URL 或使用默认值
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./data/ops_agent_v2.db")
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./workspace/data/ops_agent_v2.db")
 
 # 创建 SQLAlchemy 引擎
 if "sqlite" in DATABASE_URL:

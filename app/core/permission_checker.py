@@ -1,8 +1,8 @@
 # app/core/permission_checker.py
-"""权限检查模块"""
+"""权限检查模块 - 支持请求级缓存"""
 
 import logging
-from typing import List, Callable, Any
+from typing import List, Callable, Any, Optional
 from functools import wraps
 
 from fastapi import HTTPException, status
@@ -13,13 +13,60 @@ from app.models.user_role import UserRole
 from app.models.user import User
 from app.core.deps import get_current_user
 from app.models.database import get_db, SessionLocal
+from app.utils.logger import get_request_context, set_request_context
 
 logger = logging.getLogger(__name__)
+
+# 缓存键前缀，避免与其他上下文数据冲突
+PERMISSION_CACHE_KEY = "_cached_user_permissions"
+
+
+def _get_cached_permissions(user_id: int) -> Optional[List[str]]:
+    """
+    从请求上下文获取缓存的权限列表
+
+    Args:
+        user_id: 用户ID
+
+    Returns:
+        缓存的权限代码列表，如果未缓存则返回 None
+    """
+    ctx = get_request_context()
+    cached = ctx.get(PERMISSION_CACHE_KEY, {})
+    if cached.get("user_id") == user_id:
+        return cached.get("permissions")
+    return None
+
+
+def _cache_permissions(user_id: int, permissions: List[str]) -> None:
+    """
+    将权限列表缓存到请求上下文
+
+    Args:
+        user_id: 用户ID
+        permissions: 权限代码列表
+    """
+    ctx = get_request_context()
+    ctx[PERMISSION_CACHE_KEY] = {
+        "user_id": user_id,
+        "permissions": permissions,
+    }
+    # 更新上下文
+    set_request_context(
+        session_id=ctx.get('session_id', 'no-sess'),
+        request_id=ctx.get('request_id'),
+        user_id=ctx.get('user_id'),
+        channel=ctx.get('channel'),
+        user_permissions=permissions,
+    )
 
 
 def check_user_permission(db: Session, user_id: int, permission_code: str) -> bool:
     """
-    检查用户是否有指定权限
+    检查用户是否有指定权限（支持请求级缓存）
+
+    首次调用时会加载该用户的所有权限并缓存到请求上下文，
+    后续调用直接从缓存读取，避免 N+1 查询问题。
 
     Args:
         db: 数据库会话
@@ -29,20 +76,37 @@ def check_user_permission(db: Session, user_id: int, permission_code: str) -> bo
     Returns:
         bool: 是否有权限
     """
-    permission = (
+    # 1. 尝试从缓存获取权限列表
+    cached_permissions = _get_cached_permissions(user_id)
+
+    if cached_permissions is not None:
+        # 使用缓存的权限列表进行判断
+        return permission_code in cached_permissions
+
+    # 2. 缓存未命中，查询该用户的所有权限并缓存
+    permissions = (
         db.query(Permission)
         .join(RolePermission, Permission.id == RolePermission.permission_id)
         .join(UserRole, RolePermission.role_id == UserRole.role_id)
-        .filter(UserRole.user_id == user_id, Permission.code == permission_code)
-        .first()
+        .filter(UserRole.user_id == user_id)
+        .distinct()
+        .all()
     )
 
-    return permission is not None
+    # 提取权限代码并缓存
+    permission_codes = [p.code for p in permissions]
+    _cache_permissions(user_id, permission_codes)
+
+    # 3. 返回检查结果
+    return permission_code in permission_codes
 
 
 def get_user_permissions(db: Session, user_id: int) -> List[Permission]:
     """
-    获取用户的所有权限
+    获取用户的所有权限（支持请求级缓存）
+
+    注意：此函数直接返回 Permission 对象列表。
+    如果只需要权限代码，建议使用 get_user_permission_codes() 以获得更好的缓存效果。
 
     Args:
         db: 数据库会话
@@ -60,12 +124,18 @@ def get_user_permissions(db: Session, user_id: int) -> List[Permission]:
         .all()
     )
 
+    # 同时缓存权限代码，供后续 check_user_permission 使用
+    permission_codes = [p.code for p in permissions]
+    _cache_permissions(user_id, permission_codes)
+
     return permissions
 
 
 def get_user_permission_codes(db: Session, user_id: int) -> List[str]:
     """
-    获取用户的所有权限代码
+    获取用户的所有权限代码（支持请求级缓存）
+
+    优先从缓存读取，避免重复数据库查询。
 
     Args:
         db: 数据库会话
@@ -74,8 +144,26 @@ def get_user_permission_codes(db: Session, user_id: int) -> List[str]:
     Returns:
         List[str]: 权限代码列表
     """
-    permissions = get_user_permissions(db, user_id)
-    return [p.code for p in permissions]
+    # 1. 尝试从缓存获取
+    cached = _get_cached_permissions(user_id)
+    if cached is not None:
+        return cached
+
+    # 2. 缓存未命中，查询数据库
+    permissions = (
+        db.query(Permission.code)
+        .join(RolePermission, Permission.id == RolePermission.permission_id)
+        .join(UserRole, RolePermission.role_id == UserRole.role_id)
+        .filter(UserRole.user_id == user_id)
+        .distinct()
+        .all()
+    )
+
+    # 3. 缓存并返回
+    permission_codes = [p.code for p in permissions]
+    _cache_permissions(user_id, permission_codes)
+
+    return permission_codes
 
 
 def is_admin(db: Session, user_id: int) -> bool:

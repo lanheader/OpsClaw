@@ -142,6 +142,28 @@ async def lifespan(app: FastAPI):
     logger.info(f"LLM Provider: {settings.DEFAULT_LLM_PROVIDER}")
     logger.info("ℹ️  DeepAgents 懒加载模式：Agent 将在第一次请求时动态创建")
 
+    # ========== 安全检查：检测默认凭据 ==========
+    if settings.SECURITY_ENVIRONMENT != "dev":
+        # 检查 JWT Secret
+        default_jwt_secrets = [
+            "your-secret-key-here-change-in-production",
+            "change-me-in-production",
+            "secret",
+            "jwt-secret",
+        ]
+        if settings.JWT_SECRET_KEY in default_jwt_secrets:
+            logger.critical("🔥 安全错误：检测到默认 JWT_SECRET_KEY！")
+            logger.critical("   请在环境变量中设置安全的 JWT_SECRET_KEY（至少 32 字符）")
+            raise RuntimeError(
+                "安全策略：生产环境禁止使用默认 JWT_SECRET_KEY。"
+                "请设置环境变量 JWT_SECRET_KEY"
+            )
+
+        # 检查管理员默认凭据
+        if settings.INITIAL_ADMIN_PASSWORD == "admin123":
+            logger.warning("⚠️  警告：检测到默认管理员密码 'admin123'")
+            logger.warning("   建议通过环境变量 INITIAL_ADMIN_PASSWORD 设置强密码")
+
     # Start Feishu long connection if enabled
     if settings.FEISHU_ENABLED and settings.FEISHU_CONNECTION_MODE in ["longconn", "auto"]:
         logger.info("🔌 Starting Feishu long connection...")
@@ -168,6 +190,15 @@ async def lifespan(app: FastAPI):
     else:
         logger.info(f"ℹ️  Feishu long connection not enabled")
 
+    # Start scheduler service
+    try:
+        from app.services.scheduler_service import get_scheduler_service
+        scheduler = get_scheduler_service()
+        scheduler.start()
+        logger.info("✅ Scheduler service started")
+    except Exception as e:
+        logger.warning(f"⚠️ Failed to start scheduler service: {e}")
+
     yield
 
     # Shutdown
@@ -187,6 +218,15 @@ async def lifespan(app: FastAPI):
     # Close checkpointer connection
     from app.core.checkpointer import shutdown_checkpointer
     await shutdown_checkpointer()
+
+    # Shutdown scheduler service
+    try:
+        from app.services.scheduler_service import get_scheduler_service
+        scheduler = get_scheduler_service()
+        scheduler.shutdown()
+        logger.info("✅ Scheduler service stopped")
+    except Exception as e:
+        logger.warning(f"⚠️ Failed to stop scheduler service: {e}")
 
 
 # Create FastAPI application
@@ -211,18 +251,42 @@ async def global_exception_handler(request: Request, exc: Exception):
     logger.error(f"   异常信息: {str(exc)}")
     logger.error(f"   堆栈跟踪:", exc_info=True)
 
-    return JSONResponse(status_code=500, content={"detail": f"Internal server error: {str(exc)}"})
+    # 根据 DEBUG 配置决定是否返回详细错误
+    if settings.DEBUG:
+        # 开发环境：返回详细错误信息
+        return JSONResponse(
+            status_code=500,
+            content={
+                "detail": f"Internal server error: {str(exc)}",
+                "error_type": type(exc).__name__,
+                "path": request.url.path,
+            }
+        )
+    else:
+        # 生产环境：返回通用错误信息，避免泄露敏感信息
+        return JSONResponse(
+            status_code=500,
+            content={
+                "detail": "Internal server error",
+                "error_type": "ServerError",
+                "request_id": request.headers.get("X-Request-ID", "unknown"),
+            }
+        )
 
 
 # Configure CORS
 if settings.ENABLE_CORS:
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.CORS_ORIGINS if settings.CORS_ORIGINS else ["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    if not settings.CORS_ORIGINS:
+        # 生产环境不允许通配符，空列表等同于关闭 CORS
+        logger.warning("⚠️ CORS_ORIGINS 为空，跳过 CORS 中间件（生产环境应配置具体域名）")
+    else:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=settings.CORS_ORIGINS,
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
 
 # Register API routers
 app.include_router(workflow.router, prefix="/api")
@@ -255,6 +319,12 @@ from app.api.v1 import tools
 app.include_router(tools.router, prefix="/api/v1")
 # 审批配置管理 API
 app.include_router(approval_config.router, prefix="/api/v1")
+# 提示词管理 API
+from app.api.v1 import prompts
+app.include_router(prompts.router, prefix="/api/v1")
+# 定时任务管理 API
+from app.api.v1 import scheduled_tasks
+app.include_router(scheduled_tasks.router, prefix="/api/v1")
 
 
 @app.get("/")
