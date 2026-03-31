@@ -5,7 +5,6 @@
 import { Layout, Menu, Typography, Button, Dropdown, Space } from 'antd';
 import {
   DashboardOutlined,
-  RocketOutlined,
   HistoryOutlined,
   SettingOutlined,
   UserOutlined,
@@ -19,8 +18,6 @@ import { ClockCircleOutlined } from '@ant-design/icons';
 import { BrowserRouter, Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Dashboard } from './pages/Dashboard';
-import { WorkflowExecute } from './pages/WorkflowExecute';
-import { WorkflowDetail } from './pages/WorkflowDetail';
 import { Login } from './pages/Login';
 import { UserManagement } from './pages/UserManagement';
 import { RoleManagement } from './pages/RoleManagement';
@@ -81,11 +78,6 @@ const AppLayout: React.FC = () => {
       key: '/',
       icon: <DashboardOutlined />,
       label: <Link to="/">仪表盘</Link>,
-    },
-    hasPermission('execute_workflow') && {
-      key: '/execute',
-      icon: <RocketOutlined />,
-      label: <Link to="/execute">执行工作流</Link>,
     },
     {
       key: '/scheduled-tasks',
@@ -179,8 +171,6 @@ const AppLayout: React.FC = () => {
           }}>
             <Routes>
               <Route path="/" element={<Dashboard />} />
-              <Route path="/execute" element={<WorkflowExecute />} />
-              <Route path="/workflow/:taskId" element={<WorkflowDetail />} />
               <Route path="/chat" element={<Chat />} />
               <Route path="/chat/:sessionId" element={<Chat />} />
               <Route path="/history" element={<div>执行历史（待实现）</div>} />
