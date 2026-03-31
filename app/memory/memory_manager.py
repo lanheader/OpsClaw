@@ -201,7 +201,6 @@ class MemoryManager:
         include_knowledge: bool = True,
         include_session: bool = False,
         include_summary: bool = True,
-        include_mem0: bool = True,  # 保留参数兼容调用方，忽略
         max_tokens: int = 4500,
         enable_truncation: bool = True,
     ) -> str:

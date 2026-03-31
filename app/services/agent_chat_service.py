@@ -270,7 +270,6 @@ async def _inject_memory(text: str, session_id: str, user_id: int) -> str:
             include_knowledge=True,
             include_session=True,
             include_summary=True,
-            include_mem0=True,
             max_tokens=4500,
         )
         if context_str:
