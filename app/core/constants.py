@@ -109,9 +109,6 @@ class VectorStoreConfig:
     MAX_SEARCH_RESULTS = 100    # 最大搜索结果数
     SIMILARITY_THRESHOLD = 0.7  # 默认相似度阈值
 
-    # 向量维度
-    EMBEDDING_DIMENSION = 1536  # OpenAI text-embedding-3-small
-
 
 # ==================== LLM 调用配置 ====================
 
