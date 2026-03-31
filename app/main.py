@@ -276,13 +276,17 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 # Configure CORS
 if settings.ENABLE_CORS:
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.CORS_ORIGINS if settings.CORS_ORIGINS else ["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    if not settings.CORS_ORIGINS:
+        # 生产环境不允许通配符，空列表等同于关闭 CORS
+        logger.warning("⚠️ CORS_ORIGINS 为空，跳过 CORS 中间件（生产环境应配置具体域名）")
+    else:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=settings.CORS_ORIGINS,
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
 
 # Register API routers
 app.include_router(workflow.router, prefix="/api")

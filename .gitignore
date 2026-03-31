@@ -13,6 +13,7 @@ build/
 htmlcov/
 coverage.xml
 *.cover
+docs/*
 
 # Virtual env
 .venv/

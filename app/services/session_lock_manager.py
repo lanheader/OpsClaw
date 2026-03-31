@@ -11,10 +11,13 @@
 - 每个 session_id 对应一个 asyncio.Lock
 - 同一会话的请求必须获取锁后才能执行
 - 不同会话的请求可以并行执行
+- 使用 LRU 淘汰策略，自动清理空闲锁，防止内存泄漏
 """
 
 import asyncio
-from typing import Dict, Optional
+import time
+from collections import OrderedDict
+from typing import Dict, Optional, Tuple
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -28,16 +31,28 @@ class SessionLockManager:
         async with await SessionLockManager.acquire(session_id):
             # 执行会话相关操作
             ...
+
+    特点：
+    - 使用 OrderedDict 实现 LRU 淘汰
+    - 最大锁数量限制（默认 1000）
+    - 空闲超时自动清理（默认 30 分钟）
+    - 防止长期运行的内存泄漏
     """
 
-    # 会话锁字典：session_id -> asyncio.Lock
-    _session_locks: Dict[str, asyncio.Lock] = {}
+    # 会话锁字典：session_id -> (asyncio.Lock, last_access_time)
+    _session_locks: OrderedDict[str, Tuple[asyncio.Lock, float]] = OrderedDict()
 
     # 保护 _session_locks 字典的锁
     _manager_lock = asyncio.Lock()
 
     # 锁超时时间（秒）
     LOCK_TIMEOUT = 300  # 5 分钟
+
+    # 最大锁数量（LRU 淘汰阈值）
+    MAX_LOCKS = 1000
+
+    # 空闲锁超时时间（秒），超过此时间未使用的锁会被清理
+    IDLE_TIMEOUT = 1800  # 30 分钟
 
     @classmethod
     async def acquire(cls, session_id: str) -> asyncio.Lock:
@@ -51,10 +66,37 @@ class SessionLockManager:
             该会话对应的锁对象
         """
         async with cls._manager_lock:
+            # 清理空闲超时的锁
+            await cls._cleanup_idle_locks()
+
             if session_id not in cls._session_locks:
-                cls._session_locks[session_id] = asyncio.Lock()
+                # LRU 淘汰：如果超过最大数量，移除最旧的
+                while len(cls._session_locks) >= cls.MAX_LOCKS:
+                    oldest_id, _ = cls._session_locks.popitem(last=False)
+                    logger.debug(f"🔒 LRU 淘汰会话锁: {oldest_id}")
+
+                cls._session_locks[session_id] = (asyncio.Lock(), time.monotonic())
                 logger.debug(f"🔒 创建会话锁: {session_id}")
-            return cls._session_locks[session_id]
+            else:
+                # 更新访问时间并移到末尾（LRU）
+                lock, _ = cls._session_locks.pop(session_id)
+                cls._session_locks[session_id] = (lock, time.monotonic())
+
+            return cls._session_locks[session_id][0]
+
+    @classmethod
+    async def _cleanup_idle_locks(cls) -> None:
+        """清理空闲超时的锁（在持有 _manager_lock 时调用）"""
+        now = time.monotonic()
+        expired_keys = [
+            sid for sid, (_, last_access) in cls._session_locks.items()
+            if now - last_access > cls.IDLE_TIMEOUT and not _.locked()
+        ]
+        for sid in expired_keys:
+            del cls._session_locks[sid]
+            logger.debug(f"🔓 清理空闲会话锁: {sid}")
+        if expired_keys:
+            logger.info(f"🧹 清理了 {len(expired_keys)} 个空闲会话锁")
 
     @classmethod
     async def get_lock(cls, session_id: str) -> asyncio.Lock:

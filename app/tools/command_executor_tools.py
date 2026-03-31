@@ -478,12 +478,10 @@ async def execute_safe_shell_command(
         else:
             is_allowed = False
     else:
-        # 普通命令检查白名单
-        is_allowed = False
-        for allowed in allowed_commands:
-            if command.startswith(allowed):
-                is_allowed = True
-                break
+        # 普通命令检查白名单（只匹配命令名，防止 ; && | 绕过）
+        command_parts = command.split()
+        command_name = command_parts[0] if command_parts else ""
+        is_allowed = command_name in allowed_commands
 
     if not is_allowed:
         error_msg = f"命令 '{command_base}' 不在允许列表中"
@@ -499,11 +497,12 @@ async def execute_safe_shell_command(
             "needs_fallback": False
         }
 
-    # 额外的危险模式检查
+    # 额外的危险模式检查（包括命令链接符）
     dangerous_patterns = [
         r'\brm\b', r'\bmv\b', r'\bcp\b.*>',
         r'>', r'>>', r'\|.*rm', r'\|.*mv',
-        r'sudo', r'su\b', r'chmod', r'chown'
+        r'sudo', r'su\b', r'chmod', r'chown',
+        r';', r'&&', r'\|\|',  # 命令链接符
     ]
 
     for pattern in dangerous_patterns:

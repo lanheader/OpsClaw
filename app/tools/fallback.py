@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import re
+import shlex
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, List
 
@@ -87,12 +88,11 @@ class FallbackExecutor(ABC):
             # 获取环境变量
             env = os.environ.copy()
 
-            # 执行命令
-            process = await asyncio.create_subprocess_shell(
-                command,
+            # 执行命令（使用 shlex.split 避免 shell 注入）
+            process = await asyncio.create_subprocess_exec(
+                *shlex.split(command),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                shell=True,
                 env=env
             )
 
@@ -150,27 +150,27 @@ class K8sFallback(FallbackExecutor):
         super().__init__("kubectl")
 
     def build_command(self, operation: str, **kwargs) -> str:
-        """构建 kubectl 命令"""
-        cmd = f"kubectl {operation}"
+        """构建 kubectl 命令（使用 shlex.quote 转义用户参数）"""
+        parts = ["kubectl", operation]
 
         # 添加命名空间
         if "namespace" in kwargs and kwargs["namespace"]:
             namespace = kwargs["namespace"]
             if "-n" not in operation and "--namespace" not in operation and "-A" not in operation:
-                cmd += f" -n {namespace}"
+                parts.extend(["-n", shlex.quote(namespace)])
 
         # 添加标签选择器
         if "label_selector" in kwargs and kwargs["label_selector"]:
-            cmd += f" -l {kwargs['label_selector']}"
+            parts.extend(["-l", shlex.quote(kwargs['label_selector'])])
 
         # 添加字段选择器
         if "field_selector" in kwargs and kwargs["field_selector"]:
-            cmd += f" --field-selector={kwargs['field_selector']}"
+            parts.append(f"--field-selector={shlex.quote(kwargs['field_selector'])}")
 
         # 添加 JSON 输出格式
-        cmd += " -o json"
+        parts.append("-o json")
 
-        return cmd
+        return " ".join(parts)
 
     def parse_output(self, stdout: str, stderr: str) -> Any:
         """解析 kubectl 输出"""
@@ -187,14 +187,14 @@ class PrometheusFallback(FallbackExecutor):
         super().__init__("promql")
 
     def build_command(self, operation: str, **kwargs) -> str:
-        """构建 promql 查询命令"""
+        """构建 promql 查询命令（使用 shlex.quote 转义用户参数）"""
         if operation == "query":
             query = kwargs.get("query", "")
-            time = kwargs.get("time", "")
+            time_val = kwargs.get("time", "")
 
-            cmd = f"promql query '{query}'"
-            if time:
-                cmd += f" --time='{time}'"
+            cmd = f"promql query {shlex.quote(query)}"
+            if time_val:
+                cmd += f" --time={shlex.quote(time_val)}"
 
             return cmd
         elif operation == "query_range":
@@ -203,9 +203,9 @@ class PrometheusFallback(FallbackExecutor):
             end = kwargs.get("end", "")
             step = kwargs.get("step", "1m")
 
-            return f"promql query-range '{query}' --start='{start}' --end='{end}' --step='{step}'"
+            return f"promql query-range {shlex.quote(query)} --start={shlex.quote(start)} --end={shlex.quote(end)} --step={shlex.quote(step)}"
 
-        return f"promql {operation}"
+        return f"promql {shlex.quote(operation)}"
 
     async def execute(self, operation: str, timeout: int = 30, **kwargs) -> Dict[str, Any]:
         """
@@ -221,12 +221,11 @@ class PrometheusFallback(FallbackExecutor):
             # 获取环境变量
             env = os.environ.copy()
 
-            # 执行命令
-            process = await asyncio.create_subprocess_shell(
-                command,
+            # 执行命令（使用 shlex.split 避免 shell 注入）
+            process = await asyncio.create_subprocess_exec(
+                *shlex.split(command),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                shell=True,
                 env=env
             )
 
@@ -302,20 +301,20 @@ class LokiFallback(FallbackExecutor):
         super().__init__("logcli")
 
     def build_command(self, operation: str, **kwargs) -> str:
-        """构建 logcli 查询命令"""
+        """构建 logcli 查询命令（使用 shlex.quote 转义用户参数）"""
         if operation == "query":
             query = kwargs.get("query", "")
             limit = kwargs.get("limit", "100")
 
-            return f"logcli query --limit={limit} '{query}'"
+            return f"logcli query --limit={shlex.quote(str(limit))} {shlex.quote(query)}"
         elif operation == "query_range":
             query = kwargs.get("query", "")
             start = kwargs.get("start", "")
             end = kwargs.get("end", "")
 
-            return f"logcli query --start='{start}' --end='{end}' '{query}'"
+            return f"logcli query --start={shlex.quote(start)} --end={shlex.quote(end)} {shlex.quote(query)}"
 
-        return f"logcli {operation}"
+        return f"logcli {shlex.quote(operation)}"
 
     def parse_output(self, stdout: str, stderr: str) -> Any:
         """解析 logcli 输出"""

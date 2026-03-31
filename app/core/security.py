@@ -6,12 +6,30 @@ from typing import Optional, Dict, Any
 from jose import JWTError, jwt
 import bcrypt
 from fastapi import HTTPException, status
-import os
 
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "your-secret-key-here-change-in-production")
+from app.core.config import get_settings
+
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
-ACCESS_TOKEN_EXPIRE_DAYS = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRE_DAYS", "7"))
+
+
+def _get_secret_key() -> str:
+    """从 Settings 实例获取 JWT Secret（经过 pydantic 验证）"""
+    return get_settings().JWT_SECRET_KEY
+
+
+def _get_access_token_expire_minutes() -> int:
+    """从 Settings 获取 Token 过期时间（分钟）"""
+    return get_settings().JWT_ACCESS_TOKEN_EXPIRE_MINUTES
+
+
+def _get_access_token_expire_days() -> int:
+    """从 Settings 获取 Token 过期时间（天）- 用于"记住我"功能"""
+    return get_settings().JWT_ACCESS_TOKEN_EXPIRE_DAYS
+
+
+# 向后兼容的常量导出
+ACCESS_TOKEN_EXPIRE_MINUTES = _get_access_token_expire_minutes()
+ACCESS_TOKEN_EXPIRE_DAYS = _get_access_token_expire_days()
 
 
 def hash_password(password: str) -> str:
@@ -65,7 +83,7 @@ def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta]
         expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
 
     to_encode.update({"exp": expire, "iat": datetime.now(timezone.utc)})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    encoded_jwt = jwt.encode(to_encode, _get_secret_key(), algorithm=ALGORITHM)
 
     return encoded_jwt
 
@@ -84,7 +102,7 @@ def verify_token(token: str) -> Dict[str, Any]:
         HTTPException: Token 无效或过期
     """
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(token, _get_secret_key(), algorithms=[ALGORITHM])
         return payload
     except JWTError:
         raise HTTPException(

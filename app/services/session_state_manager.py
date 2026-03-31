@@ -14,7 +14,11 @@ logger = logging.getLogger(__name__)
 
 
 def _retry_on_db_lock(max_retries: int = 3, delay: float = 0.1):
-    """重试装饰器，处理数据库锁定错误"""
+    """重试装饰器，处理数据库锁定错误
+
+    注意：此装饰器用于同步函数。如果在异步上下文中调用被装饰的函数，
+    建议使用 asyncio.to_thread() 或 run_in_executor() 来避免阻塞事件循环。
+    """
     def decorator(func):
         def wrapper(*args, **kwargs):
             for attempt in range(max_retries):

@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 
 from app.core.config import get_settings
 from app.utils.logger import get_logger
+from app.integrations.http_client import get_shared_http_client
 
 logger = get_logger(__name__)
 
@@ -71,15 +72,15 @@ class AlertManagerClient:
             params["filter"] = filter_query
 
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                resp = await client.get(f"{self.base_url}/api/v2/alerts", params=params)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    logger.info(f"获取到 {len(data)} 条告警")
-                    return data
-                else:
-                    logger.error(f"获取告警失败: HTTP {resp.status_code}")
-                    return []
+            client = get_shared_http_client(timeout=self.timeout)
+            resp = await client.get(f"{self.base_url}/api/v2/alerts", params=params)
+            if resp.status_code == 200:
+                data = resp.json()
+                logger.info(f"获取到 {len(data)} 条告警")
+                return data
+            else:
+                logger.error(f"获取告警失败: HTTP {resp.status_code}")
+                return []
         except Exception as e:
             logger.error(f"连接 AlertManager 失败: {e}")
             return []
@@ -105,12 +106,12 @@ class AlertManagerClient:
             params["filter"] = matchers
 
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                resp = await client.get(f"{self.base_url}/api/v2/silences", params=params)
-                if resp.status_code == 200:
-                    return resp.json()
-                logger.error(f"获取静默规则失败: HTTP {resp.status_code}")
-                return []
+            client = get_shared_http_client(timeout=self.timeout)
+            resp = await client.get(f"{self.base_url}/api/v2/silences", params=params)
+            if resp.status_code == 200:
+                return resp.json()
+            logger.error(f"获取静默规则失败: HTTP {resp.status_code}")
+            return []
         except Exception as e:
             logger.error(f"连接 AlertManager 失败: {e}")
             return []
@@ -160,15 +161,15 @@ class AlertManagerClient:
         }
 
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                resp = await client.post(f"{self.base_url}/api/v2/silences", json=payload)
-                if resp.status_code in (200, 201):
-                    data = resp.json()
-                    logger.info(f"静默规则创建成功: silence_id={data.get('silenceID')}")
-                    return {"success": True, "silence_id": data.get("silenceID")}
-                else:
-                    logger.error(f"创建静默规则失败: HTTP {resp.status_code}, {resp.text}")
-                    return {"success": False, "message": f"HTTP {resp.status_code}: {resp.text}"}
+            client = get_shared_http_client(timeout=self.timeout)
+            resp = await client.post(f"{self.base_url}/api/v2/silences", json=payload)
+            if resp.status_code in (200, 201):
+                data = resp.json()
+                logger.info(f"静默规则创建成功: silence_id={data.get('silenceID')}")
+                return {"success": True, "silence_id": data.get("silenceID")}
+            else:
+                logger.error(f"创建静默规则失败: HTTP {resp.status_code}, {resp.text}")
+                return {"success": False, "message": f"HTTP {resp.status_code}: {resp.text}"}
         except Exception as e:
             logger.error(f"创建静默规则失败: {e}")
             return {"success": False, "message": str(e)}
@@ -179,12 +180,12 @@ class AlertManagerClient:
             return {"success": False, "message": "AlertManager 未配置"}
 
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                resp = await client.delete(f"{self.base_url}/api/v2/silence/{silence_id}")
-                if resp.status_code == 200:
-                    return {"success": True}
-                logger.error(f"删除静默规则失败: HTTP {resp.status_code}")
-                return {"success": False, "message": f"HTTP {resp.status_code}"}
+            client = get_shared_http_client(timeout=self.timeout)
+            resp = await client.delete(f"{self.base_url}/api/v2/silence/{silence_id}")
+            if resp.status_code == 200:
+                return {"success": True}
+            logger.error(f"删除静默规则失败: HTTP {resp.status_code}")
+            return {"success": False, "message": f"HTTP {resp.status_code}"}
         except Exception as e:
             return {"success": False, "message": str(e)}
 
