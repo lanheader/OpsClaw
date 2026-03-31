@@ -76,6 +76,28 @@ class InterceptHandler(logging.Handler):
             frame = frame.f_back
             depth += 1
 
+        # 对于 uvicorn.access 日志，格式化请求信息
+        if record.name == "uvicorn.access":
+            # uvicorn access log 格式: '172.24.39.12:0 - "POST /api/v1/... HTTP/1.1" 200 OK'
+            msg = record.getMessage()
+            try:
+                # 提取请求方法和路径
+                if '"' in msg:
+                    parts = msg.split('"')
+                    if len(parts) >= 3:
+                        request_info = parts[1].strip()  # "POST /api/v1/... HTTP/1.1"
+                        status_info = parts[2].strip()   # "200 OK"
+                        request_parts = request_info.split()
+                        if len(request_parts) >= 2:
+                            method = request_parts[0]
+                            path = request_parts[1]
+                            logger.opt(depth=depth, exception=record.exc_info).log(
+                                level, "HTTP {} {} {}", method, path, status_info
+                            )
+                            return
+            except Exception:
+                pass
+
         logger.opt(depth=depth, exception=record.exc_info).log(
             level, record.getMessage()
         )
@@ -113,6 +135,8 @@ def setup_logging():
     for name, level in LOGGING_LEVELS.items():
         logging_logger = logging.getLogger(name)
         logging_logger.setLevel(level)
+        # 确保 uvicorn 使用我们的 handler
+        logging_logger.handlers = [InterceptHandler()]
 
     logger.info("✅ Loguru 日志系统初始化完成")
 
