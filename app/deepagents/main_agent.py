@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 
 from app.core.llm_factory import LLMFactory
 from app.core.checkpointer import get_checkpointer
-from app.prompts.main_agent import MAIN_AGENT_SYSTEM_PROMPT
+from app.services.unified_prompt_optimizer import get_prompt_optimizer
 from app.tools.registry import get_tool_registry
 from app.utils.logger import get_logger
 from app.memory import get_langgraph_store
@@ -111,7 +111,7 @@ def _log_tools_info(tools: List[Any]) -> None:
 def _get_skills_config() -> tuple:
     """获取 Skills 配置"""
     project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-    skills_dir = os.path.join(project_root, "skills")
+    skills_dir = os.path.join(project_root, "workspace", "skills")
     has_skills = os.path.isdir(skills_dir)
 
     if has_skills:
@@ -121,74 +121,19 @@ def _get_skills_config() -> tuple:
             skills_dir,
             True,
             FilesystemBackend(root_dir=project_root, virtual_mode=False),
-            ["skills/"]
+            ["workspace/skills/"]
         )
 
     return project_root, skills_dir, False, None, None
-
-
-async def _generate_dynamic_memory(user_query: str = None) -> str:
-    """
-    动态生成 Agent 记忆内容
-
-    从知识库检索相关经验，写入临时文件供 MemoryMiddleware 加载。
-
-    Args:
-        user_query: 用户查询（用于检索相关经验）
-
-    Returns:
-        记忆文件路径
-    """
-    try:
-        from app.memory.memory_manager import get_memory_manager
-        memory_manager = get_memory_manager()
-    except Exception:
-        memory_manager = None
-
-    sections = []
-
-    # 系统基本信息
-    from app.core.config import get_settings
-    settings = get_settings()
-    sections.append("## 集群信息\n")
-    sections.append(f"- 环境: {settings.SECURITY_ENVIRONMENT}\n")
-    sections.append(f"- 应用版本: {settings.APP_VERSION if hasattr(settings, 'APP_VERSION') else '3.0.0'}\n")
-
-    # 相关历史经验
-    if memory_manager and user_query:
-        try:
-            similar = memory_manager.search_similar_incidents(user_query, top_k=3)
-            if similar:
-                sections.append("\n## 相关历史经验\n")
-                for case in similar:
-                    title = getattr(case, 'title', str(case))
-                    sections.append(f"### {title}\n")
-                    if hasattr(case, 'root_cause'):
-                        sections.append(f"- 根因: {case.root_cause}\n")
-                    if hasattr(case, 'resolution'):
-                        sections.append(f"- 方案: {case.resolution}\n")
-        except Exception as e:
-            logger.warning(f"⚠️ 检索历史经验失败: {e}")
-
-    content = "\n".join(sections)
-
-    # 写入临时文件供 MemoryMiddleware 加载
-    memory_dir = "/tmp/opsclaw_memory"
-    os.makedirs(memory_dir, exist_ok=True)
-    memory_path = os.path.join(memory_dir, "AGENTS.md")
-    with open(memory_path, "w", encoding="utf-8") as f:
-        f.write(content)
-
-    return memory_path
 
 
 # 文件输出指令（添加到 system_prompt 末尾）
 FILE_OUTPUT_PROMPT = """
 <file_output>
 完成分析后，你可以使用 `write_file` 工具生成报告文件：
-- 诊断报告保存到: /reports/{YYYY-MM-DD}/{session_id}_diagnosis.md
-- Runbook 保存到: /runbooks/{problem_type}.md
-- 分析数据导出到: /exports/{session_id}_data.json
+- 诊断报告保存到: /workspace/reports/{YYYY-MM-DD}/{session_id}_diagnosis.md
+- Runbook 保存到: /workspace/runbooks/{problem_type}.md
+- 分析数据导出到: /workspace/exports/{session_id}_data.json
 
 报告格式使用 Markdown，包含：
 1. 问题摘要
@@ -246,21 +191,51 @@ async def create_base_agent() -> Any:
     for output_dir in ["reports", "runbooks", "exports"]:
         os.makedirs(os.path.join(project_root, output_dir), exist_ok=True)
 
-    # 6. 自定义中间件（不包含权限/审批逻辑，那些由 DynamicWrapper 处理）
+    # 6. 自定义中间件（包含权限和审批中间件）
     from app.middleware.error_filtering_middleware import ErrorFilteringMiddleware
     from app.middleware.logging_middleware import LoggingMiddleware
+    from app.middleware.dynamic_permission_middleware import DynamicPermissionMiddleware
+    from app.middleware.dynamic_approval_middleware import DynamicApprovalMiddleware
 
     custom_middleware = [
         ErrorFilteringMiddleware(),
         LoggingMiddleware(),
+        # 权限中间件：从请求上下文获取权限，检查工具调用权限
+        DynamicPermissionMiddleware(),
+        # 审批中间件：从请求上下文获取用户 ID，检查是否需要审批
+        DynamicApprovalMiddleware(),
     ]
+    logger.info("🔧 已加载权限和审批中间件")
 
-    # 7. 使用简化的 system_prompt（不包含审批工具列表，审批由 middleware 处理）
-    system_prompt = MAIN_AGENT_SYSTEM_PROMPT + FILE_OUTPUT_PROMPT
+    # 7. 从数据库加载 system_prompt（优先数据库，降级到默认提示词）
+    prompt_optimizer = get_prompt_optimizer()
+    try:
+        main_prompt = prompt_optimizer.get_prompt_for_agent("main-agent")
+    except ValueError:
+        # 如果数据库中没有，使用默认提示词
+        main_prompt = """你是一个智能运维助手（Ops Agent），负责帮助用户诊断和解决 Kubernetes 集群问题。
 
-    # 8. 创建 Agent（利用 deepagents 内置的 MemoryMiddleware 加载知识库）
-    memory_path = await _generate_dynamic_memory()
+## 核心能力
+1. 集群状态查询和分析
+2. 问题诊断和根因分析
+3. 执行修复操作（需要审批）
+4. 生成诊断报告
 
+## 工作流程
+1. 理解用户问题
+2. 收集相关数据
+3. 分析问题原因
+4. 提供解决方案
+5. 执行修复（如需要）
+
+## 注意事项
+- 执行危险操作前需要用户确认
+- 提供清晰的问题分析报告
+- 给出可操作的解决方案"""
+
+    system_prompt = main_prompt + FILE_OUTPUT_PROMPT
+
+    # 8. 创建 Agent（记忆注入由 agent_chat_service._inject_memory 处理）
     agent = create_deep_agent(
         name="OpsAgent",
         model=llm,
@@ -273,7 +248,7 @@ async def create_base_agent() -> Any:
         store=store,
         backend=backend,
         skills=skills,
-        memory=[memory_path] if os.path.exists(memory_path) else None,
+        # memory 参数已移除，记忆注入统一在 agent_chat_service 中处理
     )
 
     # 8. 缓存

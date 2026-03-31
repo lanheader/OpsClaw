@@ -30,8 +30,8 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
 
     # ========== Database ==========
-    DATABASE_URL: str = "sqlite:///./data/ops_agent_v2.db"
-    CHECKPOINT_DB_URL: str = "sqlite:///./data/ops_checkpoints.db"
+    DATABASE_URL: str = "sqlite:///./workspace/data/ops_agent_v2.db"
+    CHECKPOINT_DB_URL: str = "sqlite:///./workspace/data/ops_checkpoints.db"
 
     # ========== LLM Provider ==========
     DEFAULT_LLM_PROVIDER: str = Field(default="openai", description="openai, claude, ollama, zhipu, openrouter")

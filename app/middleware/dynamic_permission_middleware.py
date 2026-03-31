@@ -5,14 +5,22 @@
 职责：
 - 在工具调用前检查当前用户是否有权限
 - 无权限的工具调用直接拦截返回错误
-- 每次请求实例化，携带当前用户的权限集合
+- 支持静态传入权限或从请求上下文动态获取
 
 使用方式：
+    # 方式1：静态传入权限
     middleware = DynamicPermissionMiddleware(permissions={"k8s.read", "prometheus.query"})
 
+    # 方式2：从请求上下文动态获取（推荐）
+    middleware = DynamicPermissionMiddleware()
+
+    # 方式3：允许无权限模式（仅用于内部调用或测试）
+    middleware = DynamicPermissionMiddleware(allow_no_permission_mode=True)
+
 注意：
-- 此中间件需要在每次请求时创建新实例（携带当前用户权限）
+- 推荐使用方式2，配合 set_request_context(user_permissions=...) 使用
 - 对于 deepagents 内置工具（如 write_todos, task 等），默认放行
+- 如果请求上下文中没有 user_permissions，默认拒绝所有工具调用（安全优先）
 """
 
 from typing import Set, Optional, Any, Awaitable, Callable
@@ -50,11 +58,18 @@ class DynamicPermissionMiddleware(AgentMiddleware):
     """
     动态权限中间件
 
-    在工具调用前检查用户是否有对应权限。
-    通过 ToolRegistry 获取工具的 group 信息，映射到权限代码。
+    在工具调用前检查用户是否有权限执行该工具。
+    支持两种方式获取权限：
+    1. 初始化时传入 permissions 参数（静态）
+    2. 从请求上下文（get_request_context）动态获取（推荐）
+
+    安全策略：
+    - 默认情况下，如果上下文中没有 user_permissions，拒绝所有工具调用
+    - 只有显式设置 allow_no_permission_mode=True 时才允许无权限模式
 
     Attributes:
-        permissions: 用户拥有的权限代码集合（如 {"k8s.read", "prometheus.query"}）
+        _static_permissions: 静态传入的权限集合
+        _allow_no_permission_mode: 是否允许无权限模式
         user_id: 用户 ID（用于日志记录）
     """
 
@@ -64,18 +79,20 @@ class DynamicPermissionMiddleware(AgentMiddleware):
 
     def __init__(
         self,
-        permissions: Set[str],
+        permissions: Set[str] = None,
         user_id: Optional[int] = None,
+        allow_no_permission_mode: bool = False,
     ):
         """
         初始化权限中间件
 
         Args:
-            permissions: 当前用户拥有的权限代码集合
-                         如 {"k8s.read", "prometheus.query", "k8s.write"}
+            permissions: 用户权限集合（可选，不传则从请求上下文获取）
             user_id: 用户 ID（可选，用于日志）
+            allow_no_permission_mode: 是否允许无权限模式（默认 False，安全优先）
         """
-        self.permissions = permissions
+        self._static_permissions = permissions
+        self._allow_no_permission_mode = allow_no_permission_mode
         self.user_id = user_id
 
         # 获取工具注册表
@@ -85,8 +102,43 @@ class DynamicPermissionMiddleware(AgentMiddleware):
         session_id = ctx.get('session_id', 'no-sess')
         logger.info(
             f"🔐 [{session_id}] DynamicPermissionMiddleware 已初始化 | "
-            f"user_id={user_id} | 权限数={len(permissions)}"
+            f"user_id={user_id} | 静态权限={permissions is not None} | "
+            f"允许无权限模式={allow_no_permission_mode}"
         )
+
+    def _get_permissions(self) -> Optional[Set[str]]:
+        """
+        获取当前有效的权限集合
+
+        Returns:
+            - 权限集合（非空）：用户有这些权限
+            - 空集合 set()：用户无权限，拒绝所有工具
+            - None：无权限系统，允许所有工具（仅当 allow_no_permission_mode=True）
+        """
+        # 优先使用静态传入的权限
+        if self._static_permissions is not None:
+            return self._static_permissions
+
+        # 从请求上下文获取权限
+        ctx = get_request_context()
+        permissions = ctx.get('user_permissions')
+
+        if permissions is not None:
+            # 用户权限已设置（可能是空集合）
+            return set(permissions) if not isinstance(permissions, set) else permissions
+
+        # 权限未设置
+        if self._allow_no_permission_mode:
+            # 允许无权限模式，放行所有工具
+            return None
+
+        # 安全优先：权限未设置时返回空集合，拒绝所有工具
+        ctx_user_id = ctx.get('user_id')
+        logger.warning(
+            f"⚠️ 权限未设置且不允许无权限模式 | "
+            f"middleware_user_id={self.user_id} | context_user_id={ctx_user_id}"
+        )
+        return set()  # 返回空集合，拒绝所有工具调用
 
     async def awrap_tool_call(
         self,
@@ -116,7 +168,15 @@ class DynamicPermissionMiddleware(AgentMiddleware):
             logger.debug(f"🔓 [{session_id}] 内置工具放行: {tool_name}")
             return await handler(request)
 
-        # 2. 从 ToolRegistry 获取工具元数据
+        # 2. 获取当前权限
+        permissions = self._get_permissions()
+
+        if permissions is None:
+            # 没有权限限制，放行
+            logger.debug(f"🔓 [{session_id}] 无权限限制，放行: {tool_name}")
+            return await handler(request)
+
+        # 3. 从 ToolRegistry 获取工具元数据
         tool_class = self._registry.get_tool(tool_name)
 
         if tool_class is None:
@@ -131,12 +191,11 @@ class DynamicPermissionMiddleware(AgentMiddleware):
             logger.debug(f"🔓 [{session_id}] 工具 '{tool_name}' 无元数据，默认放行")
             return await handler(request)
 
-        # 3. 获取工具所需的权限
+        # 4. 获取工具所需的权限
         required_permissions = set(metadata.permissions)
 
         if not required_permissions:
             # 工具没有声明权限要求，根据 group 判断
-            # 使用 group 作为权限代码（如 k8s.read, prometheus.query）
             if metadata.group:
                 required_permissions = {metadata.group}
             else:
@@ -144,13 +203,12 @@ class DynamicPermissionMiddleware(AgentMiddleware):
                 logger.debug(f"🔓 [{session_id}] 工具 '{tool_name}' 无权限要求，默认放行")
                 return await handler(request)
 
-        # 4. 检查用户是否有所需权限
-        # 用户需要拥有所有必需权限中的至少一个
-        has_permission = bool(required_permissions & self.permissions)
+        # 5. 检查用户是否有所需权限
+        has_permission = bool(required_permissions & permissions)
 
         if not has_permission:
             # 权限不足
-            missing_perms = required_permissions - self.permissions
+            missing_perms = required_permissions - permissions
             logger.warning(
                 f"🚫 [{session_id}] 权限拒绝 | "
                 f"user_id={self.user_id} | tool={tool_name} | "
@@ -169,40 +227,13 @@ class DynamicPermissionMiddleware(AgentMiddleware):
                 status="error",
             )
 
-        # 5. 有权限，放行
+        # 6. 有权限，放行
         logger.debug(
             f"✅ [{session_id}] 权限检查通过 | "
-            f"tool={tool_name} | 权限={required_permissions & self.permissions}"
+            f"tool={tool_name} | 权限={required_permissions & permissions}"
         )
 
         return await handler(request)
-
-    def _get_tool_permission_from_group(self, group: str) -> str:
-        """
-        从工具 group 推断权限代码
-
-        Args:
-            group: 工具分组（如 k8s.read, prometheus.query）
-
-        Returns:
-            权限代码
-        """
-        # group 格式通常是 "system.operation"，直接作为权限代码
-        # 例如：
-        # - k8s.read -> k8s.view（映射到权限代码）
-        # - k8s.write -> k8s.update
-        # - prometheus.query -> prometheus.query
-
-        group_to_permission = {
-            "k8s.read": "k8s.view",
-            "k8s.write": "k8s.update",
-            "k8s.delete": "k8s.delete",
-            "k8s.update": "k8s.update",
-            "prometheus.query": "prometheus.query",
-            "loki.query": "loki.query",
-        }
-
-        return group_to_permission.get(group, group)
 
 
 __all__ = ["DynamicPermissionMiddleware", "BUILTIN_TOOLS"]

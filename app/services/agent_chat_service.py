@@ -29,7 +29,7 @@ from app.deepagents.factory import create_agent_for_session
 from app.deepagents.main_agent import get_thread_config
 from app.memory.memory_manager import get_memory_manager
 from app.services.session_lock_manager import SessionLockContext
-from app.utils.logger import get_logger
+from app.utils.logger import get_logger, set_request_context
 from app.utils.llm_helper import ensure_final_report_in_state
 
 logger = get_logger(__name__)
@@ -496,6 +496,17 @@ class AgentChatService:
         request: ChatRequest,
     ) -> Tuple[Any, Dict, Dict]:
         """准备 Agent、输入状态和配置"""
+        # 设置请求上下文（用于中间件读取权限）
+        set_request_context(
+            session_id=request.session_id,
+            user_id=str(request.user_id),
+            user_permissions=request.user_permissions,
+        )
+        logger.info(
+            f"🔐 已设置请求上下文: session_id={request.session_id}, "
+            f"user_id={request.user_id}, permissions={request.user_permissions}"
+        )
+
         # 获取 Agent
         agent = await create_agent_for_session(
             session_id=request.session_id,

@@ -238,8 +238,8 @@ class SchedulerService:
                     task.last_run_status = "error"
                     task.failure_count += 1
                     db.commit()
-            except:
-                pass
+            except Exception as db_error:
+                logger.error(f"⚠️ 更新任务失败状态时出错 (task_id={task_id}): {db_error}")
 
         finally:
             db.close()
@@ -339,7 +339,8 @@ class SchedulerService:
         try:
             job = self.scheduler.get_job(f"task_{task_id}")
             return job.next_run_time if job else None
-        except:
+        except Exception as e:
+            logger.warning(f"⚠️ 获取下次执行时间失败 (task_id={task_id}): {e}")
             return None
 
 

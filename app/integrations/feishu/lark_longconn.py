@@ -301,5 +301,5 @@ if __name__ == "__main__":
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
-        print("\n正在停止...")
+        logger.info("\n正在停止飞书长连接客户端...")
         client.stop()

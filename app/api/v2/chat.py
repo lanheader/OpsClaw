@@ -537,8 +537,21 @@ async def send_message(
     current_user: User = Depends(get_current_user),
 ):
     """发送消息并通过 Agent 工作流处理（SSE 流式响应）"""
-    set_request_context(session_id=session_id, user_id=str(current_user.id), channel="web")
+    # 获取用户权限
+    permission_codes = get_user_permission_codes(db, current_user.id)
+    user_permissions = list(set(permission_codes))
+
+    # 设置请求上下文（包含权限信息，供 middleware 使用）
+    set_request_context(
+        session_id=session_id,
+        user_id=str(current_user.id),
+        channel="web",
+        user_permissions=user_permissions,
+    )
     logger.info(f"📥 收到 Web 聊天请求: session={session_id}, user={current_user.username}")
+    logger.info(
+        f"🔐 用户权限: {', '.join(sorted(user_permissions)) if user_permissions else '无'}"
+    )
 
     # 验证会话
     session = (
@@ -560,14 +573,7 @@ async def send_message(
             # 1. 保存用户消息
             _save_user_message(db, session_id, message_data.content)
 
-            # 2. 获取用户权限
-            permission_codes = get_user_permission_codes(db, current_user.id)
-            user_permissions = list(set(permission_codes))
-            logger.info(
-                f"🔐 用户权限: {', '.join(sorted(user_permissions)) if user_permissions else '无'}"
-            )
-
-            # 3. 构建请求并调用 AgentChatService
+            # 2. 构建请求并调用 AgentChatService
             request = ChatRequest(
                 session_id=session_id,
                 user_id=current_user.id,
@@ -648,7 +654,16 @@ async def resume_workflow(
     current_user: User = Depends(get_current_user),
 ):
     """恢复暂停的工作流（用户批准后）"""
-    set_request_context(session_id=session_id, user_id=str(current_user.id), channel="web")
+    # 获取用户权限
+    permission_codes = get_user_permission_codes(db, current_user.id)
+    user_permissions = list(set(permission_codes))
+
+    set_request_context(
+        session_id=session_id,
+        user_id=str(current_user.id),
+        channel="web",
+        user_permissions=user_permissions,
+    )
     logger.info(f"▶️ 收到工作流恢复请求: session={session_id}, user={current_user.username}")
 
     # 验证会话

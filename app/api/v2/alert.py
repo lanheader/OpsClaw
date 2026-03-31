@@ -7,12 +7,14 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
 
+from app.core.deps import get_current_user, get_db
 from app.core.state import OpsState
 from app.deepagents.factory import create_agent_for_session
-from app.models.database import get_db
+from app.models.user import User
 from app.models.workflow_execution import WorkflowExecution
 from app.utils.logger import get_logger
 
@@ -175,36 +177,43 @@ async def receive_alert(
 
 
 @router.get("/{task_id}/diagnosis")
-async def get_diagnosis(task_id: str):
+async def get_diagnosis(
+    task_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """获取告警诊断报告
+
+    需要用户认证，确保只有授权用户可以查看诊断报告。
 
     Args:
         task_id: 任务ID
+        db: 数据库会话
+        current_user: 当前登录用户
 
     Returns:
         Dict: 诊断报告
     """
-    logger.info(f"查询告警诊断报告: {task_id}")
+    logger.info(f"查询告警诊断报告: {task_id}, 用户: {current_user.username}")
 
     try:
-        db = next(get_db())
         execution = db.query(WorkflowExecution).filter(WorkflowExecution.task_id == task_id).first()
 
         if not execution:
             raise HTTPException(status_code=404, detail=f"任务不存在: {task_id}")
 
+        # 从 state 字段提取诊断信息
+        state = execution.state or {}
         diagnosis = {
             "task_id": execution.task_id,
             "status": execution.status,
             "created_at": execution.created_at.isoformat(),
             "completed_at": execution.completed_at.isoformat() if execution.completed_at else None,
-            "alert_data": (
-                execution.initial_state.get("alert_data") if execution.initial_state else None
-            ),
-            "collected_data": execution.collected_data,
-            "analysis_result": execution.analysis_result,
-            "remediation_plan": execution.remediation_plan,
-            "final_report": execution.final_report,
+            "alert_data": state.get("alert_data"),
+            "collected_data": state.get("collected_data"),
+            "analysis_result": state.get("analysis_result"),
+            "remediation_plan": state.get("remediation_plan"),
+            "final_report": state.get("final_report"),
         }
 
         logger.info(f"查询到告警诊断报告: {task_id}")

@@ -46,8 +46,6 @@ dependencies = [
     # Logging
     "python-json-logger>=2.0.0",
     "loguru>=0.7.0",  # 简洁强大的日志库
-    # Vector storage (ChromaDB - 替代手动实现的向量存储)
-    "chromadb>=0.4.0",  # 轻量级向量数据库
     # 其他依赖
     "langchain-community>=0.4.1",
     "apscheduler>=3.11.2",
@@ -87,8 +85,6 @@ packages = [
     "app.integrations",
     "app.core",
     "app.utils",
-    "app.prompts",
-    "app.prompts.subagents",
     "app.services",
     "app.schemas",
     "app.memory",

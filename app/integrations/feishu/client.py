@@ -374,7 +374,7 @@ class FeishuClient:
         示例：
             user_info = await client.get_user_info("ou_xxxxx")
             if user_info:
-                print(f"User name: {user_info.get('name')}")
+                logger.debug(f"User name: {user_info.get('name')}")
         """
         url = f"{self.base_url}/contact/v3/users/{user_id}"
         token = await self.get_access_token()

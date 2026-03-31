@@ -60,11 +60,13 @@ class DynamicApprovalMiddleware(AgentMiddleware):
     动态审批中间件
 
     在模型生成后检查工具调用是否需要审批。
-    复用 ApprovalConfigService 的逻辑，动态从数据库加载审批配置。
+    支持两种方式获取用户信息：
+    1. 初始化时传入 user_id 参数（静态）
+    2. 从请求上下文（get_request_context）动态获取（推荐）
 
     Attributes:
-        user_id: 用户 ID（用于获取角色和审批配置）
-        tools_need_approval: 需要审批的工具名称集合
+        _static_user_id: 静态传入的用户 ID
+        tools_need_approval: 需要审批的工具名称集合（按用户缓存）
     """
 
     @property
@@ -80,21 +82,47 @@ class DynamicApprovalMiddleware(AgentMiddleware):
         初始化审批中间件
 
         Args:
-            user_id: 当前用户 ID
+            user_id: 当前用户 ID（可选，不传则从请求上下文获取）
             db: 数据库会话（可选，如果不提供会创建新的）
         """
-        self.user_id = user_id
+        self._static_user_id = user_id
         self._external_db = db is not None
-
-        # 加载审批配置
-        self.tools_need_approval = self._load_approval_config(user_id, db)
+        # 按用户 ID 缓存审批配置
+        self._approval_cache: Dict[int, Set[str]] = {}
 
         ctx = get_request_context()
         session_id = ctx.get('session_id', 'no-sess')
         logger.info(
             f"🔒 [{session_id}] DynamicApprovalMiddleware 已初始化 | "
-            f"user_id={user_id} | 需审批工具数={len(self.tools_need_approval)}"
+            f"static_user_id={user_id}"
         )
+
+    def _get_user_id(self) -> Optional[int]:
+        """获取当前有效的用户 ID"""
+        if self._static_user_id is not None:
+            return self._static_user_id
+
+        # 从请求上下文获取
+        ctx = get_request_context()
+        return ctx.get('user_id')
+
+    def _get_tools_need_approval(self, user_id: Optional[int]) -> Set[str]:
+        """获取需要审批的工具集合（带缓存）"""
+        if user_id is None:
+            return set()
+
+        # 检查缓存
+        if user_id in self._approval_cache:
+            return self._approval_cache[user_id]
+
+        # 从数据库加载
+        db = SessionLocal()
+        try:
+            tools = self._load_approval_config(user_id, db)
+            self._approval_cache[user_id] = tools
+            return tools
+        finally:
+            db.close()
 
     def _load_approval_config(
         self,
@@ -200,10 +228,17 @@ class DynamicApprovalMiddleware(AgentMiddleware):
         if not last_ai_msg or not last_ai_msg.tool_calls:
             return None
 
+        # 获取当前用户 ID 和审批配置
+        user_id = self._get_user_id()
+        tools_need_approval = self._get_tools_need_approval(user_id)
+
         # 收集需要审批的工具调用
         action_requests: List[Dict[str, Any]] = []
         review_configs: List[Dict[str, Any]] = []
         interrupt_indices: List[int] = []
+
+        ctx = get_request_context()
+        session_id = ctx.get('session_id', 'no-sess')
 
         for idx, tool_call in enumerate(last_ai_msg.tool_calls):
             tool_name = tool_call.get("name", "unknown")
@@ -214,7 +249,7 @@ class DynamicApprovalMiddleware(AgentMiddleware):
                 continue
 
             # 检查是否需要审批
-            if tool_name in self.tools_need_approval:
+            if tool_name in tools_need_approval:
                 # 创建 ActionRequest
                 action_request = {
                     "name": tool_name,
