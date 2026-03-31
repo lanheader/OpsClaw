@@ -27,9 +27,20 @@ def _get_access_token_expire_days() -> int:
     return get_settings().JWT_ACCESS_TOKEN_EXPIRE_DAYS
 
 
-# 向后兼容的常量导出
-ACCESS_TOKEN_EXPIRE_MINUTES = _get_access_token_expire_minutes()
-ACCESS_TOKEN_EXPIRE_DAYS = _get_access_token_expire_days()
+def get_access_token_expire_minutes() -> int:
+    """获取 Token 过期时间（分钟）- 延迟加载"""
+    return _get_access_token_expire_minutes()
+
+
+def get_access_token_expire_days() -> int:
+    """获取 Token 过期时间（天）- 延迟加载"""
+    return _get_access_token_expire_days()
+
+
+# 向后兼容的常量导出（延迟加载，避免模块导入时调用 get_settings）
+# 注意：这些现在需要通过函数访问，或者在使用时获取
+ACCESS_TOKEN_EXPIRE_MINUTES = None  # 已废弃，使用 get_access_token_expire_minutes()
+ACCESS_TOKEN_EXPIRE_DAYS = None  # 已废弃，使用 get_access_token_expire_days()
 
 
 def hash_password(password: str) -> str:
@@ -80,7 +91,7 @@ def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta]
     if expires_delta:
         expire = datetime.now(timezone.utc) + expires_delta
     else:
-        expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        expire = datetime.now(timezone.utc) + timedelta(minutes=get_access_token_expire_minutes())
 
     to_encode.update({"exp": expire, "iat": datetime.now(timezone.utc)})
     encoded_jwt = jwt.encode(to_encode, _get_secret_key(), algorithm=ALGORITHM)

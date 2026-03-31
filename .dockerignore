@@ -1,0 +1,61 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv
+venv/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Build
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Logs
+*.log
+logs/
+
+# Data (使用 volume 挂载)
+data/
+workspace/
+
+# Frontend (多阶段构建， Docker 内构建)
+frontend/node_modules/
+# 注意：不再排除 frontend/dist/，因为多阶段构建在 Docker 内完成
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Development files
+.env.local
+.env.*.local
+*.bak
+*.tmp
+
+# macOS
+.DS_Store
+
+# Docker
+docker-compose.override.yml

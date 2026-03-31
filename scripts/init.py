@@ -215,18 +215,18 @@ DEFAULT_PROMPTS = [
 
 DEFAULT_SYSTEM_SETTINGS = [
     # 应用基础配置
-    {"key": "app_name", "value": "Ops Agent", "description": "应用名称", "category": "app"},
-    {"key": "app_version", "value": "4.0.0", "description": "应用版本", "category": "app"},
-    {"key": "default_llm_provider", "value": "deepseek", "description": "默认 LLM 提供商", "category": "llm"},
-    {"key": "max_chat_history", "value": "50", "description": "最大聊天历史记录数", "category": "app"},
-    {"key": "enable_approval", "value": "true", "description": "是否启用审批流程", "category": "app"},
+    {"key": "app_name", "value": "Ops Agent", "name": "应用名称", "description": "应用的显示名称", "category": "app"},
+    {"key": "app_version", "value": "4.0.0", "name": "应用版本", "description": "应用版本号", "category": "app"},
+    {"key": "default_llm_provider", "value": "deepseek", "name": "默认LLM提供商", "description": "默认使用的大语言模型提供商", "category": "llm"},
+    {"key": "max_chat_history", "value": "50", "name": "最大聊天历史", "description": "保存的最大聊天历史记录数", "category": "app"},
+    {"key": "enable_approval", "value": "true", "name": "启用审批流程", "description": "是否对高危操作启用审批流程", "category": "app"},
     # 飞书配置
-    {"key": "feishu.chat_mode", "value": "ai_chat", "description": "飞书聊天模式", "category": "feishu"},
-    {"key": "feishu.connection_mode", "value": "auto", "description": "飞书连接模式", "category": "feishu"},
+    {"key": "feishu.chat_mode", "value": "ai_chat", "name": "飞书聊天模式", "description": "飞书消息处理模式", "category": "feishu"},
+    {"key": "feishu.connection_mode", "value": "auto", "name": "飞书连接模式", "description": "飞书连接方式", "category": "feishu"},
     # 功能开关
-    {"key": "features.v2_inspection_enabled", "value": "true", "description": "启用 V2 巡检", "category": "features"},
-    {"key": "features.v2_healing_enabled", "value": "true", "description": "启用 V2 自愈", "category": "features"},
-    {"key": "features.v2_security_enabled", "value": "true", "description": "启用 V2 安全审核", "category": "features"},
+    {"key": "features.v2_inspection_enabled", "value": "true", "name": "V2巡检功能", "description": "启用V2版本的巡检功能", "category": "features"},
+    {"key": "features.v2_healing_enabled", "value": "true", "name": "V2自愈功能", "description": "启用V2版本的自愈功能", "category": "features"},
+    {"key": "features.v2_security_enabled", "value": "true", "name": "V2安全审核", "description": "启用V2版本的安全审核功能", "category": "features"},
 ]
 
 
@@ -281,7 +281,7 @@ def init_admin_user():
         # 检查管理员角色
         admin_role = db.query(Role).filter(Role.name == "admin").first()
         if not admin_role:
-            admin_role = Role(name="admin", description="管理员角色，拥有所有权限")
+            admin_role = Role(name="admin", code="admin", description="管理员角色，拥有所有权限")
             db.add(admin_role)
             db.commit()
             logger.info("  ✅ 创建管理员角色: admin")
@@ -292,7 +292,9 @@ def init_admin_user():
             admin_perm = Permission(
                 code="admin",
                 name="管理员权限",
-                description="拥有所有权限"
+                description="拥有所有权限",
+                category="system",
+                resource="all"
             )
             db.add(admin_perm)
             db.commit()
@@ -374,6 +376,7 @@ def init_system_settings():
                 new_setting = SystemSetting(
                     key=setting["key"],
                     value=setting["value"],
+                    name=setting.get("name", setting["key"]),
                     description=setting.get("description", ""),
                     category=setting.get("category", "general"),
                 )
