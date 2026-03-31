@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     RELOAD: bool = False
 
     # ========== Application ==========
-    APP_NAME: str = "Ops Agent LangGraph"
+    APP_NAME: str = "OpsClaw LangGraph"
     DEBUG: bool = False
     LOG_LEVEL: str = "INFO"
 

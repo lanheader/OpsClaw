@@ -135,7 +135,7 @@ const AppLayout: React.FC = () => {
       <Header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#001529' }}>
         <div style={{ display: 'flex', alignItems: 'center' }}>
           <div style={{ color: 'white', fontSize: 20, fontWeight: 'bold', marginRight: 40 }}>
-            🤖 Ops Agent v3.0
+            🤖 OpsClaw v3.0
           </div>
           <Title level={5} style={{ color: 'white', margin: 0 }}>
             智能运维管理平台

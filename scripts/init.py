@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Ops Agent 统一初始化脚本
+OpsClaw 统一初始化脚本
 
 整合所有初始化步骤，包括：
 1. 创建数据库表
@@ -215,7 +215,7 @@ DEFAULT_PROMPTS = [
 
 DEFAULT_SYSTEM_SETTINGS = [
     # 应用基础配置
-    {"key": "app_name", "value": "Ops Agent", "name": "应用名称", "description": "应用的显示名称", "category": "app"},
+    {"key": "app_name", "value": "OpsClaw", "name": "应用名称", "description": "应用的显示名称", "category": "app"},
     {"key": "app_version", "value": "4.0.0", "name": "应用版本", "description": "应用版本号", "category": "app"},
     {"key": "default_llm_provider", "value": "deepseek", "name": "默认LLM提供商", "description": "默认使用的大语言模型提供商", "category": "llm"},
     {"key": "max_chat_history", "value": "50", "name": "最大聊天历史", "description": "保存的最大聊天历史记录数", "category": "app"},
@@ -492,7 +492,7 @@ def init_knowledge_base():
 def main():
     """主函数"""
     parser = argparse.ArgumentParser(
-        description="Ops Agent 统一初始化脚本",
+        description="OpsClaw 统一初始化脚本",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例：
@@ -506,7 +506,7 @@ def main():
     args = parser.parse_args()
 
     logger.info("=" * 60)
-    logger.info("🚀 Ops Agent 统一初始化")
+    logger.info("🚀 OpsClaw 统一初始化")
     logger.info("=" * 60)
     logger.info(f"  时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     logger.info(f"  模式: {'重置' if args.reset else '初始化'}")

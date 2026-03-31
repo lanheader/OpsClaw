@@ -20,7 +20,7 @@ services:
       - ./.env:/app/.env:ro
     environment:
       # 应用配置
-      - APP_NAME=Ops Agent
+      - APP_NAME=OpsClaw
       - DEBUG=${DEBUG:-false}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
 

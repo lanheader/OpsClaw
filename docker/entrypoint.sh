@@ -2,7 +2,7 @@
 set -e
 
 echo "=========================================="
-echo "  Ops Agent v4.0 - Starting..."
+echo "  OpsClaw v4.0 - Starting..."
 echo "=========================================="
 
 # PATH is already set by Dockerfile to include /app/.venv/bin

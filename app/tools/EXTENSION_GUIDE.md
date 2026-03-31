@@ -1,6 +1,6 @@
 # Tool Extension Guide
 
-This guide explains how to extend the Ops Agent tool system, including adding new tools, creating tool groups, and configuring permissions.
+This guide explains how to extend the OpsClaw tool system, including adding new tools, creating tool groups, and configuring permissions.
 
 ---
 
@@ -536,4 +536,4 @@ curl -X POST http://localhost:8000/api/v1/permissions/sync-tool-permissions \
 ---
 
 **Last Updated**: 2026-03-22
-**Version**: Ops Agent v3.0+
+**Version**: OpsClaw v3.0+

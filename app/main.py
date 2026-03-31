@@ -137,7 +137,7 @@ async def lifespan(app: FastAPI):
     """Application lifespan management"""
 
     # Startup
-    logger.info("🚀 Starting Ops Agent (DeepAgents Architecture v3.0 - Lazy Loading)")
+    logger.info("🚀 Starting OpsClaw (DeepAgents Architecture v3.0 - Lazy Loading)")
     logger.info(f"Environment: {settings.SECURITY_ENVIRONMENT}")
     logger.info(f"LLM Provider: {settings.DEFAULT_LLM_PROVIDER}")
     logger.info("ℹ️  DeepAgents 懒加载模式：Agent 将在第一次请求时动态创建")
@@ -202,7 +202,7 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown
-    logger.info("👋 Shutting down Ops Agent")
+    logger.info("👋 Shutting down OpsClaw")
 
     # Stop Feishu long connection (if started)
     if settings.FEISHU_ENABLED and settings.FEISHU_CONNECTION_MODE in ["longconn", "auto"]:

@@ -213,7 +213,7 @@ async def create_base_agent() -> Any:
         main_prompt = prompt_optimizer.get_prompt_for_agent("main-agent")
     except ValueError:
         # 如果数据库中没有，使用默认提示词
-        main_prompt = """你是一个智能运维助手（Ops Agent），负责帮助用户诊断和解决 Kubernetes 集群问题。
+        main_prompt = """你是一个智能运维助手（OpsClaw），负责帮助用户诊断和解决 Kubernetes 集群问题。
 
 ## 核心能力
 1. 集群状态查询和分析
@@ -385,7 +385,7 @@ async def get_ops_agent(
     db: Optional[Session] = None,
 ) -> Any:
     """
-    获取 Ops Agent
+    获取 OpsClaw
 
     v4.0 改进：
     - 使用按权限组合缓存的 Agent 实例，不再每次重建

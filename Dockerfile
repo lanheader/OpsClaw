@@ -1,4 +1,4 @@
-# Ops Agent Dockerfile
+# OpsClaw Dockerfile
 # 多阶段构建：前端构建 + Python 后端 + Nginx
 
 # ============================================================

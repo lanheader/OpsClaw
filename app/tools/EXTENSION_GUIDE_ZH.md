@@ -1,6 +1,6 @@
 # 工具扩展使用说明
 
-本指南说明如何扩展 Ops Agent 工具系统，包括新增工具、创建工具分组和配置权限。
+本指南说明如何扩展 OpsClaw 工具系统，包括新增工具、创建工具分组和配置权限。
 
 ---
 
@@ -536,4 +536,4 @@ curl -X POST http://localhost:8000/api/v1/permissions/sync-tool-permissions \
 ---
 
 **最后更新**: 2026-03-22
-**适用版本**: Ops Agent v3.0+
+**适用版本**: OpsClaw v3.0+

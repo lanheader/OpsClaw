@@ -47,7 +47,7 @@ export const Login: React.FC = () => {
       <Card style={{ width: '90%', maxWidth: 400, boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
         <Space direction="vertical" size="large" style={{ width: '100%' }}>
           <div style={{ textAlign: 'center' }}>
-            <Title level={2}>🤖 Ops Agent v3.0</Title>
+            <Title level={2}>🤖 OpsClaw v3.0</Title>
             <Text type="secondary">智能运维管理平台</Text>
           </div>
 

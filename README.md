@@ -1,4 +1,4 @@
-# Ops Agent (DeepAgents Edition)
+# OpsClaw (DeepAgents Edition)
 
 <div align="center">
 
@@ -18,7 +18,7 @@ English | [简体中文](README_ZH.md)
 
 ## 📖 Project Overview
 
-Ops Agent is an intelligent operations automation platform built on the **DeepAgents Framework**. It achieves full-process automation from monitoring, diagnosis to self-healing through the collaboration of a main agent and specialized sub-agents.
+OpsClaw is an intelligent operations automation platform built on the **DeepAgents Framework**. It achieves full-process automation from monitoring, diagnosis to self-healing through the collaboration of a main agent and specialized sub-agents.
 
 **Current Version**: v4.0 | **Subagents**: 6 | **Middleware**: 3 | **K8s Tools**: 28
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-启动 Ops Agent 服务器
+启动 OpsClaw 服务器
 使用 .env 配置文件中的 HOST、PORT、RELOAD 等配置
 """
 
@@ -19,7 +19,7 @@ def main():
     """启动服务器"""
     settings = get_settings()
 
-    print(f"🚀 启动 Ops Agent 服务器...")
+    print(f"🚀 启动 OpsClaw 服务器...")
     print(f"📍 地址: http://{settings.HOST}:{settings.PORT}")
     print(f"📖 API 文档: http://{settings.HOST}:{settings.PORT}/docs (ENABLE_DOCS={settings.ENABLE_DOCS})")
     print(f"🔄 热重载: {settings.RELOAD}")

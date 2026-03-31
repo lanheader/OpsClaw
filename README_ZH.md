@@ -1,4 +1,4 @@
-# Ops Agent (DeepAgents Edition)
+# OpsClaw (DeepAgents Edition)
 
 <div align="center">
 
@@ -18,7 +18,7 @@
 
 ## 📖 项目简介
 
-Ops Agent 是一个基于 **DeepAgents 框架**的智能运维自动化平台，通过主智能体和多个专业化子智能体协同工作，实现从监控、诊断到自愈的全流程自动化。
+OpsClaw 是一个基于 **DeepAgents 框架**的智能运维自动化平台，通过主智能体和多个专业化子智能体协同工作，实现从监控、诊断到自愈的全流程自动化。
 
 **当前版本**: v4.0 | **子智能体**: 6 个 | **中间件**: 3 个 | **K8s 工具**: 28 个
 
