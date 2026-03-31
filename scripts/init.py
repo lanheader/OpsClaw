@@ -214,19 +214,31 @@ DEFAULT_PROMPTS = [
 # ============================================================================
 
 DEFAULT_SYSTEM_SETTINGS = [
-    # 应用基础配置
-    {"key": "app_name", "value": "OpsClaw", "name": "应用名称", "description": "应用的显示名称", "category": "app"},
-    {"key": "app_version", "value": "4.0.0", "name": "应用版本", "description": "应用版本号", "category": "app"},
-    {"key": "default_llm_provider", "value": "deepseek", "name": "默认LLM提供商", "description": "默认使用的大语言模型提供商", "category": "llm"},
-    {"key": "max_chat_history", "value": "50", "name": "最大聊天历史", "description": "保存的最大聊天历史记录数", "category": "app"},
-    {"key": "enable_approval", "value": "true", "name": "启用审批流程", "description": "是否对高危操作启用审批流程", "category": "app"},
-    # 飞书配置
-    {"key": "feishu.chat_mode", "value": "ai_chat", "name": "飞书聊天模式", "description": "飞书消息处理模式", "category": "feishu"},
-    {"key": "feishu.connection_mode", "value": "auto", "name": "飞书连接模式", "description": "飞书连接方式", "category": "feishu"},
-    # 功能开关
-    {"key": "features.v2_inspection_enabled", "value": "true", "name": "V2巡检功能", "description": "启用V2版本的巡检功能", "category": "features"},
-    {"key": "features.v2_healing_enabled", "value": "true", "name": "V2自愈功能", "description": "启用V2版本的自愈功能", "category": "features"},
-    {"key": "features.v2_security_enabled", "value": "true", "name": "V2安全审核", "description": "启用V2版本的安全审核功能", "category": "features"},
+    # ========== system 系统配置 ==========
+    {"key": "system.environment", "value": "development", "name": "运行环境", "description": "应用运行环境", "category": "system"},
+    {"key": "system.log_level", "value": "INFO", "name": "日志级别", "description": "应用日志级别", "category": "system"},
+    {"key": "system.max_concurrent_requests", "value": "100", "name": "最大并发请求数", "description": "最大并发请求数", "category": "system"},
+
+    # ========== features 功能开关 ==========
+    {"key": "features.v2_inspection_enabled", "value": "false", "name": "启用 V2 巡检", "description": "启用V2版本的巡检功能", "category": "features"},
+    {"key": "features.v2_healing_enabled", "value": "false", "name": "启用 V2 自愈", "description": "启用V2版本的自愈功能", "category": "features"},
+    {"key": "features.v2_security_enabled", "value": "true", "name": "启用 V2 安全审核", "description": "启用V2版本的安全审核功能", "category": "features"},
+
+    # ========== kubernetes 集成配置 ==========
+    {"key": "kubernetes.enabled", "value": "false", "name": "启用 K8s 集成", "description": "是否启用 Kubernetes 集成", "category": "kubernetes"},
+    {"key": "kubernetes.kubeconfig", "value": "", "name": "Kubeconfig 路径", "description": "Kubeconfig 文件路径", "category": "kubernetes"},
+    {"key": "kubernetes.api_host", "value": "", "name": "K8s API Server 地址", "description": "Kubernetes API Server 地址", "category": "kubernetes"},
+    {"key": "kubernetes.auth_mode", "value": "token", "name": "K8s 认证模式", "description": "Kubernetes 认证模式 (token/kubeconfig)", "category": "kubernetes"},
+    {"key": "kubernetes.ca_cert", "value": "", "name": "K8s CA 证书", "description": "Kubernetes CA 证书", "category": "kubernetes"},
+    {"key": "kubernetes.token", "value": "", "name": "K8s ServiceAccount Token", "description": "Kubernetes ServiceAccount Token", "category": "kubernetes"},
+
+    # ========== prometheus 监控配置 ==========
+    {"key": "prometheus.enabled", "value": "false", "name": "启用 Prometheus", "description": "是否启用 Prometheus 集成", "category": "prometheus"},
+    {"key": "prometheus.url", "value": "http://localhost:9090", "name": "Prometheus URL", "description": "Prometheus 服务地址", "category": "prometheus"},
+
+    # ========== loki 日志配置 ==========
+    {"key": "loki.enabled", "value": "false", "name": "启用 Loki", "description": "是否启用 Loki 集成", "category": "loki"},
+    {"key": "loki.url", "value": "http://localhost:3100", "name": "Loki URL", "description": "Loki 服务地址", "category": "loki"},
 ]
 
 

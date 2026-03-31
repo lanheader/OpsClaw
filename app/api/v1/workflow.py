@@ -1,5 +1,5 @@
-# app/api/v2/workflow.py
-"""v2 工作流 API 端点 - DeepAgents 架构"""
+# app/api/v1/workflow.py
+"""工作流 API 端点 - DeepAgents 架构"""
 
 from typing import Optional
 from fastapi import APIRouter, HTTPException, status, Depends
@@ -12,7 +12,7 @@ from app.models.database import get_db
 from app.models.user import User
 from app.core.deps import get_current_user
 
-router = APIRouter(prefix="/v2/workflow", tags=["workflow-v2"])
+router = APIRouter(prefix="/workflow", tags=["workflow"])
 
 
 class WorkflowExecuteRequest(BaseModel):

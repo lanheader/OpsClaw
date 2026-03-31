@@ -16,7 +16,7 @@ export const workflowAPI = {
    */
   execute: async (request: WorkflowExecuteRequest): Promise<WorkflowExecuteResponse> => {
     const response = await apiClient.post<WorkflowExecuteResponse>(
-      '/v2/workflow/execute',
+      '/v1/workflow/execute',
       request
     );
     return response.data;
@@ -27,7 +27,7 @@ export const workflowAPI = {
    */
   getStatus: async (taskId: string): Promise<WorkflowStatusResponse> => {
     const response = await apiClient.get<WorkflowStatusResponse>(
-      `/v2/workflow/${taskId}/status`
+      `/v1/workflow/${taskId}/status`
     );
     return response.data;
   },
@@ -40,7 +40,7 @@ export const workflowAPI = {
     request: WorkflowResumeRequest
   ): Promise<WorkflowExecuteResponse> => {
     const response = await apiClient.post<WorkflowExecuteResponse>(
-      `/v2/workflow/${taskId}/resume`,
+      `/v1/workflow/${taskId}/resume`,
       request
     );
     return response.data;
@@ -50,7 +50,7 @@ export const workflowAPI = {
    * 获取健康状态
    */
   getHealth: async (): Promise<any> => {
-    const response = await apiClient.get('/v2/health');
+    const response = await apiClient.get('/v1/health');
     return response.data;
   },
 };

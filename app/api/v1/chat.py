@@ -1,4 +1,4 @@
-# app/api/v2/chat.py
+# app/api/v1/chat.py
 """
 聊天 API 端点
 
@@ -44,7 +44,7 @@ from app.services.agent_chat_service import (
 from app.utils.logger import clear_request_context, get_logger, set_request_context
 from app.utils.llm_helper import ensure_final_report_in_state
 
-router = APIRouter(prefix="/v2/chat", tags=["chat"])
+router = APIRouter(prefix="/chat", tags=["chat"])
 logger = get_logger(__name__)
 
 

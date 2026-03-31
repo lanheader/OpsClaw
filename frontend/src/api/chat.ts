@@ -54,7 +54,7 @@ export const chatApi = {
    * 创建新会话
    */
   createSession: async (title?: string): Promise<ChatSession> => {
-    const response = await apiClient.post('/v2/chat/sessions', { title });
+    const response = await apiClient.post('/v1/chat/sessions', { title });
     return response.data;
   },
 
@@ -62,7 +62,7 @@ export const chatApi = {
    * 获取会话列表
    */
   getSessions: async (skip: number = 0, limit: number = 20): Promise<ChatSessionListResponse> => {
-    const response = await apiClient.get('/v2/chat/sessions', {
+    const response = await apiClient.get('/v1/chat/sessions', {
       params: { skip, limit }
     });
     return response.data;
@@ -72,7 +72,7 @@ export const chatApi = {
    * 获取会话详情
    */
   getSession: async (sessionId: string): Promise<ChatSession> => {
-    const response = await apiClient.get(`/v2/chat/sessions/${sessionId}`);
+    const response = await apiClient.get(`/v1/chat/sessions/${sessionId}`);
     return response.data;
   },
 
@@ -80,14 +80,14 @@ export const chatApi = {
    * 删除会话
    */
   deleteSession: async (sessionId: string): Promise<void> => {
-    await apiClient.delete(`/v2/chat/sessions/${sessionId}`);
+    await apiClient.delete(`/v1/chat/sessions/${sessionId}`);
   },
 
   /**
    * 获取消息历史
    */
   getMessages: async (sessionId: string, skip: number = 0, limit: number = 50): Promise<ChatMessage[]> => {
-    const response = await apiClient.get(`/v2/chat/sessions/${sessionId}/messages`, {
+    const response = await apiClient.get(`/v1/chat/sessions/${sessionId}/messages`, {
       params: { skip, limit }
     });
     return response.data;
@@ -112,7 +112,7 @@ export const chatApi = {
 
     try {
       const response = await fetch(
-        `${API_BASE_URL}/v2/chat/sessions/${sessionId}/messages`,
+        `${API_BASE_URL}/v1/chat/sessions/${sessionId}/messages`,
         {
           method: 'POST',
           headers: {
@@ -214,7 +214,7 @@ export const chatApi = {
 
     try {
       const response = await fetch(
-        `${API_BASE_URL}/v2/chat/sessions/${sessionId}/resume`,
+        `${API_BASE_URL}/v1/chat/sessions/${sessionId}/resume`,
         {
           method: 'POST',
           headers: {

@@ -17,7 +17,7 @@ from app.models.incident_knowledge import IncidentKnowledgeBase
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/v2/knowledge", tags=["Knowledge Base"])
+router = APIRouter(prefix="/knowledge", tags=["Knowledge Base"])
 
 
 # ==================== Pydantic 模型 ====================

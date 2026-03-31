@@ -32,9 +32,9 @@ async def universal_webhook(
 
     支持所有渠道的消息接收：
 
-    - **飞书**: POST /api/v2/messaging/webhook/feishu
-    - **Slack**: POST /api/v2/messaging/webhook/slack
-    - **微信**: POST /api/v2/messaging/webhook/wechat
+    - **飞书**: POST /api/v1/messaging/webhook/feishu
+    - **Slack**: POST /api/v1/messaging/webhook/slack
+    - **微信**: POST /api/v1/messaging/webhook/wechat
 
     请求头（渠道特定）：
     - 飞书：x_lark_request_timestamp, x_lark_request_nonce, x_lark_signature
