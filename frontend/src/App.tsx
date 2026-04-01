@@ -15,7 +15,7 @@ import {
   EditOutlined,
   ClockCircleOutlined,
 } from '@ant-design/icons';
-import React, { useState, useEffect } from 'react';
+import React, { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import axios from 'axios';
@@ -51,7 +51,6 @@ const AppLayout: React.FC = () => {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   const { hasPermission, loading: permissionLoading } = usePermission();
-  const [onboardingChecked, setOnboardingChecked] = useState(false);
 
   // 检查是否需要初始化
   useEffect(() => {
@@ -60,9 +59,8 @@ const AppLayout: React.FC = () => {
       if (!res.data.initialized) {
         navigate('/onboarding', { replace: true });
       }
-      setOnboardingChecked(true);
     }).catch(() => {
-      setOnboardingChecked(true);
+      // ignore
     });
   }, []);
 

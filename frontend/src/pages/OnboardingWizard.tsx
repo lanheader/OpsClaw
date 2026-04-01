@@ -51,7 +51,7 @@ const OnboardingWizard: React.FC = () => {
   const checkStatus = async () => {
     try {
       const res = await onboardingApi.getStatus();
-      if (res.data.initialized) {
+      if (res.initialized) {
         navigate('/', { replace: true });
       }
     } catch {
