@@ -77,15 +77,8 @@ class AgentInvoker:
 
             # 处理审批请求（interrupt_on 触发）
             if response.needs_approval and response.approval_data:
-                # 动态权限判断：如果用户有豁免权限，自动放行
-                if self._should_auto_approve(context, response.approval_data):
-                    logger.info(f"✅ [自动放行] 用户拥有豁免权限，跳过审批")
-                    # 用 Command 恢复执行（批准）
-                    await self._resume_with_approval(context, response.approval_data)
-                    return []
-                else:
-                    await self._handle_approval_request(context, response.approval_data)
-                    return []
+                await self._handle_approval_request(context, response.approval_data)
+                return []
 
             # 处理正常回复
             reply = response.reply
@@ -135,97 +128,6 @@ class AgentInvoker:
             await self._send_reply(context.chat_id, fallback, context)
             self._save_to_db(context.session_id, MessageRole.ASSISTANT, fallback)
             return [fallback]
-
-    def _should_auto_approve(self, context: ChannelContext, approval_data: Dict[str, Any]) -> bool:
-        """
-        动态判断是否自动放行审批
-
-        规则：
-        1. 用户是 admin 角色且该工具不在限制列表中 → 放行
-        2. 用户有审批豁免权限 → 放行
-        3. 其他情况 → 需要审批
-        """
-        if not context.user_permissions:
-            return False
-
-        # admin 角色拥有所有权限，可以自动放行
-        if "admin" in context.user_permissions:
-            return True
-
-        return False
-
-    async def _resume_with_approval(self, context: ChannelContext, approval_data: Dict[str, Any]) -> None:
-        """自动批准后恢复 agent 执行（通过 LangGraph Command.resume）"""
-        try:
-            from app.deepagents.main_agent import create_base_agent, get_thread_config
-
-            # 获取 agent 和配置
-            agent = await create_base_agent()
-            config = get_thread_config(context.session_id)
-
-            action_requests = approval_data.get("action_requests", [])
-            if action_requests:
-                action_names = [a.get("name", "") for a in action_requests]
-                logger.info(f"✅ [自动放行] 已批准工具: {action_names}")
-
-            # 使用 Command 恢复被中断的图执行
-            from langgraph.types import Command
-            resume_value = {"approved": True, "by": "auto", "role": "admin"}
-
-            full_response = ""
-            final_state = {}
-
-            async for event in agent.astream(
-                Command(resume=resume_value), config=config
-            ):
-                # 处理可能的二次中断（连续多步审批）
-                if isinstance(event, dict) and "__interrupt__" in event:
-                    logger.warning(f"⚠️ [自动放行] 检测到二次中断，继续自动放行")
-                    continue
-
-                # 处理 complete 事件
-                if isinstance(event, dict) and event.get("type") == "complete":
-                    state = event.get("state", {})
-                    final_state.update(state)
-                    continue
-
-                # 收集节点状态
-                if isinstance(event, dict):
-                    for key, val in event.items():
-                        if not key.startswith("__") and isinstance(val, dict):
-                            final_state.update(val)
-
-            # 提取回复
-            reply = ""
-            if "messages" in final_state:
-                for msg in reversed(final_state["messages"]):
-                    if hasattr(msg, "content") and msg.content:
-                        reply = msg.content
-                        break
-            if not reply:
-                reply = final_state.get("final_report", final_state.get("formatted_response", ""))
-
-            if reply:
-                await self._send_reply(context.chat_id, reply, context)
-                self._save_to_db(context.session_id, MessageRole.ASSISTANT, reply)
-            else:
-                logger.warning(f"⚠️ [自动放行] 恢复后未获取到回复")
-
-            # 恢复会话状态
-            from app.models.database import SessionLocal
-            from app.models.chat_session import ChatSession, SessionState
-            db = SessionLocal()
-            try:
-                session = db.query(ChatSession).filter_by(session_id=context.session_id).first()
-                if session and session.state == SessionState.AWAITING_APPROVAL.value:
-                    session.state = SessionState.NORMAL.value
-                    session.pending_approval_data = None
-                    db.commit()
-            finally:
-                db.close()
-
-        except Exception as e:
-            logger.error(f"❌ 自动放行恢复执行失败: {e}", exc_info=True)
 
     async def _handle_approval_request(
         self,

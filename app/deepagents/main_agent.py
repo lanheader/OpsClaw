@@ -35,8 +35,6 @@ logger = get_logger(__name__)
 
 # ========== 全局缓存 ==========
 
-_cached_base_agent: Optional[Any] = None
-_base_agent_ready = False
 
 
 # ========== 组件加载函数 ==========
@@ -160,27 +158,18 @@ FILE_OUTPUT_PROMPT = """
 
 # ========== 基础 Agent 创建（应用启动时调用一次） ==========
 
-async def create_base_agent() -> Any:
+async def create_base_agent(user_id: Optional[int] = None, db: Optional[Session] = None) -> Any:
     """
-    创建基础 Agent（应用启动时调用一次）。
+    懒加载创建 Agent，每次调用都新建（不缓存）。
 
-    特点：
-    - 加载所有工具（不做权限过滤，由 DynamicPermissionMiddleware 处理）
-    - 加载所有 SubAgent
-    - 不设置 interrupt_on（由 DynamicApprovalMiddleware 处理）
-    - 配置 Skills、Filesystem 等 deepagents 内置能力
-    - 利用 deepagents 内置的 SummarizationMiddleware（自动对话压缩）
+    在创建 DeepAgents 前从数据库加载当前用户的审批配置，
+    通过 interrupt_on 传入，框架级保证拦截。
 
-    Returns:
-        编译后的 DeepAgents 图
+    Args:
+        user_id: 用户 ID，用于查询角色和审批配置
+        db: 数据库会话
     """
-    global _cached_base_agent, _base_agent_ready
-
-    if _base_agent_ready and _cached_base_agent is not None:
-        logger.info("📦 使用缓存的 base_agent")
-        return _cached_base_agent
-
-    logger.info("🏗️ 创建基础 Agent（静态模式，包含所有工具和 SubAgent）")
+    logger.info("🏗️ 创建 Agent（懒加载，从数据库加载审批配置）")
 
     # 0. 获取项目根目录
     project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
@@ -210,20 +199,36 @@ async def create_base_agent() -> Any:
     from app.middleware.dynamic_permission_middleware import DynamicPermissionMiddleware
     from app.middleware.dynamic_approval_middleware import DynamicApprovalMiddleware
 
-    # 获取需要审批的工具列表（从数据库）
+    # 获取需要审批的工具列表（根据用户角色动态加载）
     interrupt_on = {}
     try:
-        from app.models.database import SessionLocal
         from app.services.approval_config_service import ApprovalConfigService
-        _db = SessionLocal()
-        tools_need_approval = ApprovalConfigService.get_tools_require_approval(_db)
+        # 查用户角色
+        user_role = None
+        if user_id is not None and db is not None:
+            try:
+                from app.models.user import UserRole, Role
+                roles = (
+                    db.query(Role.name)
+                    .join(UserRole, Role.id == UserRole.role_id)
+                    .filter(UserRole.user_id == user_id)
+                    .all()
+                )
+                user_role = roles[0][0] if roles else None
+            except Exception as e:
+                logger.warning(f"获取用户角色失败: {e}")
+
+        tools_need_approval = ApprovalConfigService.get_tools_require_approval(
+            db, user_role=user_role
+        )
         for tool_name in tools_need_approval:
             interrupt_on[tool_name] = True
-        _db.close()
-        logger.info(f"🔒 从数据库加载 interrupt_on 配置: {len(interrupt_on)} 个工具需要审批")
+        logger.info(
+            f"🔒 审批配置: user_id={user_id}, role={user_role}, "
+            f"需审批工具={list(interrupt_on.keys())}"
+        )
     except Exception as e:
-        logger.warning(f"⚠️ 加载审批配置失败: {e}，使用默认高风险工具列表")
-        # 安全兜底：默认拦截所有已知高风险工具
+        logger.warning(f"⚠️ 加载审批配置失败: {e}，安全兜底拦截所有高风险工具")
         for t in [
             "force_delete_pod", "delete_pod", "delete_deployment",
             "delete_service", "delete_config_map", "delete_secret",
@@ -284,24 +289,18 @@ async def create_base_agent() -> Any:
         interrupt_on=interrupt_on if interrupt_on else None,
     )
 
-    # 8. 缓存
-    _cached_base_agent = agent
-    _base_agent_ready = True
-
-    logger.info("✅ 基础 Agent 创建完成（已缓存，后续请求复用）")
+    logger.info("✅ Agent 创建完成（懒加载）")
     return agent
 
 
 def get_cached_base_agent() -> Optional[Any]:
-    """获取缓存的 base_agent"""
-    return _cached_base_agent
+    """懒加载模式，返回 None"""
+    return None
 
 
 def invalidate_base_agent() -> None:
-    """清除 base_agent 缓存（LLM 配置变更时调用）"""
-    global _cached_base_agent, _base_agent_ready
-    _cached_base_agent = None
-    _base_agent_ready = False
+    """清除（懒加载无需操作）"""
+    pass
     logger.info("🗑️ base_agent 缓存已清除")
 
 
@@ -435,8 +434,8 @@ async def get_ops_agent(
     Returns:
         DynamicAgentWrapper 包装的 Agent 实例
     """
-    # 1. 获取或创建 base_agent
-    base_agent = await create_base_agent()
+    # 1. 创建 agent（懒加载，按用户角色动态生成 interrupt_on）
+    base_agent = await create_base_agent(user_id=user_id, db=db)
 
     # 2. 获取用户权限（如果提供了 user_id 和 db）
     if user_id is not None and db is not None:
