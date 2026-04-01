@@ -202,7 +202,8 @@ async def create_base_agent(user_id: Optional[int] = None, db: Optional[Session]
         user_role = None
         if user_id is not None and db is not None:
             try:
-                from app.models.user import UserRole, Role
+                from app.models.user_role import UserRole
+                from app.models.role import Role
                 roles = (
                     db.query(Role.name)
                     .join(UserRole, Role.id == UserRole.role_id)
