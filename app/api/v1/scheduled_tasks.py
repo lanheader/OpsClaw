@@ -1,26 +1,32 @@
 # app/api/v1/scheduled_tasks.py
 """
-定时任务管理 API
+定时任务管理 API - 按需求文档规范
+
+路由前缀: /tasks（在 main.py 中注册）
 """
 
-from datetime import datetime
+from datetime import datetime, timezone as dt_timezone
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import desc
+from sqlalchemy import desc, func as sql_func
 
 from app.models.database import get_db
-from app.models.scheduled_task import ScheduledTask, TaskExecutionLog, TaskStatus, TaskType
+from app.models.scheduled_task import ScheduledTask, TaskExecution, TaskType, ExecutionStatus
 from app.models.user import User
 from app.schemas.scheduled_task import (
     ScheduledTaskCreate,
     ScheduledTaskUpdate,
     ScheduledTaskResponse,
     ScheduledTaskListResponse,
-    TaskExecutionLogResponse,
-    TaskExecutionLogListResponse,
+    TaskExecutionResponse,
+    TaskExecutionListResponse,
+    TaskStatsResponse,
+    TodayStats,
     TaskTypeEnum,
-    TaskStatusEnum,
+    ExecutionStatusEnum,
+    TriggerTypeEnum,
+    TaskOperationResult,
 )
 from app.services.scheduler_service import get_scheduler_service
 from app.api.v1.auth import get_current_user
@@ -28,59 +34,75 @@ from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-router = APIRouter(prefix="/scheduled-tasks", tags=["scheduled-tasks"])
+# 注意：路由前缀是 /tasks，不是 /scheduled-tasks
+router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 
-def _task_to_response(task: ScheduledTask) -> ScheduledTaskResponse:
+def _task_to_response(task: ScheduledTask, include_next_run: bool = True) -> ScheduledTaskResponse:
     """转换任务模型为响应"""
     scheduler = get_scheduler_service()
-    next_run = scheduler.get_next_run_time(task.id)
+    next_run = None
+    if include_next_run and task.enabled:
+        next_run = scheduler.get_next_run_time(task.id)
 
     return ScheduledTaskResponse(
         id=task.id,
         name=task.name,
         description=task.description,
-        task_type=task.task_type.value if task.task_type else "cron",
-        cron_expression=task.cron_expression,
-        scheduled_time=task.scheduled_time,
-        agent_task=task.agent_task,
-        parameters=task.parameters or {},
-        status=task.status.value if task.status else "pending",
+        task_type=task.task_type,
+        cron_expr=task.cron_expr,
+        timezone=task.timezone or "Asia/Shanghai",
+        task_params=task.task_params,
         enabled=task.enabled,
+        timeout=task.timeout or 600,
+        notify_on_fail=task.notify_on_fail or False,
+        notify_target=task.notify_target,
         last_run_time=task.last_run_time,
         last_run_status=task.last_run_status,
-        last_run_result=task.last_run_result,
         next_run_time=next_run or task.next_run_time,
-        run_count=task.run_count,
-        success_count=task.success_count,
-        failure_count=task.failure_count,
-        created_by=task.created_by,
+        run_count=task.run_count or 0,
+        success_count=task.success_count or 0,
+        failure_count=task.failure_count or 0,
         created_at=task.created_at,
         updated_at=task.updated_at,
     )
 
 
-# ========== 任务 CRUD ==========
+def _execution_to_response(execution: TaskExecution, task_name: Optional[str] = None) -> TaskExecutionResponse:
+    """转换执行记录为响应"""
+    return TaskExecutionResponse(
+        id=execution.id,
+        task_id=execution.task_id,
+        status=execution.status,
+        trigger_type=execution.trigger_type,
+        started_at=execution.started_at,
+        finished_at=execution.finished_at,
+        duration_ms=execution.duration_ms,
+        result_summary=execution.result_summary,
+        error_message=execution.error_message,
+        created_at=execution.created_at,
+        task_name=task_name,
+    )
+
+
+# ========== 任务管理 ==========
 
 @router.get("", response_model=ScheduledTaskListResponse)
 async def list_tasks(
-    status: Optional[TaskStatusEnum] = Query(None, description="按状态过滤"),
-    task_type: Optional[TaskTypeEnum] = Query(None, description="按类型过滤"),
     enabled: Optional[bool] = Query(None, description="按启用状态过滤"),
-    page: int = Query(0, ge=0),
-    size: int = Query(20, ge=1, le=100),
+    task_type: Optional[TaskTypeEnum] = Query(None, description="按任务类型过滤"),
+    page: int = Query(0, ge=0, description="页码，从 0 开始"),
+    size: int = Query(20, ge=1, le=100, description="每页数量"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """获取定时任务列表"""
     query = db.query(ScheduledTask)
 
-    if status:
-        query = query.filter(ScheduledTask.status == status.value)
-    if task_type:
-        query = query.filter(ScheduledTask.task_type == task_type.value)
     if enabled is not None:
         query = query.filter(ScheduledTask.enabled == enabled)
+    if task_type:
+        query = query.filter(ScheduledTask.task_type == task_type.value)
 
     total = query.count()
     tasks = query.order_by(desc(ScheduledTask.created_at)).offset(page * size).limit(size).all()
@@ -88,6 +110,40 @@ async def list_tasks(
     return ScheduledTaskListResponse(
         tasks=[_task_to_response(t) for t in tasks],
         total=total,
+    )
+
+
+@router.get("/stats", response_model=TaskStatsResponse)
+async def get_task_stats(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """获取任务统计信息"""
+    # 总任务数
+    total = db.query(ScheduledTask).count()
+    # 已启用任务数
+    enabled_count = db.query(ScheduledTask).filter(ScheduledTask.enabled == True).count()
+
+    # 今日统计
+    today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    today_executions = db.query(TaskExecution).filter(
+        TaskExecution.started_at >= today_start
+    ).all()
+
+    today_total = len(today_executions)
+    today_running = sum(1 for e in today_executions if e.status == ExecutionStatusEnum.RUNNING.value)
+    today_success = sum(1 for e in today_executions if e.status == ExecutionStatusEnum.SUCCESS.value)
+    today_failed = sum(1 for e in today_executions if e.status in [ExecutionStatusEnum.FAILED.value, ExecutionStatusEnum.TIMEOUT.value])
+
+    return TaskStatsResponse(
+        total=total,
+        enabled=enabled_count,
+        today_stats=TodayStats(
+            total=today_total,
+            running=today_running,
+            success=today_success,
+            failed=today_failed,
+        ),
     )
 
 
@@ -117,18 +173,31 @@ async def create_task(
     task = ScheduledTask(
         name=request.name,
         description=request.description,
-        task_type=TaskType.CRON if request.task_type == TaskTypeEnum.CRON else TaskType.ONCE,
-        cron_expression=request.cron_expression,
-        scheduled_time=request.scheduled_time,
-        agent_task=request.agent_task,
-        parameters=request.parameters,
-        created_by=current_user.id,
-        status=TaskStatus.PENDING,
-        enabled=True,
+        task_type=request.task_type.value,
+        cron_expr=request.cron_expr,
+        timezone=request.timezone or "Asia/Shanghai",
+        task_params=request.task_params,
+        enabled=request.enabled if request.enabled is not None else True,
+        timeout=request.timeout or 600,
+        notify_on_fail=request.notify_on_fail or False,
+        notify_target=request.notify_target,
     )
 
-    if not scheduler.create_task(db, task):
-        raise HTTPException(status_code=500, detail="创建任务失败")
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+
+    # 添加到调度器
+    if task.enabled:
+        scheduler.add_task(task)
+        # 更新下次执行时间
+        next_run = scheduler.get_next_run_time(task.id)
+        if next_run:
+            task.next_run_time = next_run
+            db.commit()
+            db.refresh(task)
+
+    logger.info(f"创建定时任务: {task.name} (ID: {task.id})")
 
     return _task_to_response(task)
 
@@ -143,15 +212,31 @@ async def update_task(
     """更新定时任务"""
     scheduler = get_scheduler_service()
 
-    updates = request.model_dump(exclude_unset=True)
-
-    # 转换枚举类型
-    if "task_type" in updates:
-        updates["task_type"] = TaskType.CRON if updates["task_type"] == TaskTypeEnum.CRON else TaskType.ONCE
-
-    task = scheduler.update_task(db, task_id, updates)
+    task = db.query(ScheduledTask).filter(ScheduledTask.id == task_id).first()
     if not task:
-        raise HTTPException(status_code=404, detail="任务不存在或更新失败")
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    # 更新字段
+    update_data = request.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        if hasattr(task, key):
+            setattr(task, key, value)
+
+    db.commit()
+    db.refresh(task)
+
+    # 重新调度
+    if task.enabled:
+        scheduler.update_task(task)
+        next_run = scheduler.get_next_run_time(task.id)
+        if next_run:
+            task.next_run_time = next_run
+            db.commit()
+            db.refresh(task)
+    else:
+        scheduler.remove_task(task.id)
+
+    logger.info(f"更新定时任务: {task.name} (ID: {task.id})")
 
     return _task_to_response(task)
 
@@ -165,117 +250,165 @@ async def delete_task(
     """删除定时任务"""
     scheduler = get_scheduler_service()
 
-    if not scheduler.delete_task(db, task_id):
-        raise HTTPException(status_code=404, detail="任务不存在或删除失败")
+    task = db.query(ScheduledTask).filter(ScheduledTask.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    # 从调度器中移除
+    scheduler.remove_task(task.id)
+
+    # 删除任务（级联删除执行记录）
+    db.delete(task)
+    db.commit()
+
+    logger.info(f"删除定时任务: {task.name} (ID: {task_id})")
 
     return {"success": True, "message": "任务已删除"}
 
 
-# ========== 任务操作 ==========
-
-@router.post("/{task_id}/enable")
-async def enable_task(
+@router.post("/{task_id}/toggle", response_model=TaskOperationResult)
+async def toggle_task(
     task_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """启用任务"""
+    """启用/禁用任务"""
     scheduler = get_scheduler_service()
 
-    if not scheduler.enable_task(db, task_id):
-        raise HTTPException(status_code=404, detail="任务不存在或启用失败")
+    task = db.query(ScheduledTask).filter(ScheduledTask.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
 
-    return {"success": True, "message": "任务已启用"}
+    # 切换状态
+    task.enabled = not task.enabled
+    db.commit()
+    db.refresh(task)
+
+    # 更新调度器
+    if task.enabled:
+        scheduler.add_task(task)
+        next_run = scheduler.get_next_run_time(task.id)
+        if next_run:
+            task.next_run_time = next_run
+            db.commit()
+        action = "启用"
+    else:
+        scheduler.remove_task(task.id)
+        action = "禁用"
+
+    logger.info(f"{action}定时任务: {task.name} (ID: {task_id})")
+
+    return TaskOperationResult(
+        success=True,
+        message=f"任务已{action}",
+        task_id=task_id,
+    )
 
 
-@router.post("/{task_id}/disable")
-async def disable_task(
-    task_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """禁用任务"""
-    scheduler = get_scheduler_service()
-
-    if not scheduler.disable_task(db, task_id):
-        raise HTTPException(status_code=404, detail="任务不存在或禁用失败")
-
-    return {"success": True, "message": "任务已禁用"}
-
-
-@router.post("/{task_id}/run")
+@router.post("/{task_id}/run", response_model=TaskOperationResult)
 async def run_task_now(
     task_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """立即执行任务"""
+    """手动触发执行任务"""
     scheduler = get_scheduler_service()
 
-    if not scheduler.run_task_now(db, task_id):
-        raise HTTPException(status_code=404, detail="任务不存在或执行失败")
-
-    return {"success": True, "message": "任务已开始执行"}
-
-
-# ========== 执行日志 ==========
-
-@router.get("/{task_id}/logs", response_model=TaskExecutionLogListResponse)
-async def get_task_logs(
-    task_id: int,
-    page: int = Query(0, ge=0),
-    size: int = Query(20, ge=1, le=100),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """获取任务执行日志"""
-    # 验证任务存在
     task = db.query(ScheduledTask).filter(ScheduledTask.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
 
-    query = db.query(TaskExecutionLog).filter(TaskExecutionLog.task_id == task_id)
-    total = query.count()
-    logs = query.order_by(desc(TaskExecutionLog.started_at)).offset(page * size).limit(size).all()
+    # 检查是否有正在执行的任务
+    running_execution = db.query(TaskExecution).filter(
+        TaskExecution.task_id == task_id,
+        TaskExecution.status == ExecutionStatusEnum.RUNNING.value
+    ).first()
 
-    return TaskExecutionLogListResponse(
-        logs=[
-            TaskExecutionLogResponse(
-                id=log.id,
-                task_id=log.task_id,
-                started_at=log.started_at,
-                finished_at=log.finished_at,
-                duration_seconds=log.duration_seconds,
-                status=log.status,
-                result=log.result,
-                error_message=log.error_message,
-                session_id=log.session_id,
-            )
-            for log in logs
-        ],
+    if running_execution:
+        raise HTTPException(status_code=400, detail="任务正在执行中，请等待完成")
+
+    # 创建执行记录
+    execution = TaskExecution(
+        task_id=task_id,
+        status=ExecutionStatusEnum.PENDING.value,
+        trigger_type=TriggerTypeEnum.MANUAL.value,
+    )
+    db.add(execution)
+    db.commit()
+    db.refresh(execution)
+
+    # 异步执行任务
+    scheduler.run_task_now(task_id, execution.id)
+
+    logger.info(f"手动触发任务: {task.name} (ID: {task_id})")
+
+    return TaskOperationResult(
+        success=True,
+        message="任务已开始执行",
+        task_id=task_id,
+        data={"execution_id": execution.id},
+    )
+
+
+# ========== 执行记录 ==========
+
+@router.get("/{task_id}/executions", response_model=TaskExecutionListResponse)
+async def get_task_executions(
+    task_id: int,
+    status: Optional[ExecutionStatusEnum] = Query(None, description="按状态过滤"),
+    page: int = Query(0, ge=0, description="页码"),
+    size: int = Query(20, ge=1, le=100, description="每页数量"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """获取单个任务的执行记录"""
+    task = db.query(ScheduledTask).filter(ScheduledTask.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    query = db.query(TaskExecution).filter(TaskExecution.task_id == task_id)
+
+    if status:
+        query = query.filter(TaskExecution.status == status.value)
+
+    total = query.count()
+    executions = query.order_by(desc(TaskExecution.started_at)).offset(page * size).limit(size).all()
+
+    return TaskExecutionListResponse(
+        executions=[_execution_to_response(e, task.name) for e in executions],
         total=total,
     )
 
 
-# ========== 统计信息 ==========
-
-@router.get("/stats/summary")
-async def get_task_stats(
+@router.get("/executions", response_model=TaskExecutionListResponse)
+async def get_all_executions(
+    task_id: Optional[int] = Query(None, description="按任务ID过滤"),
+    status: Optional[ExecutionStatusEnum] = Query(None, description="按状态过滤"),
+    trigger_type: Optional[TriggerTypeEnum] = Query(None, description="按触发类型过滤"),
+    page: int = Query(0, ge=0, description="页码"),
+    size: int = Query(20, ge=1, le=100, description="每页数量"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """获取任务统计信息"""
-    total = db.query(ScheduledTask).count()
-    enabled = db.query(ScheduledTask).filter(ScheduledTask.enabled == True).count()
-    running = db.query(ScheduledTask).filter(ScheduledTask.status == TaskStatus.RUNNING).count()
-    completed = db.query(ScheduledTask).filter(ScheduledTask.status == TaskStatus.COMPLETED).count()
-    failed = db.query(ScheduledTask).filter(ScheduledTask.status == TaskStatus.FAILED).count()
+    """获取所有执行记录"""
+    query = db.query(TaskExecution)
 
-    return {
-        "total": total,
-        "enabled": enabled,
-        "disabled": total - enabled,
-        "running": running,
-        "completed": completed,
-        "failed": failed,
-    }
+    if task_id:
+        query = query.filter(TaskExecution.task_id == task_id)
+    if status:
+        query = query.filter(TaskExecution.status == status.value)
+    if trigger_type:
+        query = query.filter(TaskExecution.trigger_type == trigger_type.value)
+
+    total = query.count()
+    executions = query.order_by(desc(TaskExecution.started_at)).offset(page * size).limit(size).all()
+
+    # 获取任务名称映射
+    task_ids = list(set(e.task_id for e in executions))
+    tasks = db.query(ScheduledTask).filter(ScheduledTask.id.in_(task_ids)).all()
+    task_name_map = {t.id: t.name for t in tasks}
+
+    return TaskExecutionListResponse(
+        executions=[_execution_to_response(e, task_name_map.get(e.task_id)) for e in executions],
+        total=total,
+    )
