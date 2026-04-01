@@ -42,11 +42,11 @@ def _get_llm(llm: Optional[BaseChatModel] = None) -> BaseChatModel:
     return llm
 
 
-def _load_all_subagents() -> List[SubAgent]:
-    """加载所有 Subagent 列表"""
+def _load_all_subagents(db: Optional[Session] = None) -> List[SubAgent]:
+    """加载所有 Subagent 列表（工具按集成开关动态过滤）"""
     from app.deepagents.subagents import get_all_subagents
 
-    subagents = get_all_subagents()
+    subagents = get_all_subagents(db=db)
 
     # 日志输出
     logger.info("=" * 60)
@@ -188,7 +188,7 @@ async def create_base_agent(user_id: Optional[int] = None, db: Optional[Session]
     llm = _get_llm()
 
     # 2. 按用户权限加载工具（不过滤则加载全部）
-    subagents = _load_all_subagents()
+    subagents = _load_all_subagents(db)
     tools = _load_tools_for_user(user_id, db)
 
     # 3. 获取基础设施

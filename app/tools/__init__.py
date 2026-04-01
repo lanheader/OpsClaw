@@ -49,6 +49,8 @@ def get_all_tools(
 def get_tools_by_group(
     group_code: str,
     permissions: Optional[Set[str]] = None,
+    user_id: Optional[int] = None,
+    db: Optional[Session] = None,
 ) -> List[Any]:
     """
     获取指定分组的工具
@@ -56,12 +58,19 @@ def get_tools_by_group(
     Args:
         group_code: 工具分组代码（如 "k8s.read", "prometheus.query"）
         permissions: 用户权限集合（可选）
+        user_id: 用户 ID（可选，用于动态获取权限）
+        db: 数据库会话（可选，用于集成开关检查）
 
     Returns:
         LangChain 工具列表
     """
     registry = get_tool_registry()
-    return registry.get_langchain_tools(group_code=group_code, permissions=permissions)
+
+    # 如果提供了 user_id 和 db，动态获取权限
+    if permissions is None and user_id is not None and db is not None:
+        return registry.get_langchain_tools(group_code=group_code, user_id=user_id, db=db)
+
+    return registry.get_langchain_tools(group_code=group_code, permissions=permissions, db=db)
 
 
 def list_groups() -> List[dict]:
