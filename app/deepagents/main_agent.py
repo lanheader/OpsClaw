@@ -301,13 +301,6 @@ async def create_base_agent(user_id: Optional[int] = None, db: Optional[Session]
     return agent
 
 
-def get_cached_base_agent() -> Optional[Any]:
-    return None
-
-
-def invalidate_base_agent() -> None:
-    pass
-
 
 # ========== 动态 Agent 包装器 ==========
 
@@ -490,7 +483,5 @@ __all__ = [
     "get_ops_agent",
     "get_thread_config",
     "create_base_agent",
-    "get_cached_base_agent",
-    "invalidate_base_agent",
     "DynamicAgentWrapper",
 ]
