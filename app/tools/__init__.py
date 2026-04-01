@@ -139,8 +139,8 @@ def get_tools_by_package(
     if permissions is None and user_id is not None and db is not None:
         return registry.get_langchain_tools(package=package, user_id=user_id, db=db)
 
-    # 否则使用传入的权限或无权限过滤
-    return registry.get_langchain_tools(package=package, permissions=permissions)
+    # 传 db 做集成开关检查
+    return registry.get_langchain_tools(package=package, permissions=permissions, db=db)
 
 
 def get_available_packages() -> List[str]:
