@@ -183,12 +183,11 @@ class AgentInvoker:
         content: str,
         context: Optional[ChannelContext] = None
     ) -> None:
-        """发送回复消息（卡片格式）"""
-        logger.info(f"🔍 [卡片转换] 原始内容: {content[:200]}...")
+        """发送回复消息（卡片格式）
 
-        cleaned = clean_xml_tags(content)
-        logger.info(f"🔍 [卡片转换] 清理后内容: {cleaned[:200]}...")
-
+        content 已经由 service 层统一清理过 XML 标签，
+        此处只做飞书卡片格式转换。
+        """
         # 获取用户 ID（用于 @）
         mention_user_id = None
         if self.settings.FEISHU_REPLY_WITH_MENTION and context:
@@ -196,7 +195,7 @@ class AgentInvoker:
             logger.info(f"🔔 启用 @用户回复: user_id={mention_user_id}")
 
         card = build_formatted_reply_card(
-            content=cleaned,
+            content=content,
             mention_user_id=mention_user_id
         )
 

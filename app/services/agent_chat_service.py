@@ -282,7 +282,7 @@ async def _inject_memory(text: str, session_id: str, user_id: int) -> str:
 
 
 def _extract_reply(final_state: Dict[str, Any], workflow_completed: bool) -> Optional[str]:
-    """提取最终回复"""
+    """提取最终回复（统一清理 XML 标签）"""
     try:
         if final_state:
             try:
@@ -295,7 +295,7 @@ def _extract_reply(final_state: Dict[str, Any], workflow_completed: bool) -> Opt
                 reply = final_state.get(key, "")
                 if reply:
                     logger.info(f"📝 从 final_state 提取到回复 (长度: {len(reply)})")
-                    return reply
+                    return _clean_reply(reply)
 
             # 从 messages 中提取
             messages = final_state.get("messages", [])
@@ -303,9 +303,9 @@ def _extract_reply(final_state: Dict[str, Any], workflow_completed: bool) -> Opt
                 for msg in reversed(messages):
                     if isinstance(msg, dict):
                         if msg.get("type") == "AIMessage" and msg.get("content"):
-                            return msg["content"]
+                            return _clean_reply(msg["content"])
                     elif isinstance(msg, AIMessage) and msg.content:
-                        return msg.content
+                        return _clean_reply(msg.content)
 
     except Exception as e:
         logger.error(f"❌ 提取回复失败: {e}")
@@ -314,6 +314,15 @@ def _extract_reply(final_state: Dict[str, Any], workflow_completed: bool) -> Opt
         return "✅ 任务已完成，但没有生成文本回复。"
 
     return None
+
+
+def _clean_reply(content: str) -> str:
+    """统一清理回复内容（XML 标签等），所有渠道共用"""
+    try:
+        from app.integrations.feishu.message_formatter import clean_xml_tags
+        return clean_xml_tags(content)
+    except Exception:
+        return content
 
 
 async def _execute_agent_stream(
