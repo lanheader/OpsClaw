@@ -32,12 +32,9 @@ const SystemSettings: React.FC = () => {
     setLoading(true);
     try {
       const data = await settingsApi.getAll();
+
       // 过滤掉不需要在页面显示的分类
-      // - integration: K8s/Prometheus/Loki/飞书使用专用组件或配置文件
-      // - llm: 不需要
-      // - feishu: 移动到配置文件中
-      // - testing: 不需要
-      const excludedCategories = ['integration', 'kubernetes', 'llm', 'feishu', 'testing'];
+      const excludedCategories = ['integration', 'kubernetes', 'llm', 'feishu', 'testing', 'features'];
       const filteredData: GroupedSettings = {};
       Object.entries(data).forEach(([category, categorySettings]) => {
         if (!excludedCategories.includes(category)) {
@@ -56,7 +53,7 @@ const SystemSettings: React.FC = () => {
       const formValues: Record<string, any> = {};
       Object.values(filteredData).flat().forEach((setting: SystemSetting) => {
         if (setting.value_type === 'boolean') {
-          formValues[setting.key] = setting.value === 'True' || setting.value === 'true';
+          formValues[setting.key] = setting.value === '1' || setting.value === 'true' || setting.value === 'True';
         } else {
           formValues[setting.key] = setting.value;
         }
@@ -80,7 +77,7 @@ const SystemSettings: React.FC = () => {
     try {
       const values = form.getFieldsValue();
 
-      // 转换布尔值为字符串
+      // 转换布尔值为 0/1
       const settingsToUpdate: Record<string, any> = {};
       Object.entries(values).forEach(([key, value]) => {
         const setting = Object.values(settings)
@@ -89,7 +86,7 @@ const SystemSettings: React.FC = () => {
 
         if (setting) {
           if (setting.value_type === 'boolean') {
-            settingsToUpdate[key] = value ? 'True' : 'False';
+            settingsToUpdate[key] = value ? '1' : '0';
           } else {
             settingsToUpdate[key] = value;
           }
@@ -126,7 +123,7 @@ const SystemSettings: React.FC = () => {
           valuePropName="checked"
           tooltip={description}
         >
-          <Switch disabled={is_readonly} />
+          <Switch checkedChildren="启用" unCheckedChildren="禁用" disabled={is_readonly} />
         </Form.Item>
       );
     }
@@ -182,7 +179,6 @@ const SystemSettings: React.FC = () => {
 
   // 分类名称映射
   const categoryNames: Record<string, string> = {
-    features: '功能开关',
     prometheus: 'Prometheus',
     loki: 'Loki',
   };

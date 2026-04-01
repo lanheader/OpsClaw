@@ -140,7 +140,15 @@ async def batch_update_settings(
             continue
 
         # 根据类型转换值
-        if setting.value_type == "json":
+        if setting.value_type == "boolean":
+            # 统一存 0/1
+            if isinstance(value, bool):
+                setting.value = "1" if value else "0"
+            elif isinstance(value, str):
+                setting.value = "1" if value.lower() in ("true", "1", "yes") else "0"
+            else:
+                setting.value = "1" if value else "0"
+        elif setting.value_type == "json":
             setting.value = json.dumps(value, ensure_ascii=False)
         else:
             setting.value = str(value)
@@ -155,6 +163,69 @@ async def batch_update_settings(
         "message": f"成功更新 {updated_count} 个设置",
         "errors": ", ".join(errors) if errors else "",
     }
+
+
+@router.post("/init", response_model=Dict[str, str])
+async def init_default_settings(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin),
+):
+    """
+    初始化默认系统设置（幂等，已存在则跳过）
+
+    Prometheus 和 Loki 的开关类型为 boolean，值存 0/1。
+    """
+    defaults = [
+        # Prometheus
+        {
+            "key": "prometheus.enabled",
+            "value": "0",
+            "value_type": "boolean",
+            "category": "prometheus",
+            "name": "启用 Prometheus",
+            "description": "开启后可查询集群监控指标（CPU、内存等）",
+        },
+        {
+            "key": "prometheus.url",
+            "value": "http://localhost:9090",
+            "value_type": "string",
+            "category": "prometheus",
+            "name": "Prometheus 地址",
+            "description": "Prometheus 服务的 HTTP 地址",
+        },
+        # Loki
+        {
+            "key": "loki.enabled",
+            "value": "0",
+            "value_type": "boolean",
+            "category": "loki",
+            "name": "启用 Loki",
+            "description": "开启后可查询集群日志",
+        },
+        {
+            "key": "loki.url",
+            "value": "http://localhost:3100",
+            "value_type": "string",
+            "category": "loki",
+            "name": "Loki 地址",
+            "description": "Loki 服务的 HTTP 地址",
+        },
+    ]
+
+    created = 0
+    for default in defaults:
+        existing = db.query(SystemSetting).filter(
+            SystemSetting.key == default["key"]
+        ).first()
+        if not existing:
+            db.add(SystemSetting(**default))
+            created += 1
+
+    db.commit()
+
+    logger.info(f"Admin {current_user.username} initialized {created} default settings")
+
+    return {"message": f"初始化完成，新增 {created} 条默认设置"}
 
 
 @router.delete("/{key}", status_code=status.HTTP_204_NO_CONTENT)
