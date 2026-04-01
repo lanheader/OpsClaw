@@ -209,8 +209,9 @@ async def create_base_agent(user_id: Optional[int] = None, db: Optional[Session]
     from app.middleware.dynamic_permission_middleware import DynamicPermissionMiddleware
     from app.middleware.dynamic_approval_middleware import DynamicApprovalMiddleware
 
-    # 获取需要审批的工具列表（根据用户角色动态加载）
+    # 获取需要审批的工具（从已加载的工具列表中筛选）
     interrupt_on = {}
+    tool_names = {t.name for t in tools}
     try:
         from app.services.approval_config_service import ApprovalConfigService
 
@@ -242,11 +243,13 @@ async def create_base_agent(user_id: Optional[int] = None, db: Optional[Session]
             tools_need_approval = ApprovalConfigService.get_tools_require_approval(
                 _db, user_role=user_role
             )
+            # 关键：只对用户可用的工具中的需审批工具设置 interrupt_on
             for tool_name in tools_need_approval:
-                interrupt_on[tool_name] = True
+                if tool_name in tool_names:
+                    interrupt_on[tool_name] = True
             logger.info(
                 f"🔒 审批配置: user_id={user_id}, role={user_role}, "
-                f"需审批工具={list(interrupt_on.keys())}"
+                f"可用工具={len(tool_names)}, 需审批={list(interrupt_on.keys())}"
             )
         finally:
             if _should_close:
