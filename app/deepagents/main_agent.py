@@ -17,7 +17,7 @@ import os
 from collections import defaultdict
 from typing import Any, Optional, Set, Dict, List
 
-from deepagents import create_deep_agent
+from deepagents import create_deep_agent, SubAgent
 from deepagents.backends.filesystem import FilesystemBackend
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, ToolMessage
@@ -42,7 +42,7 @@ def _get_llm(llm: Optional[BaseChatModel] = None) -> BaseChatModel:
     return llm
 
 
-def _load_all_subagents() -> List[Dict[str, Any]]:
+def _load_all_subagents() -> List[SubAgent]:
     """加载所有 Subagent 列表"""
     from app.deepagents.subagents import get_all_subagents
 
