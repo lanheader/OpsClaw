@@ -80,6 +80,22 @@ def _load_all_tools() -> List[Any]:
     return tools
 
 
+def _load_tools_for_user(user_id: Optional[int] = None, db: Optional[Session] = None) -> List[Any]:
+    """按用户权限动态加载工具"""
+    registry = get_tool_registry()
+    try:
+        if user_id is not None and db is not None:
+            tools = registry.get_langchain_tools(user_id=user_id, db=db)
+            logger.info(f"🔧 按用户权限加载工具: user_id={user_id}, 工具数={len(tools)}")
+        else:
+            tools = _load_all_tools()
+    except Exception:
+        tools = _load_all_tools()
+
+    _log_tools_info(tools)
+    return tools
+
+
 def _log_tools_info(tools: List[Any]) -> None:
     """输出工具分组信息"""
     logger.info("=" * 60)
@@ -171,9 +187,9 @@ async def create_base_agent(user_id: Optional[int] = None, db: Optional[Session]
     # 1. 获取 LLM
     llm = _get_llm()
 
-    # 2. 加载所有组件（不过滤权限）
+    # 2. 按用户权限加载工具（不过滤则加载全部）
     subagents = _load_all_subagents()
-    tools = _load_all_tools()
+    tools = _load_tools_for_user(user_id, db)
 
     # 3. 获取基础设施
     checkpointer = await get_checkpointer()
