@@ -210,12 +210,33 @@ async def create_base_agent() -> Any:
     from app.middleware.dynamic_permission_middleware import DynamicPermissionMiddleware
     from app.middleware.dynamic_approval_middleware import DynamicApprovalMiddleware
 
+    # 获取需要审批的工具列表（从数据库）
+    interrupt_on = {}
+    try:
+        from app.models.database import SessionLocal
+        from app.services.approval_config_service import ApprovalConfigService
+        _db = SessionLocal()
+        tools_need_approval = ApprovalConfigService.get_tools_require_approval(_db)
+        for tool_name in tools_need_approval:
+            interrupt_on[tool_name] = True
+        _db.close()
+        logger.info(f"🔒 从数据库加载 interrupt_on 配置: {len(interrupt_on)} 个工具需要审批")
+    except Exception as e:
+        logger.warning(f"⚠️ 加载审批配置失败: {e}，使用默认高风险工具列表")
+        # 安全兜底：默认拦截所有已知高风险工具
+        for t in [
+            "force_delete_pod", "delete_pod", "delete_deployment",
+            "delete_service", "delete_config_map", "delete_secret",
+            "restart_deployment", "scale_deployment", "update_deployment_image",
+        ]:
+            interrupt_on[t] = True
+
     custom_middleware = [
         ErrorFilteringMiddleware(),
         LoggingMiddleware(),
         # 权限中间件：从请求上下文获取权限，检查工具调用权限
         DynamicPermissionMiddleware(),
-        # 审批中间件：从请求上下文获取用户 ID，检查是否需要审批
+        # 审批中间件：日志记录模式（实际拦截由 interrupt_on 保证）
         DynamicApprovalMiddleware(),
     ]
     logger.info("🔧 已加载权限和审批中间件")
@@ -257,11 +278,10 @@ async def create_base_agent() -> Any:
         subagents=subagents,
         middleware=custom_middleware,
         checkpointer=checkpointer,
-        # 不传 interrupt_on，由 DynamicApprovalMiddleware 处理
         store=store,
         backend=backend,
         skills=skills,
-        # memory 参数已移除，记忆注入统一在 agent_chat_service 中处理
+        interrupt_on=interrupt_on if interrupt_on else None,
     )
 
     # 8. 缓存
