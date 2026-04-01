@@ -75,51 +75,51 @@ export interface PaginatedResponse<T> {
 
 export const scheduledTasksApi = {
   getTasks: async (page = 1, pageSize = 20): Promise<PaginatedResponse<ScheduledTask>> => {
-    const res = await apiClient.get('/tasks', { params: { page, page_size: pageSize } });
+    const res = await apiClient.get('/v1/tasks', { params: { page, page_size: pageSize } });
     return res.data;
   },
 
   getStats: async (): Promise<TaskStats> => {
-    const res = await apiClient.get('/tasks/stats');
+    const res = await apiClient.get('/v1/tasks/stats');
     return res.data;
   },
 
   getTask: async (id: number): Promise<ScheduledTask> => {
-    const res = await apiClient.get(`/tasks/${id}`);
+    const res = await apiClient.get(`/v1/tasks/${id}`);
     return res.data;
   },
 
   createTask: async (data: TaskCreate): Promise<ScheduledTask> => {
-    const res = await apiClient.post('/tasks', data);
+    const res = await apiClient.post('/v1/tasks', data);
     return res.data;
   },
 
   updateTask: async (id: number, data: TaskUpdate): Promise<ScheduledTask> => {
-    const res = await apiClient.put(`/tasks/${id}`, data);
+    const res = await apiClient.put(`/v1/tasks/${id}`, data);
     return res.data;
   },
 
   deleteTask: async (id: number): Promise<void> => {
-    await apiClient.delete(`/tasks/${id}`);
+    await apiClient.delete(`/v1/tasks/${id}`);
   },
 
   toggleTask: async (id: number): Promise<{ message: string; enabled: boolean }> => {
-    const res = await apiClient.post(`/tasks/${id}/toggle`);
+    const res = await apiClient.post(`/v1/tasks/${id}/toggle`);
     return res.data;
   },
 
   runTask: async (id: number): Promise<{ message: string }> => {
-    const res = await apiClient.post(`/tasks/${id}/run`);
+    const res = await apiClient.post(`/v1/tasks/${id}/run`);
     return res.data;
   },
 
   getTaskExecutions: async (taskId: number, page = 1, pageSize = 20): Promise<PaginatedResponse<TaskExecution>> => {
-    const res = await apiClient.get(`/tasks/${taskId}/executions`, { params: { page, page_size: pageSize } });
+    const res = await apiClient.get(`/v1/tasks/${taskId}/executions`, { params: { page, page_size: pageSize } });
     return res.data;
   },
 
   getAllExecutions: async (page = 1, pageSize = 20, taskId?: number): Promise<PaginatedResponse<TaskExecution>> => {
-    const res = await apiClient.get('/tasks/executions', { params: { page, page_size: pageSize, task_id: taskId } });
+    const res = await apiClient.get('/v1/tasks/executions', { params: { page, page_size: pageSize, task_id: taskId } });
     return res.data;
   },
 };
