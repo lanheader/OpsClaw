@@ -63,6 +63,9 @@ from app.api.v1 import inspection
 from app.api.v1 import workflow
 from app.api.v1 import knowledge_base
 from app.api.v1 import messaging
+from app.api.v1 import tools
+from app.api.v1 import prompts
+from app.api.v1 import scheduled_tasks
 from app.utils.logger import RequestContextFilter, ContextFormatter
 
 # ============ 完善日志系统配置 ============
@@ -314,15 +317,12 @@ app.include_router(settings_api.router, prefix="/api/v1")
 app.include_router(llm.router, prefix="/api/v1")
 app.include_router(integrations.router, prefix="/api/v1")
 # 工具权限管理 API
-from app.api.v1 import tools
 app.include_router(tools.router, prefix="/api/v1")
 # 审批配置管理 API
 app.include_router(approval_config.router, prefix="/api/v1")
 # 提示词管理 API
-from app.api.v1 import prompts
 app.include_router(prompts.router, prefix="/api/v1")
 # 定时任务管理 API
-from app.api.v1 import scheduled_tasks
 app.include_router(scheduled_tasks.router, prefix="/api/v1")
 
 

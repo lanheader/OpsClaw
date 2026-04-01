@@ -11,6 +11,7 @@ Loguru 优势：
 - 支持 coroutined 和 async
 """
 
+import logging
 import sys
 from pathlib import Path
 from loguru import logger
@@ -57,7 +58,6 @@ logger.add(
 )
 
 # 捕获标准库 logging 的日志并转发到 loguru
-import logging
 
 
 class InterceptHandler(logging.Handler):
