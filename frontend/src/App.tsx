@@ -15,8 +15,10 @@ import {
   EditOutlined,
   ClockCircleOutlined,
 } from '@ant-design/icons';
+import React, { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import axios from 'axios';
 import { Dashboard } from './pages/Dashboard';
 import { Login } from './pages/Login';
 import { UserManagement } from './pages/UserManagement';
@@ -27,6 +29,7 @@ import Chat from './pages/Chat';
 import Profile from './pages/Profile';
 import PromptManagement from './pages/PromptManagement';
 import ScheduledTasks from './pages/ScheduledTasks';
+import OnboardingWizard from './pages/OnboardingWizard';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { PermissionProvider, usePermission } from './contexts/PermissionContext';
 import { PrivateRoute } from './components/PrivateRoute';
@@ -48,6 +51,29 @@ const AppLayout: React.FC = () => {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   const { hasPermission, loading: permissionLoading } = usePermission();
+  const [onboardingChecked, setOnboardingChecked] = useState(false);
+
+  // 检查是否需要初始化
+  useEffect(() => {
+    if (location.pathname === '/onboarding') return;
+    axios.get('/api/v1/onboarding/status').then(res => {
+      if (!res.data.initialized) {
+        navigate('/onboarding', { replace: true });
+      }
+      setOnboardingChecked(true);
+    }).catch(() => {
+      setOnboardingChecked(true);
+    });
+  }, []);
+
+  // onboarding 页面不显示侧边栏
+  if (location.pathname === '/onboarding') {
+    return (
+      <Routes>
+        <Route path="/onboarding" element={<OnboardingWizard />} />
+      </Routes>
+    );
+  }
 
   const handleLogout = () => {
     logout();
@@ -181,6 +207,7 @@ const AppLayout: React.FC = () => {
               <Route path="/settings" element={<SystemSettings />} />
               <Route path="/prompts" element={<PromptManagement />} />
               <Route path="/scheduled-tasks" element={<ScheduledTasks />} />
+              <Route path="/onboarding" element={<OnboardingWizard />} />
             </Routes>
           </div>
         </Content>

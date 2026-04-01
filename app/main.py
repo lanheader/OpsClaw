@@ -66,6 +66,7 @@ from app.api.v1 import messaging
 from app.api.v1 import tools
 from app.api.v1 import prompts
 from app.api.v1 import scheduled_tasks
+from app.api.v1 import onboarding
 from app.utils.logger import RequestContextFilter, ContextFormatter
 
 # ============ 完善日志系统配置 ============
@@ -324,6 +325,8 @@ app.include_router(approval_config.router, prefix="/api/v1")
 app.include_router(prompts.router, prefix="/api/v1")
 # 定时任务管理 API
 app.include_router(scheduled_tasks.router, prefix="/api/v1")
+# 初始化引导 API
+app.include_router(onboarding.router, prefix="/api/v1")
 
 
 @app.get("/")
