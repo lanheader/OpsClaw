@@ -33,10 +33,6 @@ from app.memory import get_langgraph_store
 logger = get_logger(__name__)
 
 
-# ========== 全局缓存 ==========
-
-
-
 # ========== 组件加载函数 ==========
 
 def _get_llm(llm: Optional[BaseChatModel] = None) -> BaseChatModel:
@@ -160,16 +156,14 @@ FILE_OUTPUT_PROMPT = """
 
 async def create_base_agent(user_id: Optional[int] = None, db: Optional[Session] = None) -> Any:
     """
-    懒加载创建 Agent，每次调用都新建（不缓存）。
-
-    在创建 DeepAgents 前从数据库加载当前用户的审批配置，
-    通过 interrupt_on 传入，框架级保证拦截。
+    懒加载创建 Agent，每次都新建（不缓存）。
+    创建前根据 user_id+db 查用户角色，动态生成 interrupt_on。
 
     Args:
-        user_id: 用户 ID，用于查询角色和审批配置
+        user_id: 用户 ID
         db: 数据库会话
     """
-    logger.info("🏗️ 创建 Agent（懒加载，从数据库加载审批配置）")
+    logger.info("🏗️ 创建 Agent（懒加载）")
 
     # 0. 获取项目根目录
     project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
@@ -203,6 +197,7 @@ async def create_base_agent(user_id: Optional[int] = None, db: Optional[Session]
     interrupt_on = {}
     try:
         from app.services.approval_config_service import ApprovalConfigService
+
         # 查用户角色
         user_role = None
         if user_id is not None and db is not None:
@@ -218,15 +213,27 @@ async def create_base_agent(user_id: Optional[int] = None, db: Optional[Session]
             except Exception as e:
                 logger.warning(f"获取用户角色失败: {e}")
 
-        tools_need_approval = ApprovalConfigService.get_tools_require_approval(
-            db, user_role=user_role
-        )
-        for tool_name in tools_need_approval:
-            interrupt_on[tool_name] = True
-        logger.info(
-            f"🔒 审批配置: user_id={user_id}, role={user_role}, "
-            f"需审批工具={list(interrupt_on.keys())}"
-        )
+        # db 为 None 时用临时连接
+        _db = db
+        _should_close = False
+        if _db is None:
+            from app.models.database import SessionLocal
+            _db = SessionLocal()
+            _should_close = True
+
+        try:
+            tools_need_approval = ApprovalConfigService.get_tools_require_approval(
+                _db, user_role=user_role
+            )
+            for tool_name in tools_need_approval:
+                interrupt_on[tool_name] = True
+            logger.info(
+                f"🔒 审批配置: user_id={user_id}, role={user_role}, "
+                f"需审批工具={list(interrupt_on.keys())}"
+            )
+        finally:
+            if _should_close:
+                _db.close()
     except Exception as e:
         logger.warning(f"⚠️ 加载审批配置失败: {e}，安全兜底拦截所有高风险工具")
         for t in [
@@ -289,19 +296,16 @@ async def create_base_agent(user_id: Optional[int] = None, db: Optional[Session]
         interrupt_on=interrupt_on if interrupt_on else None,
     )
 
-    logger.info("✅ Agent 创建完成（懒加载）")
+    logger.info("✅ Agent 创建完成")
     return agent
 
 
 def get_cached_base_agent() -> Optional[Any]:
-    """懒加载模式，返回 None"""
     return None
 
 
 def invalidate_base_agent() -> None:
-    """清除（懒加载无需操作）"""
     pass
-    logger.info("🗑️ base_agent 缓存已清除")
 
 
 # ========== 动态 Agent 包装器 ==========
@@ -434,8 +438,19 @@ async def get_ops_agent(
     Returns:
         DynamicAgentWrapper 包装的 Agent 实例
     """
-    # 1. 创建 agent（懒加载，按用户角色动态生成 interrupt_on）
-    base_agent = await create_base_agent(user_id=user_id, db=db)
+    # 1. 创建 agent（懒加载，根据用户角色动态生成 interrupt_on）
+    _db = db
+    _should_close_db = False
+    if _db is None:
+        from app.models.database import SessionLocal
+        _db = SessionLocal()
+        _should_close_db = True
+
+    try:
+        base_agent = await create_base_agent(user_id=user_id, db=_db)
+    finally:
+        if _should_close_db:
+            _db.close()
 
     # 2. 获取用户权限（如果提供了 user_id 和 db）
     if user_id is not None and db is not None:
