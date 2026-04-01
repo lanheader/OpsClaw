@@ -88,8 +88,6 @@ class StreamEvent:
     data: Dict[str, Any]
 
 
-# ========== 事件处理辅助函数 ==========
-
 def _get_status_message(node_name: str) -> str:
     """根据节点名获取状态消息"""
     status_map = {
@@ -257,8 +255,6 @@ def _process_event(
     return None
 
 
-# ========== 消息处理辅助函数 ==========
-
 async def _inject_memory(text: str, session_id: str, user_id: int) -> str:
     """记忆注入"""
     try:
@@ -320,8 +316,6 @@ def _extract_reply(final_state: Dict[str, Any], workflow_completed: bool) -> Opt
     return None
 
 
-# ========== Agent 执行核心 ==========
-
 async def _execute_agent_stream(
     agent: Any,
     input_state: Dict,
@@ -349,8 +343,6 @@ async def _execute_agent_stream(
         if result:
             yield result
 
-
-# ========== 主服务类 ==========
 
 class AgentChatService:
     """
@@ -527,8 +519,6 @@ class AgentChatService:
 
         return agent, input_state, config
 
-
-# ========== 单例 ==========
 
 _agent_chat_service: Optional[AgentChatService] = None
 
