@@ -6,9 +6,11 @@ Agent 调用器 - 使用统一的 AgentChatService
 - 发送 AI 回复（卡片格式）
 - 处理审批流程
 - 使用统一的会话锁管理器
+- 回复质量检查（外部后处理）
 """
 
 import asyncio
+import re
 from typing import List, Dict, Any, Optional
 
 from app.utils.logger import get_logger
@@ -30,6 +32,17 @@ from app.services.agent_chat_service import (
 )
 
 logger = get_logger(__name__)
+
+# 质量检查：低质量回复关键词
+_LOW_QUALITY_PATTERNS = [
+    re.compile(r'任务已完成，但没有生成文本回复'),
+    re.compile(r'没有生成文本回复'),
+    re.compile(r'^任务已完成\s*$'),
+    re.compile(r'^操作已完成\s*$'),
+]
+
+# 最大重试次数
+_MAX_QUALITY_RETRIES = 1
 
 
 class AgentInvoker:
@@ -68,10 +81,42 @@ class AgentInvoker:
                 return []
 
             # 处理正常回复
-            if response.reply:
-                await self._send_reply(context.chat_id, response.reply, context)
-                self._save_to_db(context.session_id, MessageRole.ASSISTANT, response.reply)
-                return [response.reply]
+            reply = response.reply
+            if reply:
+                # 质量检查 + 重试
+                for attempt in range(_MAX_QUALITY_RETRIES + 1):
+                    quality_result = self._check_reply_quality(reply, text)
+                    if quality_result.is_good:
+                        break
+
+                    logger.warning(
+                        f"🔍 [质量检查] 回复质量不达标 (第{attempt + 1}次): {quality_result.reason}"
+                    )
+                    if attempt >= _MAX_QUALITY_RETRIES:
+                        logger.warning("🔍 [质量检查] 达到最大重试次数，使用原回复")
+                        break
+
+                    # 用质量反馈重新请求
+                    feedback = quality_result.feedback
+                    logger.info(f"🔍 [质量检查] 发送质量反馈重新请求: {feedback[:100]}...")
+                    retry_request = ChatRequest(
+                        session_id=context.session_id,
+                        user_id=context.user_id,
+                        content=feedback,
+                        channel=MessageChannel.FEISHU,
+                        user_permissions=list(context.user_permissions or []),
+                        chat_id=context.chat_id,
+                        enable_security=True,
+                    )
+                    retry_response = await self.service.process_message(retry_request)
+                    if retry_response.reply and not self._check_reply_quality(retry_response.reply, text).is_good == False:
+                        reply = retry_response.reply
+                    elif retry_response.reply:
+                        reply = retry_response.reply
+
+                await self._send_reply(context.chat_id, reply, context)
+                self._save_to_db(context.session_id, MessageRole.ASSISTANT, reply)
+                return [reply]
 
             # 空回复兜底
             fallback = (
@@ -180,3 +225,72 @@ class AgentInvoker:
             logger.error(f"❌ 保存消息到数据库失败: {e}")
         finally:
             db.close()
+
+    def _check_reply_quality(self, reply: str, user_query: str) -> "QualityResult":
+        """
+        检查回复质量（本地规则，不调 LLM，零延迟零成本）
+
+        检查项：
+        1. 是否命中已知低质量模板
+        2. 回复长度是否过短
+        3. 回复是否包含实质信息（数据、结论、建议）
+        """
+        reasons = []
+        feedback_parts = []
+
+        # 1. 低质量模板匹配
+        for pattern in _LOW_QUALITY_PATTERNS:
+            if pattern.search(reply):
+                reasons.append("命中低质量模板")
+                feedback_parts.append(
+                    f"你的回复 '{reply[:50]}' 属于低质量回复。"
+                    f"请根据用户的问题「{user_query[:100]}」和之前工具调用获取的数据，"
+                    f"直接给出具体的分析结论和数据。不要只说任务完成。"
+                )
+                break
+
+        # 2. 回复过短（< 20 字符）且没有实质内容
+        if len(reply.strip()) < 20:
+            reasons.append(f"回复过短（{len(reply.strip())}字符）")
+            feedback_parts.append(
+                f"你的回复太短了（'{reply}'），无法有效回答用户问题。"
+                f"请提供更详细的分析和结论。"
+            )
+
+        # 3. 只有工具报错没有分析
+        if self._is_only_errors(reply):
+            reasons.append("只有错误信息没有分析")
+            feedback_parts.append(
+                f"你的回复只包含了工具错误信息，没有给出有用的分析和建议。"
+                f"请根据已有信息分析问题原因，并告诉用户下一步应该怎么做。"
+            )
+
+        if reasons:
+            return QualityResult(
+                is_good=False,
+                reason="; ".join(reasons),
+                feedback="\n\n".join(feedback_parts)
+            )
+
+        return QualityResult(is_good=True, reason="", feedback="")
+
+    @staticmethod
+    def _is_only_errors(reply: str) -> bool:
+        """检查回复是否只包含错误信息"""
+        error_keywords = ["操作失败", "error", "Error", "失败", "执行失败", "工具调用失败"]
+        lines = [l.strip() for l in reply.strip().split("\n") if l.strip()]
+        if len(lines) == 0:
+            return False
+        # 超过 70% 的非空行包含错误关键词
+        error_line_count = sum(
+            1 for l in lines if any(kw in l for kw in error_keywords)
+        )
+        return len(lines) >= 2 and error_line_count / len(lines) > 0.7
+
+
+class QualityResult:
+    """质量检查结果"""
+    def __init__(self, is_good: bool, reason: str, feedback: str):
+        self.is_good = is_good
+        self.reason = reason
+        self.feedback = feedback
