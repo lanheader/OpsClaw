@@ -372,7 +372,7 @@ class DescribeNodeTool(BaseOpTool):
         try:
             node = self.k8s_client.core_v1.read_node(name=name)
             # 获取节点上的 Pod 列表
-            pods = self.k8s_client.core_v1.list_pod(
+            pods = self.k8s_client.core_v1.list_pod_for_all_namespaces(
                 field_selector=f"spec.nodeName={name}"
             )
             pods_info = []
