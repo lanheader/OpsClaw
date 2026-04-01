@@ -217,7 +217,7 @@ export const Dashboard: React.FC = () => {
           <Card>
             <Statistic
               title="执行中"
-              value={taskStatsData?.running || 0}
+              value={taskStatsData?.today_stats?.running || 0}
               prefix={<SyncOutlined spin />}
               valueStyle={{ color: '#faad14' }}
             />
@@ -227,7 +227,7 @@ export const Dashboard: React.FC = () => {
           <Card>
             <Statistic
               title="成功完成"
-              value={taskStatsData?.completed || 0}
+              value={taskStatsData?.today_stats?.success || 0}
               prefix={<CheckCircleOutlined />}
               valueStyle={{ color: '#52c41a' }}
             />
@@ -237,7 +237,7 @@ export const Dashboard: React.FC = () => {
           <Card>
             <Statistic
               title="执行失败"
-              value={taskStatsData?.failed || 0}
+              value={taskStatsData?.today_stats?.failed || 0}
               prefix={<CloseCircleOutlined />}
               valueStyle={{ color: '#ff4d4f' }}
             />

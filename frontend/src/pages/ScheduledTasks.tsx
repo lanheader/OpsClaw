@@ -19,8 +19,6 @@ import {
   Tooltip,
   Progress,
   Typography,
-  Tabs,
-  Spin,
 } from 'antd';
 import {
   PlusOutlined,
@@ -43,7 +41,7 @@ import {
   TaskCreate,
 } from '../api/scheduledTasks';
 
-const { Text, Title } = Typography;
+const { Text } = Typography;
 const { TextArea } = Input;
 
 const TASK_TYPE_MAP: Record<string, { label: string; color: string }> = {
