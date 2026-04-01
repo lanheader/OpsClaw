@@ -46,6 +46,9 @@ class ChatToolCategory(str):
 class GetConversationHistoryTool(BaseOpTool):
     """查询对话历史工具"""
 
+    def __init__(self, db=None):
+        self.db = db
+
     async def execute(
         self,
         session_id: str,
@@ -147,6 +150,9 @@ class GetConversationHistoryTool(BaseOpTool):
 class ListUserSessionsTool(BaseOpTool):
     """列出用户的所有会话工具"""
 
+    def __init__(self, db=None):
+        self.db = db
+
     async def execute(
         self,
         user_id: Optional[int] = None,
@@ -247,6 +253,9 @@ class ListUserSessionsTool(BaseOpTool):
 )
 class SearchConversationTool(BaseOpTool):
     """搜索对话内容工具"""
+
+    def __init__(self, db=None):
+        self.db = db
 
     async def execute(
         self,

@@ -78,6 +78,9 @@ class QueryCPUUsageTool(BaseOpTool):
     查询指定标签过滤的 CPU 使用率指标。
     """
 
+    def __init__(self, db=None):
+        self.db = db
+
     async def execute(
         self,
         labels: Optional[Dict[str, str]] = None,
@@ -150,6 +153,9 @@ class QueryMemoryUsageTool(BaseOpTool):
 
     查询指定标签过滤的内存使用率指标。
     """
+
+    def __init__(self, db=None):
+        self.db = db
 
     async def execute(
         self,
@@ -234,6 +240,9 @@ class QueryRangeTool(BaseOpTool):
 
     执行指定时间范围的 PromQL 查询。
     """
+
+    def __init__(self, db=None):
+        self.db = db
 
     async def execute(
         self,

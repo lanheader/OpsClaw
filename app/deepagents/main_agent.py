@@ -70,9 +70,15 @@ def _load_all_subagents() -> List[Dict[str, Any]]:
 
 
 def _load_all_tools() -> List[Any]:
-    """加载所有工具（不过滤权限）"""
+    """加载所有工具（过滤未启用的集成）"""
     registry = get_tool_registry()
-    tools = registry.get_langchain_tools()
+    try:
+        from app.models.database import SessionLocal
+        db = SessionLocal()
+        tools = registry.get_langchain_tools(db=db)
+        db.close()
+    except Exception:
+        tools = registry.get_langchain_tools()
 
     # 日志输出
     _log_tools_info(tools)
@@ -129,6 +135,13 @@ def _get_skills_config() -> tuple:
 
 # 文件输出指令（添加到 system_prompt 末尾）
 FILE_OUTPUT_PROMPT = """
+<language_rule>
+- 你必须始终使用中文（简体中文）回复用户
+- 所有分析报告、诊断结果、修复建议都必须使用中文
+- 工具调用参数保持英文（如 namespace、label 等），但回复内容的描述必须用中文
+- 专业术语可以保留英文原文，但需附中文解释（如 CPU 使用率、OOM 等）
+</language_rule>
+
 <file_output>
 完成分析后，你可以使用 `write_file` 工具生成报告文件：
 - 诊断报告保存到: /workspace/reports/{YYYY-MM-DD}/{session_id}_diagnosis.md

@@ -437,6 +437,22 @@ class ToolRegistry:
                 elif not required_perms.issubset(permissions):
                     continue
 
+            # 检查集成是否启用（需要 db 参数）
+            tool_package = metadata.group.split('.')[0] if metadata.group else ''
+            if db is not None and tool_package in ('k8s', 'loki', 'prometheus'):
+                try:
+                    from app.core.integration_config import IntegrationConfig
+                    integration_checks = {
+                        'k8s': IntegrationConfig.is_k8s_enabled,
+                        'loki': IntegrationConfig.is_loki_enabled,
+                        'prometheus': IntegrationConfig.is_prometheus_enabled,
+                    }
+                    check_fn = integration_checks.get(tool_package)
+                    if check_fn and not check_fn(db):
+                        continue
+                except Exception:
+                    pass  # 检查失败不过滤，避免阻断所有工具
+
             # 创建 LangChain 工具
             try:
                 lc_tool = tool_class.get_langchain_tool()

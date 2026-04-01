@@ -16,6 +16,7 @@ fi
 # 1. 数据目录
 # ============================================================================
 mkdir -p /app/workspace/data /app/workspace/logs
+ln -sf /app/workspace /workspace
 
 # 设置默认 DATABASE_URL（如果未设置）
 export DATABASE_URL="${DATABASE_URL:-sqlite:///./workspace/data/ops_agent_v2.db}"
