@@ -154,11 +154,13 @@ def _extract_state_from_node(node_state: Any) -> Optional[Dict]:
     if not isinstance(node_state, dict):
         return None
 
-    has_messages = "messages" in node_state
-
     try:
         result = {}
-        if has_messages:
+
+        # 始终保留原始 node_state 的引用，供后续提取
+        result["_raw_node_state"] = node_state
+
+        if "messages" in node_state:
             result["messages"] = [
                 {"type": type(m).__name__, "content": getattr(m, 'content', str(m))}
                 for m in node_state.get("messages", [])
@@ -166,7 +168,7 @@ def _extract_state_from_node(node_state: Any) -> Optional[Dict]:
         else:
             result["raw_state"] = True
 
-        # 始终提取这些字段（不管有没有 messages）
+        # 始终提取这些字段
         for key in ("formatted_response", "final_report", "response", "output", "reply"):
             if key in node_state:
                 result[key] = node_state[key]
@@ -336,7 +338,20 @@ def _extract_reply(final_state: Dict[str, Any], workflow_completed: bool) -> Opt
                 else:
                     logger.warning(f"  最后一条消息: class={type(last_msg).__name__}, type={getattr(last_msg, 'type', None)}, content={getattr(last_msg, 'content', None)[:100] if getattr(last_msg, 'content', None) else None}")
 
-            # 兜底：遍历所有字段，找到第一个看起来像回复的字符串
+            # 兜底1：从 _raw_node_state 的 messages 里提取（langchain Message 对象）
+            raw_state = final_state.get("_raw_node_state")
+            if isinstance(raw_state, dict) and "messages" in raw_state:
+                for msg in reversed(raw_state["messages"]):
+                    content = None
+                    if isinstance(msg, dict):
+                        content = msg.get("content", "")
+                    elif hasattr(msg, "content"):
+                        content = msg.content
+                    if content and isinstance(content, str) and len(content) > 5:
+                        logger.info(f"📝 从 _raw_node_state.messages 提取到回复 (长度: {len(content)})")
+                        return _clean_reply(content)
+
+            # 兜底2：遍历所有字段，找到第一个看起来像回复的字符串
             for key, val in final_state.items():
                 if key in ("raw_state", "workflow_status", "intent_type", "diagnosis_round"):
                     continue
