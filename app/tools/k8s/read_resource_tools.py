@@ -161,7 +161,7 @@ class GetPVCsTool(BaseOpTool):
                     "name": pvc.metadata.name,
                     "namespace": pvc.metadata.namespace,
                     "status": pvc.status.phase,
-                    "capacity": pvc.spec.resources.requests.storage,
+                    "capacity": pvc.spec.resources.requests.get("storage") if pvc.spec.resources and pvc.spec.resources.requests else None,
                     "access_modes": pvc.spec.access_modes,
                     "storage_class": pvc.spec.storage_class_name,
                 }

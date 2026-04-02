@@ -1,18 +1,3 @@
-"""
-DeepAgents 主智能体配置
-
-v4.0 - 静态创建 + 动态中间件架构
-
-核心改进：
-- Agent 图在应用启动时创建一次（加载所有工具和 SubAgent）
-- 权限过滤通过 DynamicPermissionMiddleware 在运行时处理
-- 审批检查通过 DynamicApprovalMiddleware 在运行时处理
-- 不再每次请求重建 Agent，大幅提升性能
-- 利用 deepagents 内置能力：SkillsMiddleware、SummarizationMiddleware、MemoryMiddleware
-
-⭐ system_prompt 将动态从数据库加载，经过 DSPy 优化
-"""
-
 import os
 from collections import defaultdict
 from typing import Any, Optional, Set, Dict, List
@@ -23,12 +8,18 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, ToolMessage
 from sqlalchemy.orm import Session
 
+from app.middleware.error_filtering_middleware import ErrorFilteringMiddleware
+from app.middleware.logging_middleware import LoggingMiddleware
+from app.middleware.dynamic_permission_middleware import DynamicPermissionMiddleware
+from app.middleware.dynamic_approval_middleware import DynamicApprovalMiddleware
+from langchain.agents.middleware.summarization import SummarizationMiddleware
 from app.core.llm_factory import LLMFactory
 from app.core.checkpointer import get_checkpointer
 from app.services.unified_prompt_optimizer import get_prompt_optimizer
 from app.tools.registry import get_tool_registry
 from app.utils.logger import get_logger
 from app.memory import get_langgraph_store
+from app.core.constants import MiddlewareConfig
 
 logger = get_logger(__name__)
 
@@ -203,12 +194,6 @@ async def create_base_agent(user_id: Optional[int] = None, db: Optional[Session]
     for output_dir in ["reports", "runbooks", "exports"]:
         os.makedirs(os.path.join(project_root, output_dir), exist_ok=True)
 
-    # 6. 自定义中间件（包含权限和审批中间件）
-    from app.middleware.error_filtering_middleware import ErrorFilteringMiddleware
-    from app.middleware.logging_middleware import LoggingMiddleware
-    from app.middleware.dynamic_permission_middleware import DynamicPermissionMiddleware
-    from app.middleware.dynamic_approval_middleware import DynamicApprovalMiddleware
-
     # 获取需要审批的工具（从已加载的工具列表中筛选）
     interrupt_on = {}
     tool_names = {t.name for t in tools}
@@ -266,12 +251,18 @@ async def create_base_agent(user_id: Optional[int] = None, db: Optional[Session]
     custom_middleware = [
         ErrorFilteringMiddleware(),
         LoggingMiddleware(),
+        # 消息摘要中间件：防止 token 超长（使用 MiddlewareConfig 配置）
+        SummarizationMiddleware(
+            model=llm,  # 必填参数：用于生成摘要的 LLM
+            trigger=("messages", MiddlewareConfig.COMPRESSION_THRESHOLD),  # 超过 30 条消息触发摘要
+            keep=("messages", MiddlewareConfig.MAX_FULL_MESSAGES),  # 保留最近 20 条完整消息
+        ),
         # 权限中间件：从请求上下文获取权限，检查工具调用权限
         DynamicPermissionMiddleware(),
         # 审批中间件：日志记录模式（实际拦截由 interrupt_on 保证）
         DynamicApprovalMiddleware(),
     ]
-    logger.info("🔧 已加载权限和审批中间件")
+    logger.info("🔧 已加载中间件: 错误过滤、日志记录、消息摘要、权限检查、审批检查")
 
     # 7. 从数据库加载 system_prompt（优先数据库，降级到默认提示词）
     prompt_optimizer = get_prompt_optimizer()
@@ -427,8 +418,6 @@ def _ensure_final_report(state: dict) -> dict:
 # ========== 主入口函数（兼容接口） ==========
 
 async def get_ops_agent(
-    llm: Optional[BaseChatModel] = None,
-    enable_approval: bool = True,
     user_permissions: Optional[Set[str]] = None,
     user_id: Optional[int] = None,
     db: Optional[Session] = None,
@@ -442,8 +431,6 @@ async def get_ops_agent(
     - 权限组合不变时直接复用缓存的 Agent 图
 
     Args:
-        llm: 语言模型实例 (默认使用 LLMFactory)
-        enable_approval: 是否启用审批流程
         user_permissions: 用户权限代码集合（静态权限）
         user_id: 用户 ID（用于动态获取权限）
         db: 数据库会话（用于动态获取权限）

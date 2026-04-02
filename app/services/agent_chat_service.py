@@ -36,8 +36,8 @@ from app.utils.llm_helper import ensure_final_report_in_state
 logger = get_logger(__name__)
 
 # 常量
-AGENT_TIMEOUT = 120  # 2 分钟（整体执行超时）
-LLM_CALL_TIMEOUT = 120  # 单次 LLM 调用超时（秒）
+AGENT_TIMEOUT = 600  # 2 分钟（整体执行超时）
+LLM_CALL_TIMEOUT = 300  # 单次 LLM 调用超时（秒）
 
 
 # ========== 数据模型 ==========
