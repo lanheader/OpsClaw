@@ -180,33 +180,41 @@ const Chat: React.FC = () => {
       created_at: new Date().toISOString()
     };
     setMessages(prev => [...prev, tempUserMessage]);
+    const prevMsgCount = messages.length + 1; // 用户消息发送后应有 N+1 条
 
     try {
       setIsStreaming(true);
       setStatusMessage('🤖 Agent 正在分析您的请求...');
 
-      const result = await chatApi.sendMessage(sessionId, userMessage);
+      await chatApi.sendMessage(sessionId, userMessage);
+      // API 立即返回，后台处理中。轮询消息列表获取助手回复。
+      const pollInterval = setInterval(async () => {
+        try {
+          const data = await chatApi.getMessages(sessionId);
+          if (data.messages && data.messages.length > prevMsgCount) {
+            clearInterval(pollInterval);
+            // 添加新消息
+            const newMsgs = data.messages.slice(prevMsgCount);
+            newMsgs.forEach((msg: ChatMessage) => {
+              setMessages(prev => [...prev, msg]);
+            });
+            setIsStreaming(false);
+            setStatusMessage('');
+            loadSessions();
+          }
+        } catch {
+          // 忽略轮询错误
+        }
+      }, 2000);
+      // 最多轮询 5 分钟后停止
+      setTimeout(() => { clearInterval(pollInterval); setIsStreaming(false); setStatusMessage(''); }, 300000);
 
+    } catch (error) {
       setIsStreaming(false);
       setStatusMessage('');
-
-      if (result.needs_approval) {
-        setApprovalRequest({
-          message: result.approval_data?.message || '等待确认',
-          commands: result.approval_data?.commands || [],
-          sessionId,
-        });
-        setStatusMessage('⏸️ 等待您的确认...');
-      } else {
-        const assistantMessage: ChatMessage = {
-          id: result.message_id || Date.now(),
-          role: 'assistant',
-          content: result.reply,
-          created_at: new Date().toISOString()
-        };
-        setMessages(prev => [...prev, assistantMessage]);
-        loadSessions();
-      }
+      console.error('Failed to send message:', error);
+      antMessage.error('发送消息失败');
+    }
 
     } catch (error) {
       setIsStreaming(false);
