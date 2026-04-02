@@ -17,6 +17,7 @@ Agent 聊天服务 - 统一的消息处理服务
     reply = result.reply
 """
 
+import asyncio
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -35,7 +36,8 @@ from app.utils.llm_helper import ensure_final_report_in_state
 logger = get_logger(__name__)
 
 # 常量
-AGENT_TIMEOUT = 600  # 10 分钟（可根据需要调整）
+AGENT_TIMEOUT = 120  # 2 分钟（整体执行超时）
+LLM_CALL_TIMEOUT = 120  # 单次 LLM 调用超时（秒）
 
 
 # ========== 数据模型 ==========
@@ -393,22 +395,32 @@ class AgentChatService:
                 # 准备并执行
                 agent, input_state, config = await self._prepare_agent(request)
 
-                async for event_type, event_data, state_update in _execute_agent_stream(
-                    agent, input_state, config, request.session_id
-                ):
-                    # 发送状态更新
-                    if event_type == EventType.STATUS:
-                        yield StreamEvent(type=EventType.STATUS, data=event_data)
+                # 使用 asyncio.wait_for 保护整体执行时间
+                try:
+                    async for event_type, event_data, state_update in asyncio.wait_for(
+                        _execute_agent_stream(agent, input_state, config, request.session_id),
+                        timeout=AGENT_TIMEOUT,
+                    ):
+                        # 发送状态更新
+                        if event_type == EventType.STATUS:
+                            yield StreamEvent(type=EventType.STATUS, data=event_data)
 
-                    # 处理审批中断
-                    elif event_type == EventType.APPROVAL_REQUEST:
-                        yield StreamEvent(type=EventType.APPROVAL_REQUEST, data=event_data)
-                        return
+                        # 处理审批中断
+                        elif event_type == EventType.APPROVAL_REQUEST:
+                            yield StreamEvent(type=EventType.APPROVAL_REQUEST, data=event_data)
+                            return
 
-                    # 更新 final_state
-                    if state_update:
-                        final_state.update(state_update)
-                        workflow_completed = True
+                        # 更新 final_state
+                        if state_update:
+                            final_state.update(state_update)
+                            workflow_completed = True
+                except asyncio.TimeoutError:
+                    logger.error(f"⏰ Agent 执行超时: session={request.session_id}")
+                    yield StreamEvent(
+                        type=EventType.ERROR,
+                        data={"message": f"Agent 执行超时（{AGENT_TIMEOUT}s），请稍后重试"}
+                    )
+                    return
 
                 # 提取最终回复
                 full_response = _extract_reply(final_state, workflow_completed) or ""
@@ -454,23 +466,32 @@ class AgentChatService:
             # 准备并执行
             agent, input_state, config = await self._prepare_agent(request)
 
-            async for event_type, event_data, state_update in _execute_agent_stream(
-                agent, input_state, config, request.session_id
-            ):
-                # 处理审批中断
-                if event_type == EventType.APPROVAL_REQUEST:
-                    return ChatResponse(
-                        reply=event_data.get("message", "等待审批"),
-                        session_id=request.session_id,
-                        workflow_status="awaiting_approval",
-                        needs_approval=True,
-                        approval_data=event_data
-                    )
+            try:
+                async for event_type, event_data, state_update in asyncio.wait_for(
+                    _execute_agent_stream(agent, input_state, config, request.session_id),
+                    timeout=AGENT_TIMEOUT,
+                ):
+                    # 处理审批中断
+                    if event_type == EventType.APPROVAL_REQUEST:
+                        return ChatResponse(
+                            reply=event_data.get("message", "等待审批"),
+                            session_id=request.session_id,
+                            workflow_status="awaiting_approval",
+                            needs_approval=True,
+                            approval_data=event_data
+                        )
 
-                # 更新 final_state
-                if state_update:
-                    final_state.update(state_update)
-                    workflow_completed = True
+                    # 更新 final_state
+                    if state_update:
+                        final_state.update(state_update)
+                        workflow_completed = True
+            except asyncio.TimeoutError:
+                logger.error(f"⏰ Agent 执行超时: session={request.session_id}")
+                return ChatResponse(
+                    reply=f"⚠️ Agent 执行超时（{AGENT_TIMEOUT}s），请稍后重试。",
+                    session_id=request.session_id,
+                    workflow_status="error"
+                )
 
             # 提取最终回复
             reply = _extract_reply(final_state, workflow_completed)

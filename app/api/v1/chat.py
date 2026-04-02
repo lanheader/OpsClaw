@@ -627,6 +627,13 @@ async def send_message(
                     yield _sse_event("done", event_data)
 
                 elif event.type == EventType.ERROR:
+                    # 错误时也保存一条记录，确保对话不丢失
+                    error_msg = event.data.get("message", "处理失败")
+                    _save_assistant_message(
+                        db, session_id, session,
+                        f"⚠️ {error_msg}",
+                        None, False, message_data.content
+                    )
                     yield _sse_event("error", event_data)
 
         except Exception as e:
