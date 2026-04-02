@@ -151,20 +151,29 @@ def _infer_tool_type(tool_name: str) -> str:
 
 def _extract_state_from_node(node_state: Any) -> Optional[Dict]:
     """从节点状态中提取信息"""
-    if not isinstance(node_state, dict) or "messages" not in node_state:
-        return {"raw_state": True}
+    if not isinstance(node_state, dict):
+        return None
+
+    has_messages = "messages" in node_state
 
     try:
-        return {
-            "messages": [
+        result = {}
+        if has_messages:
+            result["messages"] = [
                 {"type": type(m).__name__, "content": getattr(m, 'content', str(m))}
                 for m in node_state.get("messages", [])
-            ],
-            "final_report": node_state.get("final_report", ""),
-            "formatted_response": node_state.get("formatted_response", ""),
-            "intent_type": node_state.get("intent_type", "unknown"),
-            "diagnosis_round": node_state.get("diagnosis_round", 0),
-        }
+            ]
+        else:
+            result["raw_state"] = True
+
+        # 始终提取这些字段（不管有没有 messages）
+        for key in ("formatted_response", "final_report", "response", "output", "reply"):
+            if key in node_state:
+                result[key] = node_state[key]
+
+        result["intent_type"] = node_state.get("intent_type", "unknown")
+        result["diagnosis_round"] = node_state.get("diagnosis_round", 0)
+        return result
     except Exception:
         return {"raw_state": True}
 
@@ -326,6 +335,14 @@ def _extract_reply(final_state: Dict[str, Any], workflow_completed: bool) -> Opt
                     logger.warning(f"  最后一条消息: type={last_msg.get('type')}, has_content={bool(last_msg.get('content'))}")
                 else:
                     logger.warning(f"  最后一条消息: class={type(last_msg).__name__}, type={getattr(last_msg, 'type', None)}, content={getattr(last_msg, 'content', None)[:100] if getattr(last_msg, 'content', None) else None}")
+
+            # 兜底：遍历所有字段，找到第一个看起来像回复的字符串
+            for key, val in final_state.items():
+                if key in ("raw_state", "workflow_status", "intent_type", "diagnosis_round"):
+                    continue
+                if isinstance(val, str) and len(val) > 10 and not val.startswith("{"):
+                    logger.info(f"📝 兜底从 final_state['{key}'] 提取回复 (长度: {len(val)})")
+                    return _clean_reply(val)
 
     except Exception as e:
         logger.error(f"❌ 提取回复失败: {e}")
