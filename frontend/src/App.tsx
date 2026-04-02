@@ -13,10 +13,12 @@ import {
   SafetyOutlined,
   MessageOutlined,
   EditOutlined,
+  ClockCircleOutlined,
 } from '@ant-design/icons';
-import { ClockCircleOutlined } from '@ant-design/icons';
+import React, { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { apiClient } from './api/client';
 import { Dashboard } from './pages/Dashboard';
 import { Login } from './pages/Login';
 import { UserManagement } from './pages/UserManagement';
@@ -26,7 +28,8 @@ import SystemSettings from './pages/SystemSettings';
 import Chat from './pages/Chat';
 import Profile from './pages/Profile';
 import PromptManagement from './pages/PromptManagement';
-import ScheduledTasksPage from './pages/ScheduledTasks';
+import ScheduledTasks from './pages/ScheduledTasks';
+import OnboardingWizard from './pages/OnboardingWizard';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { PermissionProvider, usePermission } from './contexts/PermissionContext';
 import { PrivateRoute } from './components/PrivateRoute';
@@ -48,6 +51,27 @@ const AppLayout: React.FC = () => {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   const { hasPermission, loading: permissionLoading } = usePermission();
+
+  // 检查是否需要初始化
+  useEffect(() => {
+    if (location.pathname === '/onboarding') return;
+    apiClient.get('/v1/onboarding/status').then(res => {
+      if (!res.data.initialized) {
+        navigate('/onboarding', { replace: true });
+      }
+    }).catch(() => {
+      // ignore
+    });
+  }, []);
+
+  // onboarding 页面不显示侧边栏
+  if (location.pathname === '/onboarding') {
+    return (
+      <Routes>
+        <Route path="/onboarding" element={<OnboardingWizard />} />
+      </Routes>
+    );
+  }
 
   const handleLogout = () => {
     logout();
@@ -80,14 +104,14 @@ const AppLayout: React.FC = () => {
       label: <Link to="/">仪表盘</Link>,
     },
     {
-      key: '/scheduled-tasks',
-      icon: <ClockCircleOutlined />,
-      label: <Link to="/scheduled-tasks">定时任务</Link>,
-    },
-    {
       key: '/chat',
       icon: <MessageOutlined />,
       label: <Link to="/chat">AI 对话</Link>,
+    },
+    {
+      key: '/scheduled-tasks',
+      icon: <ClockCircleOutlined />,
+      label: <Link to="/scheduled-tasks">定时任务</Link>,
     },
     hasPermission('view_history') && {
       key: '/history',
@@ -135,7 +159,7 @@ const AppLayout: React.FC = () => {
       <Header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#001529' }}>
         <div style={{ display: 'flex', alignItems: 'center' }}>
           <div style={{ color: 'white', fontSize: 20, fontWeight: 'bold', marginRight: 40 }}>
-            🤖 Ops Agent v3.0
+            🤖 OpsClaw v3.0
           </div>
           <Title level={5} style={{ color: 'white', margin: 0 }}>
             智能运维管理平台
@@ -180,7 +204,8 @@ const AppLayout: React.FC = () => {
               <Route path="/profile" element={<Profile />} />
               <Route path="/settings" element={<SystemSettings />} />
               <Route path="/prompts" element={<PromptManagement />} />
-              <Route path="/scheduled-tasks" element={<ScheduledTasksPage />} />
+              <Route path="/scheduled-tasks" element={<ScheduledTasks />} />
+              <Route path="/onboarding" element={<OnboardingWizard />} />
             </Routes>
           </div>
         </Content>

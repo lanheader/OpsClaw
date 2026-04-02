@@ -290,21 +290,17 @@ class ToolRegistry:
 
         logger.debug(f"Registered tool: {metadata.name} in group {metadata.group}")
 
-    def scan_and_register(self, tool_packages: List[str] = None):
+    def scan_and_register(self, tool_packages: List[str] = None, force: bool = False):
         """
         扫描并注册所有工具
 
         Args:
-            tool_packages: 要扫描的包列表（默认扫描 k8s, prometheus, loki）
+            tool_packages: 要扫描的包列表（默认自动发现 app.tools 下所有子包）
                           支持短格式（如 "k8s"）或完整路径（如 "app.tools.k8s"）
+            force: 是否强制重新扫描（默认 False，跳过已注册的工具）
         """
         if tool_packages is None:
-            tool_packages = [
-                "app.tools.k8s",
-                "app.tools.prometheus",
-                "app.tools.loki",
-                "app.tools.chat",  # 对话历史工具
-            ]
+            tool_packages = self._discover_tool_packages()
 
         for package in tool_packages:
             try:
@@ -319,6 +315,19 @@ class ToolRegistry:
             f"Tool registry initialized: {len(self._tool_classes)} tools, "
             f"{len(self._groups)} groups, {len(self._permissions)} permissions"
         )
+
+    def _discover_tool_packages(self) -> List[str]:
+        """自动发现 app.tools 下所有子包目录"""
+        packages = []
+        tools_dir = Path(__file__).parent
+
+        for item in sorted(tools_dir.iterdir()):
+            if item.is_dir() and not item.name.startswith("_"):
+                # 检查是否是 Python 包（包含 __init__.py）
+                if (item / "__init__.py").exists():
+                    packages.append(f"app.tools.{item.name}")
+
+        return packages
 
     def _scan_package(self, package: str):
         """扫描包并注册所有工具类"""
@@ -427,6 +436,22 @@ class ToolRegistry:
                     pass
                 elif not required_perms.issubset(permissions):
                     continue
+
+            # 检查集成是否启用（需要 db 参数）
+            tool_package = metadata.group.split('.')[0] if metadata.group else ''
+            if db is not None and tool_package in ('k8s', 'loki', 'prometheus'):
+                try:
+                    from app.core.integration_config import IntegrationConfig
+                    integration_checks = {
+                        'k8s': IntegrationConfig.is_k8s_enabled,
+                        'loki': IntegrationConfig.is_loki_enabled,
+                        'prometheus': IntegrationConfig.is_prometheus_enabled,
+                    }
+                    check_fn = integration_checks.get(tool_package)
+                    if check_fn and not check_fn(db):
+                        continue
+                except Exception:
+                    pass  # 检查失败不过滤，避免阻断所有工具
 
             # 创建 LangChain 工具
             try:

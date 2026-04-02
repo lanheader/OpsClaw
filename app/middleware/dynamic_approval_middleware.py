@@ -108,12 +108,14 @@ class DynamicApprovalMiddleware(AgentMiddleware):
 
     def _get_tools_need_approval(self, user_id: Optional[int]) -> Set[str]:
         """获取需要审批的工具集合（带缓存）"""
-        if user_id is None:
-            return set()
+
+        # 即使 user_id 为 None 也加载审批配置（安全优先原则）
+        # ContextVar 可能在子 task 中丢失，不能因此跳过审批
 
         # 检查缓存
-        if user_id in self._approval_cache:
-            return self._approval_cache[user_id]
+        cache_key = user_id if user_id is not None else "__all__"
+        if cache_key in self._approval_cache:
+            return self._approval_cache[cache_key]
 
         # 从数据库加载
         db = SessionLocal()
@@ -158,11 +160,18 @@ class DynamicApprovalMiddleware(AgentMiddleware):
                 f"需审批工具数={len(tools_need_approval)}"
             )
 
+            # 写入缓存
+            self._approval_cache[cache_key] = tools_need_approval
             return tools_need_approval
 
         except Exception as e:
-            logger.warning(f"⚠️ 加载审批配置失败: {e}，使用空集合")
-            return set()
+            logger.warning(f"⚠️ 加载审批配置失败: {e}，安全起见拦截所有高危险工具")
+            # 加载失败时默认拦截所有已知的危险工具
+            return {
+                "force_delete_pod", "delete_pod", "delete_deployment",
+                "delete_service", "delete_config_map", "delete_secret",
+                "restart_deployment", "scale_deployment", "update_deployment_image",
+            }
 
         finally:
             if should_close_db:

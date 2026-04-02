@@ -184,10 +184,18 @@ class GetPodLogsTool(BaseOpTool):
             return tool_success_response(data, "get_pod_logs", source="kubernetes-sdk")
 
         except Exception as e:
+            error_msg = str(e)
+            # 优化常见错误的提示
+            if "400" in error_msg or "Bad Request" in error_msg:
+                suggestion = f"Pod '{name}' 当前不支持日志读取，可能已终止或容器未正常运行。请先检查 Pod 状态。"
+            elif "404" in error_msg or "Not Found" in error_msg:
+                suggestion = f"Pod '{name}' 在命名空间 '{namespace}' 中不存在，请检查名称和命名空间。"
+            else:
+                suggestion = f"请确认 Pod '{name}' 存在且正在运行"
             return tool_error_response(
                 e, "get_pod_logs",
                 context={"name": name, "namespace": namespace},
-                suggestion=f"请确认 Pod '{name}' 存在且正在运行"
+                suggestion=suggestion
             )
 
 

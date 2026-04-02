@@ -17,7 +17,7 @@ import os
 from collections import defaultdict
 from typing import Any, Optional, Set, Dict, List
 
-from deepagents import create_deep_agent
+from deepagents import create_deep_agent, SubAgent
 from deepagents.backends.filesystem import FilesystemBackend
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, ToolMessage
@@ -33,12 +33,6 @@ from app.memory import get_langgraph_store
 logger = get_logger(__name__)
 
 
-# ========== 全局缓存 ==========
-
-_cached_base_agent: Optional[Any] = None
-_base_agent_ready = False
-
-
 # ========== 组件加载函数 ==========
 
 def _get_llm(llm: Optional[BaseChatModel] = None) -> BaseChatModel:
@@ -48,11 +42,11 @@ def _get_llm(llm: Optional[BaseChatModel] = None) -> BaseChatModel:
     return llm
 
 
-def _load_all_subagents() -> List[Dict[str, Any]]:
-    """加载所有 Subagent 列表"""
+def _load_all_subagents(db: Optional[Session] = None) -> List[SubAgent]:
+    """加载所有 Subagent 列表（工具按集成开关动态过滤）"""
     from app.deepagents.subagents import get_all_subagents
 
-    subagents = get_all_subagents()
+    subagents = get_all_subagents(db=db)
 
     # 日志输出
     logger.info("=" * 60)
@@ -70,13 +64,35 @@ def _load_all_subagents() -> List[Dict[str, Any]]:
 
 
 def _load_all_tools() -> List[Any]:
-    """加载所有工具（不过滤权限）"""
+    """加载所有工具（过滤未启用的集成）"""
     registry = get_tool_registry()
-    tools = registry.get_langchain_tools()
+    try:
+        from app.models.database import SessionLocal
+        db = SessionLocal()
+        tools = registry.get_langchain_tools(db=db)
+        db.close()
+    except Exception:
+        tools = registry.get_langchain_tools()
 
     # 日志输出
     _log_tools_info(tools)
 
+    return tools
+
+
+def _load_tools_for_user(user_id: Optional[int] = None, db: Optional[Session] = None) -> List[Any]:
+    """按用户权限动态加载工具"""
+    registry = get_tool_registry()
+    try:
+        if user_id is not None and db is not None:
+            tools = registry.get_langchain_tools(user_id=user_id, db=db)
+            logger.info(f"🔧 按用户权限加载工具: user_id={user_id}, 工具数={len(tools)}")
+        else:
+            tools = _load_all_tools()
+    except Exception:
+        tools = _load_all_tools()
+
+    _log_tools_info(tools)
     return tools
 
 
@@ -129,6 +145,13 @@ def _get_skills_config() -> tuple:
 
 # 文件输出指令（添加到 system_prompt 末尾）
 FILE_OUTPUT_PROMPT = """
+<language_rule>
+- 你必须始终使用中文（简体中文）回复用户
+- 所有分析报告、诊断结果、修复建议都必须使用中文
+- 工具调用参数保持英文（如 namespace、label 等），但回复内容的描述必须用中文
+- 专业术语可以保留英文原文，但需附中文解释（如 CPU 使用率、OOM 等）
+</language_rule>
+
 <file_output>
 完成分析后，你可以使用 `write_file` 工具生成报告文件：
 - 诊断报告保存到: /workspace/reports/{YYYY-MM-DD}/{session_id}_diagnosis.md
@@ -147,27 +170,16 @@ FILE_OUTPUT_PROMPT = """
 
 # ========== 基础 Agent 创建（应用启动时调用一次） ==========
 
-async def create_base_agent() -> Any:
+async def create_base_agent(user_id: Optional[int] = None, db: Optional[Session] = None) -> Any:
     """
-    创建基础 Agent（应用启动时调用一次）。
+    懒加载创建 Agent，每次都新建（不缓存）。
+    创建前根据 user_id+db 查用户角色，动态生成 interrupt_on。
 
-    特点：
-    - 加载所有工具（不做权限过滤，由 DynamicPermissionMiddleware 处理）
-    - 加载所有 SubAgent
-    - 不设置 interrupt_on（由 DynamicApprovalMiddleware 处理）
-    - 配置 Skills、Filesystem 等 deepagents 内置能力
-    - 利用 deepagents 内置的 SummarizationMiddleware（自动对话压缩）
-
-    Returns:
-        编译后的 DeepAgents 图
+    Args:
+        user_id: 用户 ID
+        db: 数据库会话
     """
-    global _cached_base_agent, _base_agent_ready
-
-    if _base_agent_ready and _cached_base_agent is not None:
-        logger.info("📦 使用缓存的 base_agent")
-        return _cached_base_agent
-
-    logger.info("🏗️ 创建基础 Agent（静态模式，包含所有工具和 SubAgent）")
+    logger.info("🏗️ 创建 Agent（懒加载）")
 
     # 0. 获取项目根目录
     project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
@@ -175,9 +187,9 @@ async def create_base_agent() -> Any:
     # 1. 获取 LLM
     llm = _get_llm()
 
-    # 2. 加载所有组件（不过滤权限）
-    subagents = _load_all_subagents()
-    tools = _load_all_tools()
+    # 2. 按用户权限加载工具（不过滤则加载全部）
+    subagents = _load_all_subagents(db)
+    tools = _load_tools_for_user(user_id, db)
 
     # 3. 获取基础设施
     checkpointer = await get_checkpointer()
@@ -197,12 +209,66 @@ async def create_base_agent() -> Any:
     from app.middleware.dynamic_permission_middleware import DynamicPermissionMiddleware
     from app.middleware.dynamic_approval_middleware import DynamicApprovalMiddleware
 
+    # 获取需要审批的工具（从已加载的工具列表中筛选）
+    interrupt_on = {}
+    tool_names = {t.name for t in tools}
+    try:
+        from app.services.approval_config_service import ApprovalConfigService
+
+        # 查用户角色
+        user_role = None
+        if user_id is not None and db is not None:
+            try:
+                from app.models.user_role import UserRole
+                from app.models.role import Role
+                roles = (
+                    db.query(Role.name)
+                    .join(UserRole, Role.id == UserRole.role_id)
+                    .filter(UserRole.user_id == user_id)
+                    .all()
+                )
+                user_role = roles[0][0] if roles else None
+            except Exception as e:
+                logger.warning(f"获取用户角色失败: {e}")
+
+        # db 为 None 时用临时连接
+        _db = db
+        _should_close = False
+        if _db is None:
+            from app.models.database import SessionLocal
+            _db = SessionLocal()
+            _should_close = True
+
+        try:
+            tools_need_approval = ApprovalConfigService.get_tools_require_approval(
+                _db, user_role=user_role
+            )
+            # 关键：只对用户可用的工具中的需审批工具设置 interrupt_on
+            for tool_name in tools_need_approval:
+                if tool_name in tool_names:
+                    interrupt_on[tool_name] = True
+            logger.info(
+                f"🔒 审批配置: user_id={user_id}, role={user_role}, "
+                f"可用工具={len(tool_names)}, 需审批={list(interrupt_on.keys())}"
+            )
+        finally:
+            if _should_close:
+                _db.close()
+    except Exception as e:
+        logger.warning(f"⚠️ 加载审批配置失败: {e}，安全兜底拦截所有高风险工具")
+        for t in [
+            "force_delete_pod", "delete_pod", "delete_deployment",
+            "delete_service", "delete_config_map", "delete_secret",
+            "restart_deployment", "scale_deployment", "update_deployment_image",
+        ]:
+            interrupt_on[t] = True
+
     custom_middleware = [
         ErrorFilteringMiddleware(),
         LoggingMiddleware(),
         # 权限中间件：从请求上下文获取权限，检查工具调用权限
         DynamicPermissionMiddleware(),
-        # 审批中间件：从请求上下文获取用户 ID，检查是否需要审批
+        # 审批中间件：日志记录模式（实际拦截由 interrupt_on 保证）
         DynamicApprovalMiddleware(),
     ]
     logger.info("🔧 已加载权限和审批中间件")
@@ -213,7 +279,7 @@ async def create_base_agent() -> Any:
         main_prompt = prompt_optimizer.get_prompt_for_agent("main-agent")
     except ValueError:
         # 如果数据库中没有，使用默认提示词
-        main_prompt = """你是一个智能运维助手（Ops Agent），负责帮助用户诊断和解决 Kubernetes 集群问题。
+        main_prompt = """你是一个智能运维助手（OpsClaw），负责帮助用户诊断和解决 Kubernetes 集群问题。
 
 ## 核心能力
 1. 集群状态查询和分析
@@ -244,32 +310,15 @@ async def create_base_agent() -> Any:
         subagents=subagents,
         middleware=custom_middleware,
         checkpointer=checkpointer,
-        # 不传 interrupt_on，由 DynamicApprovalMiddleware 处理
         store=store,
         backend=backend,
         skills=skills,
-        # memory 参数已移除，记忆注入统一在 agent_chat_service 中处理
+        interrupt_on=interrupt_on if interrupt_on else None,
     )
 
-    # 8. 缓存
-    _cached_base_agent = agent
-    _base_agent_ready = True
-
-    logger.info("✅ 基础 Agent 创建完成（已缓存，后续请求复用）")
+    logger.info("✅ Agent 创建完成")
     return agent
 
-
-def get_cached_base_agent() -> Optional[Any]:
-    """获取缓存的 base_agent"""
-    return _cached_base_agent
-
-
-def invalidate_base_agent() -> None:
-    """清除 base_agent 缓存（LLM 配置变更时调用）"""
-    global _cached_base_agent, _base_agent_ready
-    _cached_base_agent = None
-    _base_agent_ready = False
-    logger.info("🗑️ base_agent 缓存已清除")
 
 
 # ========== 动态 Agent 包装器 ==========
@@ -385,7 +434,7 @@ async def get_ops_agent(
     db: Optional[Session] = None,
 ) -> Any:
     """
-    获取 Ops Agent
+    获取 OpsClaw
 
     v4.0 改进：
     - 使用按权限组合缓存的 Agent 实例，不再每次重建
@@ -402,8 +451,19 @@ async def get_ops_agent(
     Returns:
         DynamicAgentWrapper 包装的 Agent 实例
     """
-    # 1. 获取或创建 base_agent
-    base_agent = await create_base_agent()
+    # 1. 创建 agent（懒加载，根据用户角色动态生成 interrupt_on）
+    _db = db
+    _should_close_db = False
+    if _db is None:
+        from app.models.database import SessionLocal
+        _db = SessionLocal()
+        _should_close_db = True
+
+    try:
+        base_agent = await create_base_agent(user_id=user_id, db=_db)
+    finally:
+        if _should_close_db:
+            _db.close()
 
     # 2. 获取用户权限（如果提供了 user_id 和 db）
     if user_id is not None and db is not None:
@@ -442,7 +502,5 @@ __all__ = [
     "get_ops_agent",
     "get_thread_config",
     "create_base_agent",
-    "get_cached_base_agent",
-    "invalidate_base_agent",
     "DynamicAgentWrapper",
 ]

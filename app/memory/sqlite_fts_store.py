@@ -33,10 +33,10 @@ from langgraph.store.base import (
     SearchItem,
 )
 
+from app.core.config import get_settings
+
 if TYPE_CHECKING:
     pass
-
-from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 

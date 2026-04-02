@@ -15,8 +15,12 @@ DeepAgents 中间件系统
 
 from .logging_middleware import LoggingMiddleware
 from .error_filtering_middleware import ErrorFilteringMiddleware
+from .dynamic_permission_middleware import DynamicPermissionMiddleware
+from .dynamic_approval_middleware import DynamicApprovalMiddleware
 
 __all__ = [
     "LoggingMiddleware",
     "ErrorFilteringMiddleware",
+    "DynamicPermissionMiddleware",
+    "DynamicApprovalMiddleware",
 ]

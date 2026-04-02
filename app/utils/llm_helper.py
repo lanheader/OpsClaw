@@ -307,22 +307,37 @@ def ensure_final_report_in_state(state: Dict[str, Any]) -> Dict[str, Any]:
     if not state or not isinstance(state, dict):
         return state
 
+    # 如果已有 final_report，直接返回
+    existing_report = _normalize_message_content(state.get("final_report"))
+    if existing_report:
+        return state
+
+    # 尝试从直接 state 合成报告
     synthesized_report = synthesize_final_report_from_state(state)
     if synthesized_report:
         return _safe_merge_state(state, "final_report", synthesized_report)
 
-    existing_report = _normalize_message_content(state.get("final_report"))
-    if existing_report:
-        if existing_report != state.get("final_report"):
-            return _safe_merge_state(state, "final_report", existing_report)
-        return state
-
+    # 尝试从 messages 提取
     messages = state.get("messages", [])
     final_report = extract_final_report_from_messages(messages)
-    if not final_report:
-        return state
+    if final_report:
+        return _safe_merge_state(state, "final_report", final_report)
 
-    return _safe_merge_state(state, "final_report", final_report)
+    # 兜底：从 _raw_node_state 提取（LangGraph 节点事件可能没有 messages 字段）
+    raw_node_state = state.get("_raw_node_state")
+    if isinstance(raw_node_state, dict):
+        # 先尝试合成
+        synthesized_report = synthesize_final_report_from_state(raw_node_state)
+        if synthesized_report:
+            return _safe_merge_state(state, "final_report", synthesized_report)
+
+        # 再尝试从 messages 提取
+        raw_messages = raw_node_state.get("messages", [])
+        final_report = extract_final_report_from_messages(raw_messages)
+        if final_report:
+            return _safe_merge_state(state, "final_report", final_report)
+
+    return state
 
 
 def extract_json_from_llm_response(

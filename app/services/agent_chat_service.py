@@ -17,6 +17,7 @@ Agent 聊天服务 - 统一的消息处理服务
     reply = result.reply
 """
 
+import asyncio
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -35,7 +36,8 @@ from app.utils.llm_helper import ensure_final_report_in_state
 logger = get_logger(__name__)
 
 # 常量
-AGENT_TIMEOUT = 600  # 10 分钟（可根据需要调整）
+AGENT_TIMEOUT = 120  # 2 分钟（整体执行超时）
+LLM_CALL_TIMEOUT = 120  # 单次 LLM 调用超时（秒）
 
 
 # ========== 数据模型 ==========
@@ -87,8 +89,6 @@ class StreamEvent:
     type: EventType
     data: Dict[str, Any]
 
-
-# ========== 事件处理辅助函数 ==========
 
 def _get_status_message(node_name: str) -> str:
     """根据节点名获取状态消息"""
@@ -151,21 +151,61 @@ def _infer_tool_type(tool_name: str) -> str:
 
 def _extract_state_from_node(node_state: Any) -> Optional[Dict]:
     """从节点状态中提取信息"""
-    if not isinstance(node_state, dict) or "messages" not in node_state:
-        return {"raw_state": True}
-
     try:
-        return {
-            "messages": [
-                {"type": type(m).__name__, "content": getattr(m, 'content', str(m))}
-                for m in node_state.get("messages", [])
-            ],
-            "final_report": node_state.get("final_report", ""),
-            "formatted_response": node_state.get("formatted_response", ""),
-            "intent_type": node_state.get("intent_type", "unknown"),
-            "diagnosis_round": node_state.get("diagnosis_round", 0),
-        }
-    except Exception:
+        # 如果不是 dict，尝试转换为 dict（LangGraph 可能返回 StateSnapshot 等对象）
+        if not isinstance(node_state, dict):
+            if hasattr(node_state, 'values'):
+                node_state = node_state.values
+            elif hasattr(node_state, '__dict__'):
+                node_state = vars(node_state)
+            else:
+                logger.warning(f"⚠️ _extract_state_from_node: 不支持的状态类型 {type(node_state).__name__}: {repr(node_state)[:200]}")
+                return None
+
+        if not isinstance(node_state, dict):
+            return None
+
+        result = {}
+
+        # 始终保留原始 node_state 的引用，供后续提取
+        result["_raw_node_state"] = node_state
+
+        # 安全获取字段（避免 LangGraph Overwrite 对象的迭代问题）
+        def _safe_get(d, key, default=None):
+            try:
+                return d[key] if key in d else default
+            except TypeError:
+                return default
+
+        def _safe_has(d, key):
+            try:
+                return key in d
+            except TypeError:
+                return False
+
+        messages = _safe_get(node_state, "messages")
+        if messages is not None:
+            try:
+                result["messages"] = [
+                    {"type": type(m).__name__, "content": getattr(m, 'content', str(m))}
+                    for m in messages
+                ]
+            except TypeError:
+                result["raw_state"] = True
+        else:
+            result["raw_state"] = True
+
+        # 始终提取这些字段
+        for key in ("formatted_response", "final_report", "response", "output", "reply"):
+            val = _safe_get(node_state, key)
+            if val is not None:
+                result[key] = val
+
+        result["intent_type"] = _safe_get(node_state, "intent_type", "unknown")
+        result["diagnosis_round"] = _safe_get(node_state, "diagnosis_round", 0)
+        return result
+    except Exception as e:
+        logger.warning(f"⚠️ _extract_state_from_node 异常: {e}")
         return {"raw_state": True}
 
 
@@ -212,8 +252,14 @@ def _process_event(
     event_type = event.get("type")
     if event_type is None:
         # LangGraph 节点事件格式: {node_name: state}
-        for node_name, node_state in event.items():
-            if node_name.startswith("__"):
+        try:
+            items = list(event.items())
+        except TypeError:
+            logger.warning(f"⚠️ _process_event: event.items() 失败, type={type(event).__name__}")
+            return None
+
+        for node_name, node_state in items:
+            if not isinstance(node_name, str) or node_name.startswith("__"):
                 continue
 
             status_msg = _get_status_message(node_name)
@@ -222,7 +268,8 @@ def _process_event(
             return (
                 EventType.STATUS,
                 {"status": "processing", "message": status_msg},
-                state_update
+                state_update,
+                node_state  # 额外返回原始 node_state
             )
 
     # 3. 处理自定义 complete 事件
@@ -257,8 +304,6 @@ def _process_event(
     return None
 
 
-# ========== 消息处理辅助函数 ==========
-
 async def _inject_memory(text: str, session_id: str, user_id: int) -> str:
     """记忆注入"""
     try:
@@ -286,7 +331,7 @@ async def _inject_memory(text: str, session_id: str, user_id: int) -> str:
 
 
 def _extract_reply(final_state: Dict[str, Any], workflow_completed: bool) -> Optional[str]:
-    """提取最终回复"""
+    """提取最终回复（统一清理 XML 标签）"""
     try:
         if final_state:
             try:
@@ -298,18 +343,57 @@ def _extract_reply(final_state: Dict[str, Any], workflow_completed: bool) -> Opt
             for key in ["formatted_response", "final_report", "final_answer", "response"]:
                 reply = final_state.get(key, "")
                 if reply:
-                    logger.info(f"📝 从 final_state 提取到回复 (长度: {len(reply)})")
-                    return reply
+                    logger.info(f"📝 从 final_state 提取到回复 (key={key}, 长度: {len(reply)})")
+                    return _clean_reply(reply)
 
             # 从 messages 中提取
             messages = final_state.get("messages", [])
             if messages:
                 for msg in reversed(messages):
                     if isinstance(msg, dict):
-                        if msg.get("type") == "AIMessage" and msg.get("content"):
-                            return msg["content"]
-                    elif isinstance(msg, AIMessage) and msg.content:
-                        return msg.content
+                        msg_type = msg.get("type", "")
+                        content = msg.get("content", "")
+                        # 匹配 "ai", "AIMessage", "AIMessageChunk" 等
+                        if ("ai" in str(msg_type).lower()) and content:
+                            logger.info(f"📝 从 messages 提取到回复 (type={msg_type}, 长度: {len(content)})")
+                            return _clean_reply(content)
+                    elif hasattr(msg, 'type'):
+                        # langchain Message 对象
+                        if 'ai' in str(msg.type).lower():
+                            content = getattr(msg, 'content', None) or ""
+                            if content:
+                                logger.info(f"📝 从 messages 提取到回复 (AIMessage obj, 长度: {len(content)})")
+                                return _clean_reply(content)
+
+            # 调试：打印 final_state keys 和 messages 结构
+            logger.warning(f"⚠️ 未能从 final_state 提取回复. keys={list(final_state.keys())}, messages_count={len(messages) if messages else 0}")
+            if messages and len(messages) > 0:
+                last_msg = messages[-1]
+                if isinstance(last_msg, dict):
+                    logger.warning(f"  最后一条消息: type={last_msg.get('type')}, has_content={bool(last_msg.get('content'))}")
+                else:
+                    logger.warning(f"  最后一条消息: class={type(last_msg).__name__}, type={getattr(last_msg, 'type', None)}, content={getattr(last_msg, 'content', None)[:100] if getattr(last_msg, 'content', None) else None}")
+
+            # 兜底1：从 _raw_node_state 的 messages 里提取（langchain Message 对象）
+            raw_state = final_state.get("_raw_node_state")
+            if isinstance(raw_state, dict) and "messages" in raw_state:
+                for msg in reversed(raw_state["messages"]):
+                    content = None
+                    if isinstance(msg, dict):
+                        content = msg.get("content", "")
+                    elif hasattr(msg, "content"):
+                        content = msg.content
+                    if content and isinstance(content, str) and len(content) > 5:
+                        logger.info(f"📝 从 _raw_node_state.messages 提取到回复 (长度: {len(content)})")
+                        return _clean_reply(content)
+
+            # 兜底2：遍历所有字段，找到第一个看起来像回复的字符串
+            for key, val in final_state.items():
+                if key in ("raw_state", "workflow_status", "intent_type", "diagnosis_round"):
+                    continue
+                if isinstance(val, str) and len(val) > 10 and not val.startswith("{"):
+                    logger.info(f"📝 兜底从 final_state['{key}'] 提取回复 (长度: {len(val)})")
+                    return _clean_reply(val)
 
     except Exception as e:
         logger.error(f"❌ 提取回复失败: {e}")
@@ -320,7 +404,14 @@ def _extract_reply(final_state: Dict[str, Any], workflow_completed: bool) -> Opt
     return None
 
 
-# ========== Agent 执行核心 ==========
+def _clean_reply(content: str) -> str:
+    """统一清理回复内容（XML 标签等），所有渠道共用"""
+    try:
+        from app.integrations.feishu.message_formatter import clean_xml_tags
+        return clean_xml_tags(content)
+    except Exception:
+        return content
+
 
 async def _execute_agent_stream(
     agent: Any,
@@ -328,12 +419,12 @@ async def _execute_agent_stream(
     config: Dict,
     session_id: str,
     timeout: int = AGENT_TIMEOUT,
-) -> AsyncGenerator[Tuple[EventType, Dict, Optional[Dict]], None]:
+) -> AsyncGenerator[Tuple[EventType, Dict, Optional[Dict], Optional[Any]], None]:
     """
     执行 Agent 并流式返回事件
 
     Yields:
-        (event_type, event_data, state_update)
+        (event_type, event_data, state_update, raw_node_state)
     """
     start_time = time.time()
 
@@ -344,13 +435,20 @@ async def _execute_agent_stream(
             yield EventType.ERROR, {"message": f"处理超时（{elapsed:.0f}s）"}, None
             return
 
+        # 调试：打印原始事件
+        if isinstance(event, dict):
+            logger.warning(f"🔍 [DEBUG STREAM] event type=dict, keys={list(event.keys())[:5]}, sample={str({k: (str(v)[:100] if not isinstance(v, (list,dict)) else f'{type(v).__name__}({len(v)})') for k,v in list(event.items())[:3]})}")
+        else:
+            logger.warning(f"🔍 [DEBUG STREAM] event type={type(event).__name__}, repr={repr(event)[:300]}")
+
         # 处理事件
         result = _process_event(event, session_id)
         if result:
             yield result
+        else:
+            # 调试：打印未处理的事件
+            logger.warning(f"🔍 [DEBUG] 未处理事件: keys={list(event.keys()) if isinstance(event, dict) else type(event).__name__}, content_preview={str(event)[:200]}")
 
-
-# ========== 主服务类 ==========
 
 class AgentChatService:
     """
@@ -392,22 +490,32 @@ class AgentChatService:
                 # 准备并执行
                 agent, input_state, config = await self._prepare_agent(request)
 
-                async for event_type, event_data, state_update in _execute_agent_stream(
-                    agent, input_state, config, request.session_id
-                ):
-                    # 发送状态更新
-                    if event_type == EventType.STATUS:
-                        yield StreamEvent(type=EventType.STATUS, data=event_data)
+                # 使用 asyncio.timeout 保护整体执行时间
+                try:
+                    async with asyncio.timeout(AGENT_TIMEOUT):
+                        async for event_type, event_data, state_update in _execute_agent_stream(
+                            agent, input_state, config, request.session_id
+                        ):
+                            # 发送状态更新
+                            if event_type == EventType.STATUS:
+                                yield StreamEvent(type=EventType.STATUS, data=event_data)
 
-                    # 处理审批中断
-                    elif event_type == EventType.APPROVAL_REQUEST:
-                        yield StreamEvent(type=EventType.APPROVAL_REQUEST, data=event_data)
-                        return
+                            # 处理审批中断
+                            elif event_type == EventType.APPROVAL_REQUEST:
+                                yield StreamEvent(type=EventType.APPROVAL_REQUEST, data=event_data)
+                                return
 
-                    # 更新 final_state
-                    if state_update:
-                        final_state.update(state_update)
-                        workflow_completed = True
+                            # 更新 final_state
+                            if state_update:
+                                final_state.update(state_update)
+                                workflow_completed = True
+                except asyncio.TimeoutError:
+                    logger.error(f"⏰ Agent 执行超时: session={request.session_id}")
+                    yield StreamEvent(
+                        type=EventType.ERROR,
+                        data={"message": f"Agent 执行超时（{AGENT_TIMEOUT}s），请稍后重试"}
+                    )
+                    return
 
                 # 提取最终回复
                 full_response = _extract_reply(final_state, workflow_completed) or ""
@@ -453,26 +561,62 @@ class AgentChatService:
             # 准备并执行
             agent, input_state, config = await self._prepare_agent(request)
 
-            async for event_type, event_data, state_update in _execute_agent_stream(
-                agent, input_state, config, request.session_id
-            ):
-                # 处理审批中断
-                if event_type == EventType.APPROVAL_REQUEST:
-                    return ChatResponse(
-                        reply=event_data.get("message", "等待审批"),
-                        session_id=request.session_id,
-                        workflow_status="awaiting_approval",
-                        needs_approval=True,
-                        approval_data=event_data
-                    )
+            try:
+                async with asyncio.timeout(AGENT_TIMEOUT):
+                    async for event in _execute_agent_stream(
+                        agent, input_state, config, request.session_id
+                    ):
+                        # event 是元组：(event_type, event_data, state_update, raw_node_state)
+                        if not isinstance(event, tuple) or len(event) < 3:
+                            continue
+                        event_type, event_data, state_update = event[0], event[1], event[2]
+                        raw_node_state = event[3] if len(event) > 3 else None
 
-                # 更新 final_state
-                if state_update:
-                    final_state.update(state_update)
-                    workflow_completed = True
+                        # 处理审批中断
+                        if event_type == EventType.APPROVAL_REQUEST:
+                            return ChatResponse(
+                                reply=event_data.get("message", "等待审批"),
+                                session_id=request.session_id,
+                                workflow_status="awaiting_approval",
+                                needs_approval=True,
+                                approval_data=event_data
+                            )
+
+                        # 收集有效状态
+                        if state_update:
+                            final_state.update(state_update)
+                            workflow_completed = True
+
+                        # 如果 state_update 为空但有原始节点状态，直接尝试提取
+                        if not state_update and raw_node_state is not None:
+                            extracted = _extract_state_from_node(raw_node_state)
+                            if extracted and not extracted.get("raw_state"):
+                                final_state.update(extracted)
+                                workflow_completed = True
+            except asyncio.TimeoutError:
+                logger.error(f"⏰ Agent 执行超时: session={request.session_id}")
+                return ChatResponse(
+                    reply=f"⚠️ Agent 执行超时（{AGENT_TIMEOUT}s），请稍后重试。",
+                    session_id=request.session_id,
+                    workflow_status="error"
+                )
+
+            # 终极兜底：如果 astream 没拿到任何有效状态，直接 ainvoke
+            if not final_state:
+                logger.info(f"📝 astream 未提取到状态，回退到 ainvoke: session={request.session_id}")
+                try:
+                    result = await agent.ainvoke(input_state, config=config)
+                    if isinstance(result, dict):
+                        final_state = result
+                        workflow_completed = True
+                        logger.info(f"✅ ainvoke 成功，keys={list(result.keys())[:5]}")
+                except Exception as e:
+                    logger.warning(f"⚠️ ainvoke 回退失败: {e}")
 
             # 提取最终回复
             reply = _extract_reply(final_state, workflow_completed)
+
+            logger.info(f"🔍 final_state keys={list(final_state.keys())}, reply_len={len(reply) if reply else 0}")
 
             return ChatResponse(
                 reply=reply or "未能生成有效回复",
@@ -527,8 +671,6 @@ class AgentChatService:
 
         return agent, input_state, config
 
-
-# ========== 单例 ==========
 
 _agent_chat_service: Optional[AgentChatService] = None
 

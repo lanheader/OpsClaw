@@ -409,8 +409,13 @@ class BaseOpTool(ABC):
         # ========== 创建包装函数 ==========
         async def langchain_tool(**kwargs):
             """工具包装函数，支持参数签名提取"""
-            instance = cls()
-            return await instance.execute(**kwargs)
+            from app.models.database import SessionLocal
+            db = SessionLocal()
+            try:
+                instance = cls(db=db)
+                return await instance.execute(**kwargs)
+            finally:
+                db.close()
 
         # 注意：不要设置 __signature__，让 LangChain 从 args_schema 推断参数
         # 只设置函数名称

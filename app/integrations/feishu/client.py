@@ -125,7 +125,7 @@ class FeishuClient:
         示例：
             result = await client.send_text_message(
                 chat_id="oc_xxx",
-                text="Hello from Ops Agent!"
+                text="Hello from OpsClaw!"
             )
         """
         url = f"{self.base_url}/im/v1/messages"

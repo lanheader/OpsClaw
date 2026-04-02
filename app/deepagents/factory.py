@@ -46,6 +46,7 @@ async def create_agent_for_session(
         enable_approval=enable_approval,
         user_permissions=user_permissions,
         user_id=user_id,
+        db=None,  # db 在 get_ops_agent 内部按需创建
     )
 
 

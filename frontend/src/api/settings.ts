@@ -75,4 +75,10 @@ export const settingsApi = {
   delete: async (key: string): Promise<void> => {
     await apiClient.delete(`/v1/settings/${key}`);
   },
+
+  // 初始化默认系统设置（幂等）
+  initDefaults: async (): Promise<{ message: string }> => {
+    const response = await apiClient.post('/v1/settings/init');
+    return response.data;
+  },
 };

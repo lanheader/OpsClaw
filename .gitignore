@@ -60,3 +60,10 @@ MESSAGE_PROCESSING_BUG_FIX.py
 MEMORY_SYSTEM_FIX_SUMMARY.md
 MEMORY_SYSTEM_IMPROVEMENT_SUMMARY.md
 CLAUDE.md
+# Data files (databases, embeddings, etc.)
+data/
+*.db
+*.db-shm
+*.db-wal
+test_integration*
+tsc

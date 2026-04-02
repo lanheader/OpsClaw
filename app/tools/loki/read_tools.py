@@ -60,7 +60,8 @@ class QueryLogsTool(BaseOpTool):
     执行 LogQL 查询语句获取日志。
     """
 
-    def __init__(self):
+    def __init__(self, db=None):
+        self.db = db
         self.fallback = get_loki_fallback()
 
     async def execute(
@@ -198,7 +199,8 @@ class QueryErrorLogsTool(BaseOpTool):
     快速查询错误级别的日志。
     """
 
-    def __init__(self):
+    def __init__(self, db=None):
+        self.db = db
         self.fallback = get_loki_fallback()
 
     async def execute(
@@ -301,7 +303,8 @@ class SearchLogsTool(BaseOpTool):
     在日志中搜索指定的字符串或正则表达式。
     """
 
-    def __init__(self):
+    def __init__(self, db=None):
+        self.db = db
         self.fallback = get_loki_fallback()
 
     async def execute(

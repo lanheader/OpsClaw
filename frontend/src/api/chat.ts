@@ -54,7 +54,7 @@ export const chatApi = {
    * 创建新会话
    */
   createSession: async (title?: string): Promise<ChatSession> => {
-    const response = await apiClient.post('/v2/chat/sessions', { title });
+    const response = await apiClient.post('/v1/chat/sessions', { title });
     return response.data;
   },
 
@@ -62,7 +62,7 @@ export const chatApi = {
    * 获取会话列表
    */
   getSessions: async (skip: number = 0, limit: number = 20): Promise<ChatSessionListResponse> => {
-    const response = await apiClient.get('/v2/chat/sessions', {
+    const response = await apiClient.get('/v1/chat/sessions', {
       params: { skip, limit }
     });
     return response.data;
@@ -72,7 +72,7 @@ export const chatApi = {
    * 获取会话详情
    */
   getSession: async (sessionId: string): Promise<ChatSession> => {
-    const response = await apiClient.get(`/v2/chat/sessions/${sessionId}`);
+    const response = await apiClient.get(`/v1/chat/sessions/${sessionId}`);
     return response.data;
   },
 
@@ -80,23 +80,48 @@ export const chatApi = {
    * 删除会话
    */
   deleteSession: async (sessionId: string): Promise<void> => {
-    await apiClient.delete(`/v2/chat/sessions/${sessionId}`);
+    await apiClient.delete(`/v1/chat/sessions/${sessionId}`);
   },
 
   /**
    * 获取消息历史
    */
   getMessages: async (sessionId: string, skip: number = 0, limit: number = 50): Promise<ChatMessage[]> => {
-    const response = await apiClient.get(`/v2/chat/sessions/${sessionId}/messages`, {
+    const response = await apiClient.get(`/v1/chat/sessions/${sessionId}/messages`, {
       params: { skip, limit }
     });
     return response.data;
   },
 
   /**
-   * 发送消息（流式响应）
+   * 发送消息（普通 HTTP 请求/响应）
+   */
+  sendMessage: async (
+    sessionId: string,
+    content: string,
+  ): Promise<{ reply: string; message_id?: number; workflow_status: string; needs_approval?: boolean; approval_data?: any }> => {
+    const token = getToken();
+    const response = await fetch(
+      `${API_BASE_URL}/v1/chat/sessions/${sessionId}/messages`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ content }),
+      }
+    );
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({ detail: '请求失败' }));
+      throw new Error(err.detail || err.reply || `HTTP ${response.status}`);
+    }
+    return response.json();
+  },
+
+  /**
+   * 发送消息（流式响应，备用）
    * 使用 fetch API 实现 SSE 流式接收
-   * 注意：流式请求使用 fetch 而不是 axios，因为 axios 不支持流式响应
    */
   sendMessageStream: async (
     sessionId: string,
@@ -112,7 +137,7 @@ export const chatApi = {
 
     try {
       const response = await fetch(
-        `${API_BASE_URL}/v2/chat/sessions/${sessionId}/messages`,
+        `${API_BASE_URL}/v1/chat/sessions/${sessionId}/messages`,
         {
           method: 'POST',
           headers: {
@@ -214,7 +239,7 @@ export const chatApi = {
 
     try {
       const response = await fetch(
-        `${API_BASE_URL}/v2/chat/sessions/${sessionId}/resume`,
+        `${API_BASE_URL}/v1/chat/sessions/${sessionId}/resume`,
         {
           method: 'POST',
           headers: {

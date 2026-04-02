@@ -3,7 +3,7 @@
   "version": "2.0.0",
   "private": true,
   "type": "module",
-  "description": "Ops Agent v3.0 Web Management Interface",
+  "description": "OpsClaw v3.0 Web Management Interface",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",

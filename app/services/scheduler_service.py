@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.models.database import get_db
-from app.models.scheduled_task import ScheduledTask, TaskExecutionLog, TaskStatus, TaskType
+from app.models.scheduled_task import ScheduledTask, TaskExecution, ExecutionStatus, TaskType
 from app.services.agent_chat_service import get_agent_chat_service, ChatRequest, MessageChannel
 from app.utils.logger import get_logger
 
@@ -57,8 +57,7 @@ class SchedulerService:
         db = next(get_db())
         try:
             tasks = db.query(ScheduledTask).filter(
-                ScheduledTask.enabled == True,
-                ScheduledTask.status.in_([TaskStatus.PENDING, TaskStatus.COMPLETED])
+                ScheduledTask.enabled == True
             ).all()
 
             for task in tasks:
@@ -82,13 +81,13 @@ class SchedulerService:
                 pass
 
             # 根据任务类型创建触发器
-            if task.task_type == TaskType.CRON:
-                if not task.cron_expression:
+            if task.task_type == TaskType.K8S_INSPECT or task.task_type == TaskType.RESOURCE_REPORT or task.task_type == TaskType.POD_RESTART or task.task_type == TaskType.CUSTOM_COMMAND:
+                if not task.cron_expr:
                     logger.error(f"❌ Cron 任务缺少表达式: {task.id}")
                     return False
 
                 # 解析 cron 表达式（支持 5 字段标准格式）
-                parts = task.cron_expression.split()
+                parts = task.cron_expr.split()
                 if len(parts) != 5:
                     logger.error(f"❌ 无效的 Cron 表达式: {task.cron_expression}")
                     return False
@@ -101,12 +100,12 @@ class SchedulerService:
                     day_of_week=parts[4],
                 )
 
-            elif task.task_type == TaskType.ONCE:
-                if not task.scheduled_time:
-                    logger.error(f"❌ 一次性任务缺少执行时间: {task.id}")
+            elif task.task_type == TaskType.WEBHOOK:
+                if not task.cron_expr:
+                    logger.error(f"❌ Webhook 任务缺少执行时间: {task.id}")
                     return False
 
-                trigger = DateTrigger(run_date=task.scheduled_time)
+                trigger = DateTrigger(run_date=datetime.fromisoformat(task.cron_expr))
 
             else:
                 logger.error(f"❌ 未知的任务类型: {task.task_type}")
@@ -160,12 +159,11 @@ class SchedulerService:
             logger.info(f"🚀 开始执行任务: {task.name} (ID: {task_id})")
 
             # 更新任务状态
-            task.status = TaskStatus.RUNNING
             task.last_run_time = datetime.now()
             db.commit()
 
             # 创建执行日志
-            log = TaskExecutionLog(
+            log = TaskExecution(
                 task_id=task_id,
                 started_at=datetime.now(),
                 status="running",
@@ -179,8 +177,8 @@ class SchedulerService:
 
             request = ChatRequest(
                 session_id=session_id,
-                user_id=task.created_by,
-                content=task.agent_task,
+                user_id="system",
+                content=task.task_params or task.description or task.name,
                 channel=MessageChannel.WEB,
                 user_permissions=[],
             )
@@ -190,12 +188,11 @@ class SchedulerService:
 
             # 更新执行结果
             log.finished_at = datetime.now()
-            log.duration_seconds = int((log.finished_at - log.started_at).total_seconds())
-            log.session_id = session_id
+            log.duration_ms = int((log.finished_at - log.started_at).total_seconds() * 1000)
 
             if response.workflow_status == "completed":
                 log.status = "success"
-                log.result = response.reply
+                log.result_summary = response.reply
                 task.last_run_status = "success"
                 task.success_count += 1
             else:
@@ -204,19 +201,12 @@ class SchedulerService:
                 task.last_run_status = "failed"
                 task.failure_count += 1
 
-            task.last_run_result = response.reply[:500] if response.reply else None
             task.run_count += 1
-            task.status = TaskStatus.COMPLETED
 
-            # 更新下次执行时间（仅 Cron 任务）
-            if task.task_type == TaskType.CRON:
-                job = self.scheduler.get_job(f"task_{task_id}")
-                if job:
-                    task.next_run_time = job.next_run_time
-            else:
-                # 一次性任务执行后禁用
-                task.enabled = False
-                task.status = TaskStatus.COMPLETED
+            # 更新下次执行时间
+            job = self.scheduler.get_job(f"task_{task_id}")
+            if job:
+                task.next_run_time = job.next_run_time
 
             db.commit()
             logger.info(f"✅ 任务执行完成: {task.name}, 状态: {log.status}")
@@ -229,12 +219,11 @@ class SchedulerService:
                 log.status = "error"
                 log.error_message = str(e)
                 log.finished_at = datetime.now()
-                log.duration_seconds = int((log.finished_at - log.started_at).total_seconds())
+                log.duration_ms = int((log.finished_at - log.started_at).total_seconds() * 1000)
 
             try:
                 task = db.query(ScheduledTask).filter(ScheduledTask.id == task_id).first()
                 if task:
-                    task.status = TaskStatus.FAILED
                     task.last_run_status = "error"
                     task.failure_count += 1
                     db.commit()
@@ -313,11 +302,11 @@ class SchedulerService:
 
     def enable_task(self, db: Session, task_id: int) -> bool:
         """启用任务"""
-        return self.update_task(db, task_id, {"enabled": True, "status": TaskStatus.PENDING}) is not None
+        return self.update_task(db, task_id, {"enabled": True}) is not None
 
     def disable_task(self, db: Session, task_id: int) -> bool:
         """禁用任务"""
-        return self.update_task(db, task_id, {"enabled": False, "status": TaskStatus.DISABLED}) is not None
+        return self.update_task(db, task_id, {"enabled": False}) is not None
 
     def run_task_now(self, db: Session, task_id: int) -> bool:
         """立即执行任务"""

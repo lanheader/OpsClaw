@@ -37,9 +37,14 @@ class IntegrationConfig:
 
         if setting:
             value = setting.value
-            # 处理布尔值
-            if setting.value_type == "boolean":
-                return value.lower() in ("true", "1", "yes")
+            # 处理布尔值（按 value_type 或 key 后缀判断）
+            # 兼容存储格式: "1"/"0", "True"/"False", "true"/"false"
+            if setting.value_type == "boolean" or key.endswith(".enabled"):
+                if isinstance(value, bool):
+                    return value
+                if isinstance(value, str):
+                    return value.strip() in ("true", "1", "yes", "True")
+                return bool(value)
             return value
 
         return default

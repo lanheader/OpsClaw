@@ -1,4 +1,4 @@
-# app/api/v2/chat.py
+# app/api/v1/chat.py
 """
 聊天 API 端点
 
@@ -9,13 +9,14 @@
 """
 
 import json
+import asyncio
 import time
 import uuid
 from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any, AsyncGenerator
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from sqlalchemy import func, desc
 from sqlalchemy.orm import Session
 
@@ -23,9 +24,10 @@ from app.core.deps import get_current_user
 from app.core.permission_checker import get_user_permission_codes
 from app.deepagents.factory import create_agent_for_session
 from app.memory.memory_manager import get_memory_manager
+from app.utils.timezone import get_beijing_now
 from app.models.chat_message import ChatMessage, MessageRole
 from app.models.chat_session import ChatSession
-from app.models.database import get_db
+from app.models.database import get_db, SessionLocal
 from app.models.user import User
 from app.schemas.chat import (
     ChatMessageCreate,
@@ -43,7 +45,7 @@ from app.services.agent_chat_service import (
 from app.utils.logger import clear_request_context, get_logger, set_request_context
 from app.utils.llm_helper import ensure_final_report_in_state
 
-router = APIRouter(prefix="/v2/chat", tags=["chat"])
+router = APIRouter(prefix="/chat", tags=["chat"])
 logger = get_logger(__name__)
 
 
@@ -165,7 +167,7 @@ def _save_approval_request(
             }),
         )
         db.add(message)
-        session.updated_at = datetime.now(timezone.utc)
+        session.updated_at = get_beijing_now()
         db.commit()
         logger.info(f"✅ 审批请求消息已保存: session={session_id}")
         return True
@@ -213,7 +215,7 @@ def _save_assistant_message(
     if not session.title:
         session.title = user_query[:30] + ("..." if len(user_query) > 30 else "")
 
-    session.updated_at = datetime.now(timezone.utc)
+    session.updated_at = get_beijing_now()
     db.commit()
     db.refresh(message)
 
@@ -353,7 +355,7 @@ def _append_to_last_assistant_message(
         )
         db.add(message)
 
-    session.updated_at = datetime.now(timezone.utc)
+    session.updated_at = get_beijing_now()
     db.commit()
     logger.info(f"AI 回复已更新/保存: session={session_id}")
 
@@ -536,7 +538,101 @@ async def send_message(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """发送消息并通过 Agent 工作流处理（SSE 流式响应）"""
+    """发送消息 — 立即保存用户消息并返回，Agent 在后台执行完成后自动保存助手消息"""
+    # 获取用户权限
+    permission_codes = get_user_permission_codes(db, current_user.id)
+    user_permissions = list(set(permission_codes))
+
+    # 验证会话
+    session = (
+        db.query(ChatSession)
+        .filter(
+            ChatSession.session_id == session_id,
+            (ChatSession.source == "feishu") | (ChatSession.user_id == current_user.id),
+            ChatSession.is_active == True,
+        )
+        .first()
+    )
+    if not session:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="会话不存在")
+
+    # 1. 立即保存用户消息
+    user_msg = _save_user_message(db, session_id, message_data.content)
+
+    # 2. 后台执行 Agent 并保存助手消息
+    async def _background_process():
+        """后台任务：执行 Agent → 保存助手消息"""
+        inner_db = SessionLocal()
+        try:
+            set_request_context(
+                session_id=session_id,
+                user_id=str(current_user.id),
+                channel="web",
+                user_permissions=user_permissions,
+            )
+            request = ChatRequest(
+                session_id=session_id,
+                user_id=current_user.id,
+                content=message_data.content,
+                channel=MessageChannel.WEB,
+                user_permissions=user_permissions,
+                enable_security=True,
+            )
+            service = get_agent_chat_service()
+            response = await service.process_message(request)
+
+            # 重新查询 session 对象（避免 DetachedInstanceError）
+            bg_session = inner_db.query(ChatSession).filter(
+                ChatSession.session_id == session_id
+            ).first()
+
+            if response.reply:
+                _save_assistant_message(
+                    inner_db, session_id, bg_session, response.reply,
+                    response.final_state,
+                    response.workflow_status == "completed",
+                    message_data.content,
+                )
+            else:
+                _save_assistant_message(
+                    inner_db, session_id, bg_session,
+                    "⚠️ 未能生成有效回复",
+                    None, False, message_data.content,
+                )
+        except Exception as e:
+            logger.error(f"❌ 后台 Agent 执行失败: session={session_id}, error={e}", exc_info=True)
+            bg_session = inner_db.query(ChatSession).filter(
+                ChatSession.session_id == session_id
+            ).first()
+            _save_assistant_message(
+                inner_db, session_id, bg_session,
+                f"⚠️ 处理失败: {str(e)}",
+                None, False, message_data.content,
+            )
+        finally:
+            clear_request_context()
+            inner_db.close()
+
+    asyncio.create_task(_background_process())
+    logger.info(f"📥 Web 聊天请求已接收，后台处理中: session={session_id}, user={current_user.username}")
+
+    return {
+        "reply": "",
+        "message_id": None,
+        "workflow_status": "processing",
+        "needs_approval": False,
+        "approval_data": None,
+    }
+
+
+@router.post("/sessions/{session_id}/messages/stream")
+async def send_message_stream(
+    session_id: str,
+    message_data: ChatMessageCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """发送消息并通过 Agent 工作流处理（SSE 流式响应，备用）"""
     # 获取用户权限
     permission_codes = get_user_permission_codes(db, current_user.id)
     user_permissions = list(set(permission_codes))
@@ -626,6 +722,13 @@ async def send_message(
                     yield _sse_event("done", event_data)
 
                 elif event.type == EventType.ERROR:
+                    # 错误时也保存一条记录，确保对话不丢失
+                    error_msg = event.data.get("message", "处理失败")
+                    _save_assistant_message(
+                        db, session_id, session,
+                        f"⚠️ {error_msg}",
+                        None, False, message_data.content
+                    )
                     yield _sse_event("error", event_data)
 
         except Exception as e:

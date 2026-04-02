@@ -180,60 +180,38 @@ const Chat: React.FC = () => {
       created_at: new Date().toISOString()
     };
     setMessages(prev => [...prev, tempUserMessage]);
+    const prevMsgCount = messages.length + 1; // 用户消息发送后应有 N+1 条
 
     try {
-      const controller = await chatApi.sendMessageStream(
-        sessionId,
-        userMessage,
-        (chunk) => {
-          streamingContentRef.current += chunk;
-          setStreamingContent(prev => prev + chunk);
-        },
-        (_status, message) => {
-          setStatusMessage(message);
-        },
-        (message, commands, sid) => {
-          setApprovalRequest({ message, commands, sessionId: sid });
-          setStatusMessage('⏸️ 等待您的确认...');
-        },
-        (messageId) => {
-          setIsStreaming(false);
-          setStatusMessage('');
+      setIsStreaming(true);
+      setStatusMessage('🤖 Agent 正在分析您的请求...');
 
-          if (streamingContentRef.current) {
-            // 如果有流式内容，直接添加
-            const assistantMessage: ChatMessage = {
-              id: messageId || Date.now(),
-              role: 'assistant',
-              content: streamingContentRef.current,
-              created_at: new Date().toISOString()
-            };
-            setMessages(prev => [...prev, assistantMessage]);
-          } else {
-            // 如果没有流式内容，从服务器重新加载消息
-            // 这确保即使后端没有发送 chunk 事件，消息也能正确显示
-            loadMessages(sessionId);
+      await chatApi.sendMessage(sessionId, userMessage);
+      // API 立即返回，后台处理中。轮询消息列表获取助手回复。
+      const pollInterval = setInterval(async () => {
+        try {
+          const msgs = await chatApi.getMessages(sessionId);
+          if (msgs && msgs.length > prevMsgCount) {
+            clearInterval(pollInterval);
+            // 添加新消息
+            const newMsgs = msgs.slice(prevMsgCount);
+            newMsgs.forEach((msg: ChatMessage) => {
+              setMessages(prev => [...prev, msg]);
+            });
+            setIsStreaming(false);
+            setStatusMessage('');
+            loadSessions();
           }
-          setStreamingContent('');
-          streamingContentRef.current = '';
-          loadSessions();
-        },
-        (error) => {
-          setIsStreaming(false);
-          setStreamingContent('');
-          setStatusMessage('');
-          streamingContentRef.current = '';
-          antMessage.error(`发送失败: ${error.message}`);
+        } catch {
+          // 忽略轮询错误
         }
-      );
-
-      abortControllerRef.current = controller;
+      }, 2000);
+      // 最多轮询 5 分钟后停止
+      setTimeout(() => { clearInterval(pollInterval); setIsStreaming(false); setStatusMessage(''); }, 300000);
 
     } catch (error) {
       setIsStreaming(false);
-      setStreamingContent('');
       setStatusMessage('');
-      streamingContentRef.current = '';
       console.error('Failed to send message:', error);
       antMessage.error('发送消息失败');
     }

@@ -57,13 +57,16 @@ from app.api.v1 import roles
 from app.api.v1 import settings as settings_api
 from app.api.v1 import users
 from app.api.v1 import approval_config
-from app.api.v2 import alert
-from app.api.v2 import chat
-from app.api.v2 import inspection
-from app.api.v2 import workflow
-from app.api.v2 import knowledge_base
-from app.api.v2 import messaging
-from app.core.llm_factory import LLMFactory
+from app.api.v1 import alert
+from app.api.v1 import chat
+from app.api.v1 import inspection
+from app.api.v1 import workflow
+from app.api.v1 import knowledge_base
+from app.api.v1 import messaging
+from app.api.v1 import tools
+from app.api.v1 import prompts
+from app.api.v1 import scheduled_tasks
+from app.api.v1 import onboarding
 from app.utils.logger import RequestContextFilter, ContextFormatter
 
 # ============ 完善日志系统配置 ============
@@ -137,7 +140,7 @@ async def lifespan(app: FastAPI):
     """Application lifespan management"""
 
     # Startup
-    logger.info("🚀 Starting Ops Agent (DeepAgents Architecture v3.0 - Lazy Loading)")
+    logger.info("🚀 Starting OpsClaw (DeepAgents Architecture v3.0 - Lazy Loading)")
     logger.info(f"Environment: {settings.SECURITY_ENVIRONMENT}")
     logger.info(f"LLM Provider: {settings.DEFAULT_LLM_PROVIDER}")
     logger.info("ℹ️  DeepAgents 懒加载模式：Agent 将在第一次请求时动态创建")
@@ -202,7 +205,7 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown
-    logger.info("👋 Shutting down Ops Agent")
+    logger.info("👋 Shutting down OpsClaw")
 
     # Stop Feishu long connection (if started)
     if settings.FEISHU_ENABLED and settings.FEISHU_CONNECTION_MODE in ["longconn", "auto"]:
@@ -288,19 +291,19 @@ if settings.ENABLE_CORS:
             allow_headers=["*"],
         )
 
-# Register API routers
-app.include_router(workflow.router, prefix="/api")
-app.include_router(chat.router, prefix="/api")
-app.include_router(inspection.router, prefix="/api/v2")
-app.include_router(alert.router, prefix="/api/v2")
-app.include_router(knowledge_base.router, prefix="/api")  # 新增：知识库管理
+# Register API routers (统一使用 /api/v1 前缀)
+app.include_router(workflow.router, prefix="/api/v1")
+app.include_router(chat.router, prefix="/api/v1")
+app.include_router(inspection.router, prefix="/api/v1")
+app.include_router(alert.router, prefix="/api/v1")
+app.include_router(knowledge_base.router, prefix="/api/v1")
 
 # 统一消息 API（新架构）
 if get_settings().USE_NEW_MESSAGING_ARCH:
     try:
         from app.integrations.messaging.registry import initialize_channels
         initialize_channels()  # 初始化渠道适配器
-        app.include_router(messaging.router, prefix="/api/v2/messaging")
+        app.include_router(messaging.router, prefix="/api/v1/messaging")
         logger.info("✅ 新消息架构已启用")
     except Exception as e:
         logger.warning(f"⚠️ 新消息架构初始化失败: {e}，回退到旧架构")
@@ -315,16 +318,15 @@ app.include_router(settings_api.router, prefix="/api/v1")
 app.include_router(llm.router, prefix="/api/v1")
 app.include_router(integrations.router, prefix="/api/v1")
 # 工具权限管理 API
-from app.api.v1 import tools
 app.include_router(tools.router, prefix="/api/v1")
 # 审批配置管理 API
 app.include_router(approval_config.router, prefix="/api/v1")
 # 提示词管理 API
-from app.api.v1 import prompts
 app.include_router(prompts.router, prefix="/api/v1")
 # 定时任务管理 API
-from app.api.v1 import scheduled_tasks
 app.include_router(scheduled_tasks.router, prefix="/api/v1")
+# 初始化引导 API
+app.include_router(onboarding.router, prefix="/api/v1")
 
 
 @app.get("/")
@@ -344,16 +346,18 @@ async def root():
 
 
 @app.get("/api/v1/health")
-@app.get("/api/v2/health")
 async def health():
-    """Health check endpoint"""
-    llm_status = "unknown"
+    """Health check endpoint - 轻量级检查，不每次创建 LLM 客户端"""
+    # 只检查 LLM 配置是否有效，不实际创建客户端
+    llm_status = "configured"
     try:
-        # 使用默认 LLM provider（不再使用 profile）
-        llm = LLMFactory.create_llm()
-        llm_status = f"available:{type(llm).__name__}"
+        llm_config_valid = settings.validate_llm_config()
+        if llm_config_valid:
+            llm_status = f"configured:{settings.DEFAULT_LLM_PROVIDER}"
+        else:
+            llm_status = "not_configured"
     except Exception as e:
-        llm_status = f"unavailable: {str(e)}"
+        llm_status = f"error: {str(e)[:50]}"
 
     agent_status = "lazy_loading"
 

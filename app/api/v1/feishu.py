@@ -200,7 +200,7 @@ async def feishu_callback_legacy(
     飞书 Webhook 回调端点（旧版本，已重定向到新架构）
 
     注意：此端点已废弃，请使用新架构：
-    POST /api/v2/messaging/webhook/feishu
+    POST /api/v1/messaging/webhook/feishu
 
     为了向后兼容，此端点仍然保留，但内部会调用新架构的处理逻辑。
     """
@@ -223,7 +223,7 @@ async def feishu_callback_legacy(
             detail=(
                 "旧的消息处理架构已废弃。\n\n"
                 "请启用新架构：在 .env 文件中设置 USE_NEW_MESSAGING_ARCH=true\n\n"
-                "或使用新端点：POST /api/v2/messaging/webhook/feishu"
+                "或使用新端点：POST /api/v1/messaging/webhook/feishu"
             )
         )
 

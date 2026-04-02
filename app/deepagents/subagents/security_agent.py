@@ -8,10 +8,11 @@ Security Agent - 安全巡检子智能体
 4. 敏感信息泄露检查
 
 利用 deepagents 内置的 ReAct 循环进行安全诊断。
+
+⭐ 工具按集成开关动态加载
 """
 
-from app.tools import get_tools_by_package
-
+# 基础配置（工具延迟加载）
 SECURITY_AGENT_CONFIG = {
     "name": "security-agent",
     "description": (
@@ -20,9 +21,8 @@ SECURITY_AGENT_CONFIG = {
         "当用户提到安全、权限、漏洞、合规、审计、RBAC 时使用。"
     ),
     "system_prompt": None,  # 将动态从数据库加载
-    "tools": [
-        *get_tools_by_package("k8s"),
-    ],
+    "tools": [],  # 将在 get_all_subagents 中动态加载
+    "tool_packages": ["k8s"],
 }
 
 __all__ = ["SECURITY_AGENT_CONFIG"]

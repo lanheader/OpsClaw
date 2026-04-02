@@ -9,6 +9,7 @@ import time
 
 from app.models.chat_session import ChatSession, SessionState
 from app.models.database import SessionLocal
+from app.utils.timezone import get_beijing_now
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,7 @@ class SessionStateManager:
             session.state = SessionState.AWAITING_APPROVAL.value
             session.pending_approval_data = approval_data
             # 记录过期时间，但不用于自动清理，仅供参考
-            session.approval_expires_at = datetime.now(timezone.utc) + timedelta(
+            session.approval_expires_at = get_beijing_now() + timedelta(
                 minutes=timeout_minutes
             )
 

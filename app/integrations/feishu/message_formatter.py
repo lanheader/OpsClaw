@@ -1,5 +1,6 @@
 """飞书消息格式化工具 - 让消息像人类交流一样自然"""
 
+import re
 from typing import Dict, List, Any, Optional
 
 
@@ -323,9 +324,6 @@ def format_pending_approval_warning(approval_data: Dict[str, Any]) -> str:
 {commands_summary}
 
 请先告诉我是同意还是拒绝，然后我再处理你的新请求。"""
-
-
-import re
 
 
 def clean_xml_tags(content: str) -> str:

@@ -128,7 +128,7 @@ class MessageProcessor:
             # 立即添加 THUMBSUP 表情，表示消息已收到
             if message.message_id:
                 try:
-                    await self.channel.add_reaction(message.message_id, "THUMBSUP")
+                    await self.channel.add_reaction(message.message_id, "MeMeMe")
                 except Exception:
                     pass
 

@@ -220,9 +220,9 @@ class GetNodesTool(BaseOpTool):
                         for addr in node.status.addresses
                     ],
                     "capacity": {
-                        "cpu": node.status.capacity.cpu,
-                        "memory": node.status.capacity.memory,
-                        "pods": node.status.capacity.pods,
+                        "cpu": node.status.capacity.get("cpu", ""),
+                        "memory": node.status.capacity.get("memory", ""),
+                        "pods": node.status.capacity.get("pods", ""),
                     } if node.status.capacity else {},
                     "kubelet_version": node.status.node_info.kubelet_version,
                     "os_image": node.status.node_info.os_image,
@@ -372,7 +372,7 @@ class DescribeNodeTool(BaseOpTool):
         try:
             node = self.k8s_client.core_v1.read_node(name=name)
             # 获取节点上的 Pod 列表
-            pods = self.k8s_client.core_v1.list_pod(
+            pods = self.k8s_client.core_v1.list_pod_for_all_namespaces(
                 field_selector=f"spec.nodeName={name}"
             )
             pods_info = []
@@ -400,9 +400,9 @@ class DescribeNodeTool(BaseOpTool):
                         ],
                         "addresses": node.status.addresses,
                         "capacity": {
-                            "cpu": node.status.capacity.cpu,
-                            "memory": node.status.capacity.memory,
-                            "pods": node.status.capacity.pods,
+                            "cpu": node.status.capacity.get("cpu", ""),
+                            "memory": node.status.capacity.get("memory", ""),
+                            "pods": node.status.capacity.get("pods", ""),
                         } if node.status.capacity else {},
                         "node_info": node.status.node_info,
                         "images": len(node.status.images) if node.status.images else 0,
