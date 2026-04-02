@@ -190,11 +190,11 @@ const Chat: React.FC = () => {
       // API 立即返回，后台处理中。轮询消息列表获取助手回复。
       const pollInterval = setInterval(async () => {
         try {
-          const data = await chatApi.getMessages(sessionId);
-          if (data.messages && data.messages.length > prevMsgCount) {
+          const msgs = await chatApi.getMessages(sessionId);
+          if (msgs && msgs.length > prevMsgCount) {
             clearInterval(pollInterval);
             // 添加新消息
-            const newMsgs = data.messages.slice(prevMsgCount);
+            const newMsgs = msgs.slice(prevMsgCount);
             newMsgs.forEach((msg: ChatMessage) => {
               setMessages(prev => [...prev, msg]);
             });
