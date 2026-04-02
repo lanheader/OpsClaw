@@ -581,23 +581,31 @@ async def send_message(
             service = get_agent_chat_service()
             response = await service.process_message(request)
 
+            # 重新查询 session 对象（避免 DetachedInstanceError）
+            bg_session = inner_db.query(ChatSession).filter(
+                ChatSession.session_id == session_id
+            ).first()
+
             if response.reply:
                 _save_assistant_message(
-                    inner_db, session_id, session, response.reply,
+                    inner_db, session_id, bg_session, response.reply,
                     response.final_state,
                     response.workflow_status == "completed",
                     message_data.content,
                 )
             else:
                 _save_assistant_message(
-                    inner_db, session_id, session,
+                    inner_db, session_id, bg_session,
                     "⚠️ 未能生成有效回复",
                     None, False, message_data.content,
                 )
         except Exception as e:
             logger.error(f"❌ 后台 Agent 执行失败: session={session_id}, error={e}", exc_info=True)
+            bg_session = inner_db.query(ChatSession).filter(
+                ChatSession.session_id == session_id
+            ).first()
             _save_assistant_message(
-                inner_db, session_id, session,
+                inner_db, session_id, bg_session,
                 f"⚠️ 处理失败: {str(e)}",
                 None, False, message_data.content,
             )
