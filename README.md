@@ -5,9 +5,9 @@
 **Intelligent Operations Automation Platform - Powered by DeepAgents Framework**
 
 [![Python Version](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
-[![DeepAgents](https://img.shields.io/badge/DeepAgents-latest-green)](https://github.com/langchain-ai/deepagents)
 [![LangGraph](https://img.shields.io/badge/LangGraph-latest-green)](https://github.com/langchain-ai/langgraph)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688)](https://fastapi.tiangolo.com/)
+[![Docker Image](https://img.shields.io/badge/docker-lanjiaxuan%2Fops--agent%3Av4.0-blue)](https://hub.docker.com/r/lanjiaxuan/ops-agent)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 English | [简体中文](README_ZH.md)
@@ -20,7 +20,7 @@ English | [简体中文](README_ZH.md)
 
 OpsClaw is an intelligent operations automation platform built on the **DeepAgents Framework**. It achieves full-process automation from monitoring, diagnosis to self-healing through the collaboration of a main agent and specialized sub-agents.
 
-**Current Version**: v4.0 | **Subagents**: 6 | **Middleware**: 3 | **K8s Tools**: 28
+**Current Version**: v4.0 | **Subagents**: 6 | **Middleware**: 5 | **K8s Tools**: 29
 
 ### ✨ Key Features
 
@@ -33,6 +33,7 @@ OpsClaw is an intelligent operations automation platform built on the **DeepAgen
 #### 🛡️ Tools & Integrations
 - **Tool Fallback Mechanism**: SDK first, auto fallback to CLI (kubectl/prometheus/loki)
 - **28 K8s Tools**: 19 read + 3 write + 6 delete tools
+- **29 Total Tools**: 17 K8s read + 3 write + 6 delete + 3 chat history
 - **Prometheus/Loki Integration**: Metrics query and log retrieval
 
 #### 📨 Multi-Channel Messaging Architecture
@@ -46,9 +47,11 @@ OpsClaw is an intelligent operations automation platform built on the **DeepAgen
   - 💾 Fallback Reply (ensure friendly response)
   - 📚 Auto Learning (write to long-term memory)
 
-#### 🔧 Middleware Layer (3 Middlewares)
+#### 🔧 Middleware Layer (5 Middlewares)
 - **ErrorFilteringMiddleware**: Filter tool call errors to prevent LLM from responding to errors
 - **MessageTrimmingMiddleware**: Intelligently trim messages (keep last 40)
+- **DynamicPermissionMiddleware**: Dynamic tool permission control per user/request
+- **DynamicApprovalMiddleware**: Dynamic approval for dangerous operations
 - **LoggingMiddleware**: Record model calls, tool execution, and latency
 
 #### 🧠 Memory System (v3.5 SQLite FTS5)
@@ -379,11 +382,13 @@ Session summaries use overwrite strategy (fixed doc_id) to avoid storage bloat.
 
 ## 🔧 Middleware
 
-| 中间件 | 文件 | 职责 |
-|--------|------|------|
-| **ErrorFilteringMiddleware** | `error_filtering_middleware.py` | 过滤工具错误消息，防止 LLM 响应错误 |
-| **MessageTrimmingMiddleware** | `message_trimming_middleware.py` | 智能截断消息（保留最近 40 条，优先完整轮次） |
-| **LoggingMiddleware** | `logging_middleware.py` | 记录 LLM 调用、工具执行、耗时 |
+| Middleware | File | Responsibility |
+|-----------|------|----------------|
+| **ErrorFilteringMiddleware** | `error_filtering_middleware.py` | Filter tool error messages, prevent LLM from responding to errors |
+| **MessageTrimmingMiddleware** | `message_trimming_middleware.py` | Trim messages intelligently (keep last 40, prioritize complete turns) |
+| **DynamicPermissionMiddleware** | `dynamic_permission_middleware.py` | Dynamic tool permission control per user/request |
+| **DynamicApprovalMiddleware** | `dynamic_approval_middleware.py` | Dynamic approval for dangerous operations (delete, restart, scale) |
+| **LoggingMiddleware** | `logging_middleware.py` | Record LLM calls, tool execution, latency |
 
 ---
 
@@ -513,6 +518,6 @@ MIT License
 
 <div align="center">
 
-**Last Updated**: 2026-03-31 | **Version**: v4.0 | **Maintainer**: lanjiaxuan
+**Last Updated**: 2026-04-02 | **Version**: v4.0 | **Maintainer**: lanjiaxuan | **Docker**: [lanjiaxuan/ops-agent](https://hub.docker.com/r/lanjiaxuan/ops-agent)
 
 </div>
