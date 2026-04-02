@@ -182,52 +182,31 @@ const Chat: React.FC = () => {
     setMessages(prev => [...prev, tempUserMessage]);
 
     try {
-      const controller = await chatApi.sendMessageStream(
-        sessionId,
-        userMessage,
-        (chunk) => {
-          streamingContentRef.current += chunk;
-          setStreamingContent(prev => prev + chunk);
-        },
-        (_status, message) => {
-          setStatusMessage(message);
-        },
-        (message, commands, sid) => {
-          setApprovalRequest({ message, commands, sessionId: sid });
-          setStatusMessage('⏸️ 等待您的确认...');
-        },
-        (messageId) => {
-          setIsStreaming(false);
-          setStatusMessage('');
+      setIsStreaming(true);
+      setStatusMessage('🤖 Agent 正在分析您的请求...');
 
-          if (streamingContentRef.current) {
-            // 如果有流式内容，直接添加
-            const assistantMessage: ChatMessage = {
-              id: messageId || Date.now(),
-              role: 'assistant',
-              content: streamingContentRef.current,
-              created_at: new Date().toISOString()
-            };
-            setMessages(prev => [...prev, assistantMessage]);
-          } else {
-            // 如果没有流式内容，从服务器重新加载消息
-            // 这确保即使后端没有发送 chunk 事件，消息也能正确显示
-            loadMessages(sessionId);
-          }
-          setStreamingContent('');
-          streamingContentRef.current = '';
-          loadSessions();
-        },
-        (error) => {
-          setIsStreaming(false);
-          setStreamingContent('');
-          setStatusMessage('');
-          streamingContentRef.current = '';
-          antMessage.error(`发送失败: ${error.message}`);
-        }
-      );
+      const result = await chatApi.sendMessage(sessionId, userMessage);
 
-      abortControllerRef.current = controller;
+      setIsStreaming(false);
+      setStatusMessage('');
+
+      if (result.needs_approval) {
+        setApprovalRequest({
+          message: result.approval_data?.message || '等待确认',
+          commands: result.approval_data?.commands || [],
+          sessionId,
+        });
+        setStatusMessage('⏸️ 等待您的确认...');
+      } else {
+        const assistantMessage: ChatMessage = {
+          id: result.message_id || Date.now(),
+          role: 'assistant',
+          content: result.reply,
+          created_at: new Date().toISOString()
+        };
+        setMessages(prev => [...prev, assistantMessage]);
+        loadSessions();
+      }
 
     } catch (error) {
       setIsStreaming(false);

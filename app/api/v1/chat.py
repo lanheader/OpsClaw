@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any, AsyncGenerator
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from sqlalchemy import func, desc
 from sqlalchemy.orm import Session
 
@@ -537,7 +537,88 @@ async def send_message(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """发送消息并通过 Agent 工作流处理（SSE 流式响应）"""
+    """发送消息并通过 Agent 工作流处理（普通 HTTP 请求/响应）"""
+    # 获取用户权限
+    permission_codes = get_user_permission_codes(db, current_user.id)
+    user_permissions = list(set(permission_codes))
+
+    # 设置请求上下文
+    set_request_context(
+        session_id=session_id,
+        user_id=str(current_user.id),
+        channel="web",
+        user_permissions=user_permissions,
+    )
+    logger.info(f"📥 收到 Web 聊天请求: session={session_id}, user={current_user.username}")
+
+    try:
+        # 验证会话
+        session = (
+            db.query(ChatSession)
+            .filter(
+                ChatSession.session_id == session_id,
+                (ChatSession.source == "feishu") | (ChatSession.user_id == current_user.id),
+                ChatSession.is_active == True,
+            )
+            .first()
+        )
+        if not session:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="会话不存在")
+
+        # 1. 保存用户消息
+        _save_user_message(db, session_id, message_data.content)
+
+        # 2. 调用 Agent（非流式，与飞书一致）
+        request = ChatRequest(
+            session_id=session_id,
+            user_id=current_user.id,
+            content=message_data.content,
+            channel=MessageChannel.WEB,
+            user_permissions=user_permissions,
+            enable_security=True,
+        )
+
+        service = get_agent_chat_service()
+        response = await service.process_message(request)
+
+        # 3. 保存助手消息
+        if response.reply:
+            assistant_msg = _save_assistant_message(
+                db, session_id, session, response.reply,
+                response.final_state,
+                response.workflow_status == "completed",
+                message_data.content,
+            )
+            message_id = assistant_msg.id if assistant_msg else None
+        else:
+            message_id = None
+
+        return {
+            "reply": response.reply or "未能生成有效回复",
+            "message_id": message_id,
+            "workflow_status": response.workflow_status,
+            "needs_approval": response.needs_approval,
+            "approval_data": response.approval_data,
+        }
+
+    except Exception as e:
+        logger.error(f"❌ Web 聊天处理失败: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content={"reply": f"⚠️ 处理失败: {str(e)}", "workflow_status": "error"}
+        )
+    finally:
+        clear_request_context()
+
+
+@router.post("/sessions/{session_id}/messages/stream")
+async def send_message_stream(
+    session_id: str,
+    message_data: ChatMessageCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """发送消息并通过 Agent 工作流处理（SSE 流式响应，备用）"""
     # 获取用户权限
     permission_codes = get_user_permission_codes(db, current_user.id)
     user_permissions = list(set(permission_codes))

@@ -94,9 +94,34 @@ export const chatApi = {
   },
 
   /**
-   * 发送消息（流式响应）
+   * 发送消息（普通 HTTP 请求/响应）
+   */
+  sendMessage: async (
+    sessionId: string,
+    content: string,
+  ): Promise<{ reply: string; message_id?: number; workflow_status: string; needs_approval?: boolean; approval_data?: any }> => {
+    const token = getToken();
+    const response = await fetch(
+      `${API_BASE_URL}/v1/chat/sessions/${sessionId}/messages`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ content }),
+      }
+    );
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({ detail: '请求失败' }));
+      throw new Error(err.detail || err.reply || `HTTP ${response.status}`);
+    }
+    return response.json();
+  },
+
+  /**
+   * 发送消息（流式响应，备用）
    * 使用 fetch API 实现 SSE 流式接收
-   * 注意：流式请求使用 fetch 而不是 axios，因为 axios 不支持流式响应
    */
   sendMessageStream: async (
     sessionId: string,
