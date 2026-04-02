@@ -395,25 +395,25 @@ class AgentChatService:
                 # 准备并执行
                 agent, input_state, config = await self._prepare_agent(request)
 
-                # 使用 asyncio.wait_for 保护整体执行时间
+                # 使用 asyncio.timeout 保护整体执行时间
                 try:
-                    async for event_type, event_data, state_update in asyncio.wait_for(
-                        _execute_agent_stream(agent, input_state, config, request.session_id),
-                        timeout=AGENT_TIMEOUT,
-                    ):
-                        # 发送状态更新
-                        if event_type == EventType.STATUS:
-                            yield StreamEvent(type=EventType.STATUS, data=event_data)
+                    async with asyncio.timeout(AGENT_TIMEOUT):
+                        async for event_type, event_data, state_update in _execute_agent_stream(
+                            agent, input_state, config, request.session_id
+                        ):
+                            # 发送状态更新
+                            if event_type == EventType.STATUS:
+                                yield StreamEvent(type=EventType.STATUS, data=event_data)
 
-                        # 处理审批中断
-                        elif event_type == EventType.APPROVAL_REQUEST:
-                            yield StreamEvent(type=EventType.APPROVAL_REQUEST, data=event_data)
-                            return
+                            # 处理审批中断
+                            elif event_type == EventType.APPROVAL_REQUEST:
+                                yield StreamEvent(type=EventType.APPROVAL_REQUEST, data=event_data)
+                                return
 
-                        # 更新 final_state
-                        if state_update:
-                            final_state.update(state_update)
-                            workflow_completed = True
+                            # 更新 final_state
+                            if state_update:
+                                final_state.update(state_update)
+                                workflow_completed = True
                 except asyncio.TimeoutError:
                     logger.error(f"⏰ Agent 执行超时: session={request.session_id}")
                     yield StreamEvent(
@@ -467,13 +467,13 @@ class AgentChatService:
             agent, input_state, config = await self._prepare_agent(request)
 
             try:
-                async for event_type, event_data, state_update in asyncio.wait_for(
-                    _execute_agent_stream(agent, input_state, config, request.session_id),
-                    timeout=AGENT_TIMEOUT,
-                ):
-                    # 处理审批中断
-                    if event_type == EventType.APPROVAL_REQUEST:
-                        return ChatResponse(
+                async with asyncio.timeout(AGENT_TIMEOUT):
+                    async for event_type, event_data, state_update in _execute_agent_stream(
+                        agent, input_state, config, request.session_id
+                    ):
+                        # 处理审批中断
+                        if event_type == EventType.APPROVAL_REQUEST:
+                            return ChatResponse(
                             reply=event_data.get("message", "等待审批"),
                             session_id=request.session_id,
                             workflow_status="awaiting_approval",
