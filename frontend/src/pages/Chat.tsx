@@ -215,13 +215,9 @@ const Chat: React.FC = () => {
       console.error('Failed to send message:', error);
       antMessage.error('发送消息失败');
     }
+  };
 
-    } catch (error) {
-      setIsStreaming(false);
-      setStreamingContent('');
-      setStatusMessage('');
-      streamingContentRef.current = '';
-      console.error('Failed to send message:', error);
+
       antMessage.error('发送消息失败');
     }
   };
