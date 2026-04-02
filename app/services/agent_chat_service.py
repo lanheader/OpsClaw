@@ -296,7 +296,7 @@ def _extract_reply(final_state: Dict[str, Any], workflow_completed: bool) -> Opt
             for key in ["formatted_response", "final_report", "final_answer", "response"]:
                 reply = final_state.get(key, "")
                 if reply:
-                    logger.info(f"📝 从 final_state 提取到回复 (长度: {len(reply)})")
+                    logger.info(f"📝 从 final_state 提取到回复 (key={key}, 长度: {len(reply)})")
                     return _clean_reply(reply)
 
             # 从 messages 中提取
@@ -304,10 +304,28 @@ def _extract_reply(final_state: Dict[str, Any], workflow_completed: bool) -> Opt
             if messages:
                 for msg in reversed(messages):
                     if isinstance(msg, dict):
-                        if msg.get("type") == "AIMessage" and msg.get("content"):
-                            return _clean_reply(msg["content"])
-                    elif isinstance(msg, AIMessage) and msg.content:
-                        return _clean_reply(msg.content)
+                        msg_type = msg.get("type", "")
+                        content = msg.get("content", "")
+                        # 匹配 "ai", "AIMessage", "AIMessageChunk" 等
+                        if ("ai" in str(msg_type).lower()) and content:
+                            logger.info(f"📝 从 messages 提取到回复 (type={msg_type}, 长度: {len(content)})")
+                            return _clean_reply(content)
+                    elif hasattr(msg, 'type'):
+                        # langchain Message 对象
+                        if 'ai' in str(msg.type).lower():
+                            content = getattr(msg, 'content', None) or ""
+                            if content:
+                                logger.info(f"📝 从 messages 提取到回复 (AIMessage obj, 长度: {len(content)})")
+                                return _clean_reply(content)
+
+            # 调试：打印 final_state keys 和 messages 结构
+            logger.warning(f"⚠️ 未能从 final_state 提取回复. keys={list(final_state.keys())}, messages_count={len(messages) if messages else 0}")
+            if messages and len(messages) > 0:
+                last_msg = messages[-1]
+                if isinstance(last_msg, dict):
+                    logger.warning(f"  最后一条消息: type={last_msg.get('type')}, has_content={bool(last_msg.get('content'))}")
+                else:
+                    logger.warning(f"  最后一条消息: class={type(last_msg).__name__}, type={getattr(last_msg, 'type', None)}, content={getattr(last_msg, 'content', None)[:100] if getattr(last_msg, 'content', None) else None}")
 
     except Exception as e:
         logger.error(f"❌ 提取回复失败: {e}")
