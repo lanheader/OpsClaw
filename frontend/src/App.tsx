@@ -18,7 +18,7 @@ import {
 import React, { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import axios from 'axios';
+import { apiClient } from './api/client';
 import { Dashboard } from './pages/Dashboard';
 import { Login } from './pages/Login';
 import { UserManagement } from './pages/UserManagement';
@@ -55,7 +55,7 @@ const AppLayout: React.FC = () => {
   // 检查是否需要初始化
   useEffect(() => {
     if (location.pathname === '/onboarding') return;
-    axios.get('/api/v1/onboarding/status').then(res => {
+    apiClient.get('/v1/onboarding/status').then(res => {
       if (!res.data.initialized) {
         navigate('/onboarding', { replace: true });
       }
