@@ -217,11 +217,6 @@ const Chat: React.FC = () => {
     }
   };
 
-
-      antMessage.error('发送消息失败');
-    }
-  };
-
   // 处理批准决定
   const handleApprovalDecision = async (approved: boolean) => {
     if (!approvalRequest) return;
