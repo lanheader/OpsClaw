@@ -51,7 +51,7 @@ class PrometheusClient:
         params = {"query": query}
 
         if time:
-            params["time"] = time.timestamp()
+            params["time"] = time.timestamp()  # type: ignore[assignment]
 
         try:
             response = await self._client.get(url, params=params)
@@ -62,7 +62,7 @@ class PrometheusClient:
                 logger.error(f"Prometheus query failed: {data.get('error')}")
                 return {"status": "error", "error": data.get("error", "Unknown error")}
 
-            return data
+            return data  # type: ignore[no-any-return]
 
         except httpx.HTTPError as e:
             logger.exception(f"Prometheus HTTP error: {e}")
@@ -98,7 +98,7 @@ class PrometheusClient:
         params = {"query": query, "start": start.timestamp(), "end": end.timestamp(), "step": step}
 
         try:
-            response = await self._client.get(url, params=params)
+            response = await self._client.get(url, params=params)  # type: ignore[arg-type]
             response.raise_for_status()
             data = response.json()
 
@@ -106,7 +106,7 @@ class PrometheusClient:
                 logger.error(f"Prometheus range query failed: {data.get('error')}")
                 return {"status": "error", "error": data.get("error", "Unknown error")}
 
-            return data
+            return data  # type: ignore[no-any-return]
 
         except httpx.HTTPError as e:
             logger.exception(f"Prometheus HTTP error: {e}")
@@ -260,15 +260,15 @@ class PrometheusClient:
 
         return default_metrics.get(plugin_type, [])
 
-    async def close(self):
+    async def close(self):  # type: ignore[no-untyped-def]
         """关闭 HTTP 客户端"""
         await self._client.aclose()
 
-    async def __aenter__(self):
+    async def __aenter__(self):  # type: ignore[no-untyped-def]
         """异步上下文管理器入口"""
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(self, exc_type, exc_val, exc_tb):  # type: ignore[no-untyped-def]
         """异步上下文管理器退出"""
         await self.close()
 
@@ -277,7 +277,7 @@ class PrometheusClient:
 _prometheus_client: Optional[PrometheusClient] = None
 
 
-def get_prometheus_client(base_url: Optional[str] = None, db=None) -> PrometheusClient:
+def get_prometheus_client(base_url: Optional[str] = None, db=None) -> PrometheusClient:  # type: ignore[no-untyped-def]
     """
     获取单例 Prometheus 客户端实例。
 

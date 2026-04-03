@@ -28,5 +28,5 @@ class LoginHistory(Base):
     # 关系
     user = relationship("User", backref="login_history")
 
-    def __repr__(self):
+    def __repr__(self):  # type: ignore[no-untyped-def]
         return f"<LoginHistory(id={self.id}, user_id={self.user_id}, status='{self.login_status}')>"

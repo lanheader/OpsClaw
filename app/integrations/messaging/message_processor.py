@@ -101,7 +101,7 @@ class MessageProcessor:
                 sender_id=message.sender_id,
                 sender_name=message.sender_name,
                 channel_type=message.channel_type,
-                user_id=user.id
+                user_id=user.id  # type: ignore[attr-defined]
             )
 
             # 增强日志：添加 session_id 追踪

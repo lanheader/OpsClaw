@@ -34,5 +34,5 @@ class SystemSetting(Base):
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, comment="更新时间"
     )
 
-    def __repr__(self):
+    def __repr__(self):  # type: ignore[no-untyped-def]
         return f"<SystemSetting(key='{self.key}', category='{self.category}')>"

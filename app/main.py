@@ -37,7 +37,7 @@ if USE_LOGURU:
 if not USE_LOGURU or logger is None:
     # 先临时设置一个简单的日志配置，避免导入时的噪音
     logging.basicConfig(level=logging.WARNING, format='%(levelname)s - %(message)s')
-    logger = logging.getLogger(__name__)
+    logger = logging.getLogger(__name__)  # type: ignore[assignment]
 
 # ============ 第二优先级：导入配置 ============
 from app.core.config import get_settings
@@ -74,7 +74,7 @@ from app.utils.logger import RequestContextFilter, ContextFormatter
 
 if USE_LOGURU:
     # Loguru 已经在前面设置好了
-    logger.info("🚀 应用启动 - 使用 Loguru 日志系统")
+    logger.info("🚀 应用启动 - 使用 Loguru 日志系统")  # type: ignore[union-attr]
 else:
     # 完善标准 logging 配置（带请求上下文支持）
     from app.utils.logger import _suppress_third_party_logs
@@ -105,7 +105,7 @@ else:
     # 添加处理器到根日志记录器
     root_logger.addHandler(console_handler)
 
-    logger = logging.getLogger(__name__)
+    logger = logging.getLogger(__name__)  # type: ignore[assignment]
 
 # 压制第三方库的 DEBUG 噪音，只保留 WARNING 及以上
 for _noisy_logger in (
@@ -136,14 +136,14 @@ for _noisy_logger in (
     logging.getLogger(_noisy_logger).setLevel(logging.WARNING)
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
     """Application lifespan management"""
 
     # Startup
-    logger.info("🚀 Starting OpsClaw (DeepAgents Architecture v3.0 - Lazy Loading)")
-    logger.info(f"Environment: {settings.SECURITY_ENVIRONMENT}")
-    logger.info(f"LLM Provider: {settings.DEFAULT_LLM_PROVIDER}")
-    logger.info("ℹ️  DeepAgents 懒加载模式：Agent 将在第一次请求时动态创建")
+    logger.info("🚀 Starting OpsClaw (DeepAgents Architecture v3.0 - Lazy Loading)")  # type: ignore[union-attr]
+    logger.info(f"Environment: {settings.SECURITY_ENVIRONMENT}")  # type: ignore[union-attr]
+    logger.info(f"LLM Provider: {settings.DEFAULT_LLM_PROVIDER}")  # type: ignore[union-attr]
+    logger.info("ℹ️  DeepAgents 懒加载模式：Agent 将在第一次请求时动态创建")  # type: ignore[union-attr]
 
     # ========== 安全检查：检测默认凭据 ==========
     if settings.SECURITY_ENVIRONMENT != "dev":
@@ -155,8 +155,8 @@ async def lifespan(app: FastAPI):
             "jwt-secret",
         ]
         if settings.JWT_SECRET_KEY in default_jwt_secrets:
-            logger.critical("🔥 安全错误：检测到默认 JWT_SECRET_KEY！")
-            logger.critical("   请在环境变量中设置安全的 JWT_SECRET_KEY（至少 32 字符）")
+            logger.critical("🔥 安全错误：检测到默认 JWT_SECRET_KEY！")  # type: ignore[union-attr]
+            logger.critical("   请在环境变量中设置安全的 JWT_SECRET_KEY（至少 32 字符）")  # type: ignore[union-attr]
             raise RuntimeError(
                 "安全策略：生产环境禁止使用默认 JWT_SECRET_KEY。"
                 "请设置环境变量 JWT_SECRET_KEY"
@@ -164,59 +164,59 @@ async def lifespan(app: FastAPI):
 
         # 检查管理员默认凭据
         if settings.INITIAL_ADMIN_PASSWORD == "admin123":
-            logger.warning("⚠️  警告：检测到默认管理员密码 'admin123'")
-            logger.warning("   建议通过环境变量 INITIAL_ADMIN_PASSWORD 设置强密码")
+            logger.warning("⚠️  警告：检测到默认管理员密码 'admin123'")  # type: ignore[union-attr]
+            logger.warning("   建议通过环境变量 INITIAL_ADMIN_PASSWORD 设置强密码")  # type: ignore[union-attr]
 
     # Start Feishu long connection if enabled
     if settings.FEISHU_ENABLED and settings.FEISHU_CONNECTION_MODE in ["longconn", "auto"]:
-        logger.info("🔌 Starting Feishu long connection...")
+        logger.info("🔌 Starting Feishu long connection...")  # type: ignore[union-attr]
 
         try:
             from app.integrations.feishu.lark_longconn import start_feishu_longconn
             import asyncio
 
             start_feishu_longconn(
-                app_id=settings.FEISHU_APP_ID,
-                app_secret=settings.FEISHU_APP_SECRET,
+                app_id=settings.FEISHU_APP_ID,  # type: ignore[arg-type]
+                app_secret=settings.FEISHU_APP_SECRET,  # type: ignore[arg-type]
                 main_loop=asyncio.get_event_loop(),
             )
-            logger.info("✅ Feishu long connection started successfully")
+            logger.info("✅ Feishu long connection started successfully")  # type: ignore[union-attr]
 
         except Exception as e:
-            logger.error(f"❌ Failed to start Feishu long connection: {e}")
+            logger.error(f"❌ Failed to start Feishu long connection: {e}")  # type: ignore[union-attr]
 
             if settings.FEISHU_CONNECTION_MODE == "longconn":
                 raise
             else:
-                logger.warning("⚠️  Falling back to Webhook mode")
+                logger.warning("⚠️  Falling back to Webhook mode")  # type: ignore[union-attr]
 
     else:
-        logger.info(f"ℹ️  Feishu long connection not enabled")
+        logger.info(f"ℹ️  Feishu long connection not enabled")  # type: ignore[union-attr]
 
     # Start scheduler service
     try:
         from app.services.scheduler_service import get_scheduler_service
         scheduler = get_scheduler_service()
         scheduler.start()
-        logger.info("✅ Scheduler service started")
+        logger.info("✅ Scheduler service started")  # type: ignore[union-attr]
     except Exception as e:
-        logger.warning(f"⚠️ Failed to start scheduler service: {e}")
+        logger.warning(f"⚠️ Failed to start scheduler service: {e}")  # type: ignore[union-attr]
 
     yield
 
     # Shutdown
-    logger.info("👋 Shutting down OpsClaw")
+    logger.info("👋 Shutting down OpsClaw")  # type: ignore[union-attr]
 
     # Stop Feishu long connection (if started)
     if settings.FEISHU_ENABLED and settings.FEISHU_CONNECTION_MODE in ["longconn", "auto"]:
         from app.integrations.feishu.lark_longconn import get_feishu_longconn_client
 
-        logger.info("🔌 Stopping Feishu long connection...")
+        logger.info("🔌 Stopping Feishu long connection...")  # type: ignore[union-attr]
 
         client = get_feishu_longconn_client()
         if client:
             client.stop()
-            logger.info("✅ Feishu long connection stopped")
+            logger.info("✅ Feishu long connection stopped")  # type: ignore[union-attr]
 
     # Close checkpointer connection
     from app.core.checkpointer import shutdown_checkpointer
@@ -227,9 +227,9 @@ async def lifespan(app: FastAPI):
         from app.services.scheduler_service import get_scheduler_service
         scheduler = get_scheduler_service()
         scheduler.shutdown()
-        logger.info("✅ Scheduler service stopped")
+        logger.info("✅ Scheduler service stopped")  # type: ignore[union-attr]
     except Exception as e:
-        logger.warning(f"⚠️ Failed to stop scheduler service: {e}")
+        logger.warning(f"⚠️ Failed to stop scheduler service: {e}")  # type: ignore[union-attr]
 
 
 # Create FastAPI application
@@ -245,14 +245,14 @@ app = FastAPI(
 
 # 【调试】添加全局异常处理
 @app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
+async def global_exception_handler(request: Request, exc: Exception):  # type: ignore[no-untyped-def]
     """全局异常捕获和日志记录"""
-    logger.error(f"🔥 全局异常捕获")
-    logger.error(f"   请求路径: {request.url.path}")
-    logger.error(f"   请求方法: {request.method}")
-    logger.error(f"   异常类型: {type(exc).__name__}")
-    logger.error(f"   异常信息: {str(exc)}")
-    logger.error(f"   堆栈跟踪:", exc_info=True)
+    logger.error(f"🔥 全局异常捕获")  # type: ignore[union-attr]
+    logger.error(f"   请求路径: {request.url.path}")  # type: ignore[union-attr]
+    logger.error(f"   请求方法: {request.method}")  # type: ignore[union-attr]
+    logger.error(f"   异常类型: {type(exc).__name__}")  # type: ignore[union-attr]
+    logger.error(f"   异常信息: {str(exc)}")  # type: ignore[union-attr]
+    logger.error(f"   堆栈跟踪:", exc_info=True)  # type: ignore[union-attr]
 
     # 根据 DEBUG 配置决定是否返回详细错误
     if settings.DEBUG:
@@ -281,7 +281,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 if settings.ENABLE_CORS:
     if not settings.CORS_ORIGINS:
         # 生产环境不允许通配符，空列表等同于关闭 CORS
-        logger.warning("⚠️ CORS_ORIGINS 为空，跳过 CORS 中间件（生产环境应配置具体域名）")
+        logger.warning("⚠️ CORS_ORIGINS 为空，跳过 CORS 中间件（生产环境应配置具体域名）")  # type: ignore[union-attr]
     else:
         app.add_middleware(
             CORSMiddleware,
@@ -304,9 +304,9 @@ if get_settings().USE_NEW_MESSAGING_ARCH:
         from app.integrations.messaging.registry import initialize_channels
         initialize_channels()  # 初始化渠道适配器
         app.include_router(messaging.router, prefix="/api/v1/messaging")
-        logger.info("✅ 新消息架构已启用")
+        logger.info("✅ 新消息架构已启用")  # type: ignore[union-attr]
     except Exception as e:
-        logger.warning(f"⚠️ 新消息架构初始化失败: {e}，回退到旧架构")
+        logger.warning(f"⚠️ 新消息架构初始化失败: {e}，回退到旧架构")  # type: ignore[union-attr]
 
 # 飞书 API（兼容层，重定向到新架构）
 app.include_router(feishu.router, prefix="/api/v1")
@@ -330,7 +330,7 @@ app.include_router(onboarding.router, prefix="/api/v1")
 
 
 @app.get("/")
-async def root():
+async def root():  # type: ignore[no-untyped-def]
     """Root endpoint"""
     agent_status = "lazy_loading"
 
@@ -346,7 +346,7 @@ async def root():
 
 
 @app.get("/api/v1/health")
-async def health():
+async def health():  # type: ignore[no-untyped-def]
     """Health check endpoint - 轻量级检查，不每次创建 LLM 客户端"""
     # 只检查 LLM 配置是否有效，不实际创建客户端
     llm_status = "configured"

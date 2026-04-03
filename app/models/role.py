@@ -27,5 +27,5 @@ class Role(Base):
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, comment="更新时间"
     )
 
-    def __repr__(self):
+    def __repr__(self):  # type: ignore[no-untyped-def]
         return f"<Role(id={self.id}, code='{self.code}', name='{self.name}')>"

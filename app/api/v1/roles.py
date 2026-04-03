@@ -27,9 +27,9 @@ router = APIRouter(prefix="/roles", tags=["roles"])
 logger = logging.getLogger(__name__)
 
 
-def _check_manage_roles_permission(current_user: User, db: Session):
+def _check_manage_roles_permission(current_user: User, db: Session):  # type: ignore[no-untyped-def]
     """检查用户是否有 manage_roles 权限"""
-    if not check_user_permission(db, current_user.id, "manage_roles"):
+    if not check_user_permission(db, current_user.id, "manage_roles"):  # type: ignore[arg-type]
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="没有权限: manage_roles")
 
 
@@ -41,11 +41,11 @@ def _get_role_permissions(db: Session, role_id: int) -> List[str]:
         .filter(RolePermission.role_id == role_id)
         .all()
     )
-    return [p.code for p in permissions]
+    return [p.code for p in permissions]  # type: ignore[misc]
 
 
 @router.get("", response_model=List[RoleResponse])
-async def list_roles(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+async def list_roles(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):  # type: ignore[no-untyped-def]
     """获取所有角色"""
     _check_manage_roles_permission(current_user, db)
 
@@ -56,7 +56,7 @@ async def list_roles(current_user: User = Depends(get_current_user), db: Session
 
 
 @router.post("", response_model=RoleResponse, status_code=status.HTTP_201_CREATED)
-async def create_role(
+async def create_role(  # type: ignore[no-untyped-def]
     role_data: RoleCreate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -96,7 +96,7 @@ async def create_role(
 
 
 @router.get("/{role_id}", response_model=RoleWithPermissions)
-async def get_role(
+async def get_role(  # type: ignore[no-untyped-def]
     role_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ):
     """获取角色详情（包含权限）"""
@@ -123,11 +123,11 @@ async def get_role(
 
     logger.info(f"User {current_user.username} viewed role: {role.code}")
 
-    return RoleWithPermissions(**role_dict)
+    return RoleWithPermissions(**role_dict)  # type: ignore[arg-type]
 
 
 @router.put("/{role_id}", response_model=RoleResponse)
-async def update_role(
+async def update_role(  # type: ignore[no-untyped-def]
     role_id: int,
     role_data: RoleUpdate,
     current_user: User = Depends(get_current_user),
@@ -153,11 +153,11 @@ async def update_role(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail=f"角色名称已存在: {role_data.name}"
             )
-        role.name = role_data.name
+        role.name = role_data.name  # type: ignore[assignment]
 
     # 更新描述
     if role_data.description is not None:
-        role.description = role_data.description
+        role.description = role_data.description  # type: ignore[assignment]
 
     db.commit()
     db.refresh(role)
@@ -168,7 +168,7 @@ async def update_role(
 
 
 @router.delete("/{role_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_role(
+async def delete_role(  # type: ignore[no-untyped-def]
     role_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ):
     """删除角色"""
@@ -201,7 +201,7 @@ async def delete_role(
 
 
 @router.get("/{role_id}/permissions", response_model=List[PermissionResponse])
-async def get_role_permissions(
+async def get_role_permissions(  # type: ignore[no-untyped-def]
     role_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ):
     """获取角色的权限列表"""
@@ -228,7 +228,7 @@ async def get_role_permissions(
 
 
 @router.put("/{role_id}/permissions", response_model=RoleWithPermissions)
-async def assign_permissions_to_role(
+async def assign_permissions_to_role(  # type: ignore[no-untyped-def]
     role_id: int,
     permission_data: RolePermissionAssign,
     current_user: User = Depends(get_current_user),
@@ -283,4 +283,4 @@ async def assign_permissions_to_role(
         f"User {current_user.username} assigned {len(permissions)} permissions to role: {role.code}"
     )
 
-    return RoleWithPermissions(**role_dict)
+    return RoleWithPermissions(**role_dict)  # type: ignore[arg-type]

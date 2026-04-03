@@ -42,10 +42,10 @@ from app.tools.k8s.common import (
 class GetPodsTool(BaseOpTool):
     """获取 Pod 列表工具"""
 
-    def __init__(self, db=None):
+    def __init__(self, db=None):  # type: ignore[no-untyped-def]
         self.k8s_client = init_k8s_client(db)
 
-    async def execute(
+    async def execute(  # type: ignore[no-untyped-def]
         self,
         namespace: str = "default",
         label_selector: Optional[str] = None,
@@ -98,10 +98,10 @@ class GetPodsTool(BaseOpTool):
 class GetPodTool(BaseOpTool):
     """获取单个 Pod 详情工具"""
 
-    def __init__(self, db=None):
+    def __init__(self, db=None):  # type: ignore[no-untyped-def]
         self.k8s_client = init_k8s_client(db)
 
-    async def execute(
+    async def execute(  # type: ignore[no-untyped-def]
         self,
         name: str,
         namespace: str = "default",
@@ -152,10 +152,10 @@ class GetPodTool(BaseOpTool):
 class GetPodLogsTool(BaseOpTool):
     """获取 Pod 日志工具"""
 
-    def __init__(self, db=None):
+    def __init__(self, db=None):  # type: ignore[no-untyped-def]
         self.k8s_client = init_k8s_client(db)
 
-    async def execute(
+    async def execute(  # type: ignore[no-untyped-def]
         self,
         name: str,
         namespace: str = "default",
@@ -212,10 +212,10 @@ class GetPodLogsTool(BaseOpTool):
 class GetPodEventsTool(BaseOpTool):
     """获取 Pod 事件工具"""
 
-    def __init__(self, db=None):
+    def __init__(self, db=None):  # type: ignore[no-untyped-def]
         self.k8s_client = init_k8s_client(db)
 
-    async def execute(
+    async def execute(  # type: ignore[no-untyped-def]
         self,
         name: str,
         namespace: str = "default",
@@ -266,10 +266,10 @@ class GetPodEventsTool(BaseOpTool):
 class DescribePodTool(BaseOpTool):
     """获取 Pod 详细描述信息工具"""
 
-    def __init__(self, db=None):
+    def __init__(self, db=None):  # type: ignore[no-untyped-def]
         self.k8s_client = init_k8s_client(db)
 
-    async def execute(
+    async def execute(  # type: ignore[no-untyped-def]
         self,
         name: str,
         namespace: str = "default",

@@ -153,7 +153,84 @@ npm run dev
 
 ---
 
-### 方式二：Docker 部署（推荐生产环境）
+### 🐳 Docker Hub 快速部署（最快）
+
+直接拉取预构建镜像，无需本地编译。
+
+#### 1. 创建环境变量文件
+
+```bash
+mkdir -p opsclaw && cd opsclaw
+cat > .env << 'EOF'
+# LLM 配置（必填，选择一个）
+DEFAULT_LLM_PROVIDER=openai          # openai / claude / zhipu / ollama / openrouter
+OPENAI_API_KEY=your_key_here         # 使用 OpenAI 时填写
+# ZHIPU_API_KEY=your_key_here        # 使用智谱时填写
+# OLLAMA_BASE_URL=http://your-server:11434/v1  # 使用 Ollama 时填写
+
+# JWT 密钥（生产环境务必修改！）
+JWT_SECRET_KEY=change-me-to-a-random-string
+
+# 可选：Kubernetes 集成
+K8S_ENABLED=false
+K8S_DEFAULT_NAMESPACE=default
+
+# 可选：Prometheus / Loki
+PROMETHEUS_ENABLED=false
+PROMETHEUS_URL=http://localhost:9090
+LOKI_ENABLED=false
+LOKI_URL=http://localhost:3100
+
+# 可选：飞书集成
+FEISHU_ENABLED=false
+# FEISHU_APP_ID=cli_xxx
+# FEISHU_APP_SECRET=xxx
+EOF
+```
+
+#### 2. 拉取并启动
+
+```bash
+# 单容器启动（最简方式）
+docker run -d \
+  --name ops-agent \
+  -p 8000:80 \
+  --env-file .env \
+  -v opsclaw-data:/app/workspace/data \
+  lanjiaxuan/ops-agent:v4.0
+
+# 自定义端口
+docker run -d \
+  --name ops-agent \
+  -p 32799:80 \
+  --env-file .env \
+  -v opsclaw-data:/app/workspace/data \
+  lanjiaxuan/ops-agent:v4.0
+```
+
+> **说明**: 建议挂载 `opsclaw-data` 数据卷，容器重建后数据库和配置不会丢失。
+
+#### 3. 验证服务
+
+```bash
+# 健康检查
+curl http://localhost:8000/api/v1/health
+
+# 查看日志
+docker logs -f ops-agent
+
+# 重启服务
+docker restart ops-agent
+```
+
+#### 4. 访问应用
+
+- **Web UI**: http://localhost:8000
+- **默认账号**: `admin` / `admin123`
+
+---
+
+### 🐳 从源码构建部署
 
 #### 1. 配置环境变量
 

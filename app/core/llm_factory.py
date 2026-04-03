@@ -72,10 +72,10 @@ class LLMFactory:
 
                 if ":" in host_port:
                     host, port = host_port.split(":")
-                    port = int(port)
+                    port = int(port)  # type: ignore[assignment]
                 else:
                     host = host_port
-                    port = 11434  # Ollama 默认端口
+                    port = 11434  # Ollama 默认端口  # type: ignore[assignment]
 
                 # 快速 socket 连接测试（超时 2 秒）
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -508,7 +508,7 @@ def get_llm(
     return _llm_instance
 
 
-def reset_llm():
+def reset_llm():  # type: ignore[no-untyped-def]
     """
     重置 LLM 单例（用于测试）。
     """

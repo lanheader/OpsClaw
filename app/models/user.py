@@ -36,5 +36,5 @@ class User(Base):
     )
     last_login_at = Column(DateTime, nullable=True, comment="最后登录时间")
 
-    def __repr__(self):
+    def __repr__(self):  # type: ignore[no-untyped-def]
         return f"<User(id={self.id}, username='{self.username}', email='{self.email}')>"

@@ -77,7 +77,7 @@ class AlertManagerClient:
             if resp.status_code == 200:
                 data = resp.json()
                 logger.info(f"获取到 {len(data)} 条告警")
-                return data
+                return data  # type: ignore[no-any-return]
             else:
                 logger.error(f"获取告警失败: HTTP {resp.status_code}")
                 return []
@@ -109,7 +109,7 @@ class AlertManagerClient:
             client = get_shared_http_client(timeout=self.timeout)
             resp = await client.get(f"{self.base_url}/api/v2/silences", params=params)
             if resp.status_code == 200:
-                return resp.json()
+                return resp.json()  # type: ignore[no-any-return]
             logger.error(f"获取静默规则失败: HTTP {resp.status_code}")
             return []
         except Exception as e:

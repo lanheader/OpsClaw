@@ -150,7 +150,7 @@ class FeishuClient:
             else:
                 logger.info(f"Text message sent successfully to {chat_id}")
 
-            return data
+            return data  # type: ignore[no-any-return]
 
         except httpx.HTTPError as e:
             logger.exception(f"HTTP error sending text message: {e}")
@@ -203,7 +203,7 @@ class FeishuClient:
             else:
                 logger.info(f"Card message sent successfully to {chat_id}")
 
-            return data
+            return data  # type: ignore[no-any-return]
 
         except httpx.HTTPError as e:
             logger.exception(f"HTTP error sending card message: {e}")
@@ -259,7 +259,7 @@ class FeishuClient:
             else:
                 logger.debug(f"Added reaction {emoji_type} to message {message_id}")
 
-            return data
+            return data  # type: ignore[no-any-return]
 
         except httpx.HTTPError as e:
             logger.exception(f"HTTP error adding reaction: {e}")
@@ -298,7 +298,7 @@ class FeishuClient:
             else:
                 logger.info("Webhook message sent successfully")
 
-            return data
+            return data  # type: ignore[no-any-return]
 
         except httpx.HTTPError as e:
             logger.exception(f"HTTP error sending webhook message: {e}")
@@ -333,7 +333,7 @@ class FeishuClient:
             if data.get("code") != 0:
                 logger.error(f"Failed to get chat info: {data.get('msg')}")
 
-            return data
+            return data  # type: ignore[no-any-return]
 
         except httpx.HTTPError as e:
             logger.exception(f"HTTP error getting chat info: {e}")
@@ -394,7 +394,7 @@ class FeishuClient:
 
             user_data = data.get("data", {}).get("user", {})
             logger.debug(f"Got user info for {user_id}: {user_data.get('name')}")
-            return user_data
+            return user_data  # type: ignore[no-any-return]
 
         except httpx.HTTPError as e:
             logger.warning(f"HTTP error getting user info: {e}")
@@ -403,16 +403,16 @@ class FeishuClient:
             logger.warning(f"Error getting user info: {e}")
             return None
 
-    async def close(self):
+    async def close(self):  # type: ignore[no-untyped-def]
         """关闭 HTTP 客户端"""
         await self._client.aclose()
         logger.info("FeishuClient closed")
 
-    async def __aenter__(self):
+    async def __aenter__(self):  # type: ignore[no-untyped-def]
         """异步上下文管理器入口"""
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(self, exc_type, exc_val, exc_tb):  # type: ignore[no-untyped-def]
         """异步上下文管理器退出"""
         await self.close()
 
@@ -444,8 +444,8 @@ def get_feishu_client() -> FeishuClient:
             raise RuntimeError("Feishu integration is not enabled")
 
         _feishu_client = FeishuClient(
-            app_id=settings.FEISHU_APP_ID,
-            app_secret=settings.FEISHU_APP_SECRET,
+            app_id=settings.FEISHU_APP_ID,  # type: ignore[arg-type]
+            app_secret=settings.FEISHU_APP_SECRET,  # type: ignore[arg-type]
             webhook_url=settings.FEISHU_WEBHOOK_URL,
             verification_token=settings.FEISHU_VERIFICATION_TOKEN,
             encrypt_key=settings.FEISHU_ENCRYPT_KEY,

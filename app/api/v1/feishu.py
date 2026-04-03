@@ -25,7 +25,7 @@ router = APIRouter(prefix="/feishu", tags=["feishu"])
 
 
 @router.get("/status")
-async def get_feishu_status():
+async def get_feishu_status():  # type: ignore[no-untyped-def]
     """
     获取飞书集成状态
 
@@ -108,7 +108,7 @@ def _get_status_message(enabled: bool, mode: str, longconn_healthy: bool) -> str
 
 
 @router.post("/test-message")
-async def send_test_message(
+async def send_test_message(  # type: ignore[no-untyped-def]
     text: str,
     chat_id: Optional[str] = None,
     db: Session = Depends(get_db)
@@ -144,7 +144,7 @@ async def send_test_message(
 
             if recent_session:
                 # 使用飞书会话的 external_chat_id
-                target_chat_id = recent_session.external_chat_id
+                target_chat_id = recent_session.external_chat_id  # type: ignore[assignment]
                 logger.info(f"📱 使用最近的飞书会话: {target_chat_id}")
             else:
                 # 降级：尝试从配置文件获取
@@ -163,7 +163,7 @@ async def send_test_message(
 
         card = build_formatted_reply_card(content=text)
         outgoing = OutgoingMessage(
-            chat_id=target_chat_id,
+            chat_id=target_chat_id,  # type: ignore[arg-type]
             message_type=MessageType.CARD,
             content=card,
         )
@@ -189,7 +189,7 @@ async def send_test_message(
 
 
 @router.post("/callback")
-async def feishu_callback_legacy(
+async def feishu_callback_legacy(  # type: ignore[no-untyped-def]
     request: Request,
     background_tasks: BackgroundTasks,
     x_lark_request_timestamp: Optional[str] = Header(None),
@@ -228,7 +228,7 @@ async def feishu_callback_legacy(
         )
 
 
-async def _process_with_new_architecture(
+async def _process_with_new_architecture(  # type: ignore[no-untyped-def]
     request: Request,
     background_tasks: BackgroundTasks,
     x_lark_request_timestamp: Optional[str],

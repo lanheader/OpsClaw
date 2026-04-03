@@ -54,7 +54,7 @@ class AgentPrompt(Base):
         Index("idx_agent_prompts_version", "agent_name", "version"),
     )
 
-    def __repr__(self):
+    def __repr__(self):  # type: ignore[no-untyped-def]
         return f"<AgentPrompt(agent_name='{self.agent_name}', version={self.version})>"
 
     def to_dict(self) -> dict:
@@ -103,7 +103,7 @@ class PromptVersion(Base):
         Index("idx_prompt_versions_version", "agent_name", "version"),
     )
 
-    def __repr__(self):
+    def __repr__(self):  # type: ignore[no-untyped-def]
         return f"<PromptVersion(agent_name='{self.agent_name}', version={self.version})>"
 
     def to_dict(self) -> dict:

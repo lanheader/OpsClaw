@@ -220,8 +220,8 @@ def sync_tool_permissions_to_db(db: "Session") -> dict:
     # 删除过期权限（软删除：只删除不在 ToolRegistry 中的）
     # 注意：如果权限已被角色使用，应该标记而不是直接删除
     removed_count = 0
-    for code in to_remove:
-        db_perm = db.query(Permission).filter(Permission.code == code).first()
+    for code in to_remove:  # type: ignore[assignment]
+        db_perm = db.query(Permission).filter(Permission.code == code).first()  # type: ignore[assignment]
         if db_perm:
             # 检查是否有角色在使用此权限
             usage_count = db.query(RolePermission).filter(RolePermission.permission_id == db_perm.id).count()

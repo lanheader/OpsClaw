@@ -7,7 +7,7 @@ K8s 删除操作工具（新架构）
 
 from typing import Dict, Any, Optional
 
-from kubernetes import client
+from kubernetes import client  # type: ignore[import]
 from app.integrations.kubernetes.client import create_client
 
 from app.tools.base import (
@@ -25,12 +25,12 @@ logger = get_logger(__name__)
 
 
 # 通用初始化函数
-def _init_k8s_client(db=None):
+def _init_k8s_client(db=None):  # type: ignore[no-untyped-def]
     """初始化 K8s 客户端"""
     return create_client(db)
 
 
-def _log_tool_start(tool_name: str, **kwargs):
+def _log_tool_start(tool_name: str, **kwargs):  # type: ignore[no-untyped-def]
     """记录工具开始执行的日志"""
     ctx = get_request_context()
     session_id = ctx.get('session_id', 'no-sess')
@@ -38,7 +38,7 @@ def _log_tool_start(tool_name: str, **kwargs):
     logger.info(f"🔧 [{session_id}] 执行工具: {tool_name} | 参数: {params}")
 
 
-def _log_tool_success(tool_name: str, message: str = None):
+def _log_tool_success(tool_name: str, message: str = None):  # type: ignore[assignment]
     """记录工具执行成功的日志"""
     ctx = get_request_context()
     session_id = ctx.get('session_id', 'no-sess')
@@ -65,10 +65,10 @@ class DeletePodTool(BaseOpTool):
     删除指定的 Pod。
     """
 
-    def __init__(self, db=None):
+    def __init__(self, db=None):  # type: ignore[no-untyped-def]
         self.k8s_client = _init_k8s_client(db)
 
-    async def execute(
+    async def execute(  # type: ignore[no-untyped-def]
         self,
         name: str,
         namespace: str = "default",
@@ -116,10 +116,10 @@ class DeleteDeploymentTool(BaseOpTool):
     删除指定的 Deployment 及其关联的 Pods。
     """
 
-    def __init__(self, db=None):
+    def __init__(self, db=None):  # type: ignore[no-untyped-def]
         self.k8s_client = _init_k8s_client(db)
 
-    async def execute(
+    async def execute(  # type: ignore[no-untyped-def]
         self,
         name: str,
         namespace: str = "default",
@@ -167,10 +167,10 @@ class DeleteServiceTool(BaseOpTool):
     删除指定的 Service。
     """
 
-    def __init__(self, db=None):
+    def __init__(self, db=None):  # type: ignore[no-untyped-def]
         self.k8s_client = _init_k8s_client(db)
 
-    async def execute(
+    async def execute(  # type: ignore[no-untyped-def]
         self,
         name: str,
         namespace: str = "default",
@@ -218,10 +218,10 @@ class DeleteConfigMapTool(BaseOpTool):
     删除指定的 ConfigMap。
     """
 
-    def __init__(self, db=None):
+    def __init__(self, db=None):  # type: ignore[no-untyped-def]
         self.k8s_client = _init_k8s_client(db)
 
-    async def execute(
+    async def execute(  # type: ignore[no-untyped-def]
         self,
         name: str,
         namespace: str = "default",
@@ -269,10 +269,10 @@ class DeleteSecretTool(BaseOpTool):
     删除指定的 Secret。
     """
 
-    def __init__(self, db=None):
+    def __init__(self, db=None):  # type: ignore[no-untyped-def]
         self.k8s_client = _init_k8s_client(db)
 
-    async def execute(
+    async def execute(  # type: ignore[no-untyped-def]
         self,
         name: str,
         namespace: str = "default",
@@ -320,10 +320,10 @@ class ForceDeletePodTool(BaseOpTool):
     强制删除卡住或无法正常删除的 Pod。
     """
 
-    def __init__(self, db=None):
+    def __init__(self, db=None):  # type: ignore[no-untyped-def]
         self.k8s_client = _init_k8s_client(db)
 
-    async def execute(
+    async def execute(  # type: ignore[no-untyped-def]
         self,
         name: str,
         namespace: str = "default",

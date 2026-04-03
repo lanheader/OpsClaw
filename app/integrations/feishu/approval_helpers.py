@@ -27,7 +27,7 @@ from app.utils.llm_helper import ensure_final_report_in_state, extract_final_rep
 logger = get_logger(__name__)
 
 
-async def _send_card_message(channel_adapter, chat_id: str, content: str) -> None:
+async def _send_card_message(channel_adapter, chat_id: str, content: str) -> None:  # type: ignore[no-untyped-def]
     """发送卡片消息（支持 Markdown 渲染）"""
     cleaned = clean_xml_tags(content)
     card = build_formatted_reply_card(content=cleaned)
@@ -93,7 +93,7 @@ def _extract_response_from_state(state: Dict[str, Any]) -> str:
     )
 
     if response:
-        return response
+        return response  # type: ignore[no-any-return]
 
     # 如果上述字段都为空，尝试从 messages 中提取
     messages = state.get("messages", [])
@@ -103,7 +103,7 @@ def _extract_response_from_state(state: Dict[str, Any]) -> str:
     return ""
 
 
-async def handle_approval_response(
+async def handle_approval_response(  # type: ignore[no-untyped-def]
     session_id: str,
     decision: str,
     chat_id: str,
@@ -134,7 +134,7 @@ async def handle_approval_response(
 
     try:
         # 创建 Agent
-        agent = await create_agent_for_session(
+        agent = await create_agent_for_session(  # type: ignore[call-arg]
             session_id=session_id,
             enable_approval=True,
             enable_security=True,

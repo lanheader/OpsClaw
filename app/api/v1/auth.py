@@ -18,14 +18,14 @@ logger = logging.getLogger(__name__)
 
 
 @router.post("/login", response_model=LoginResponse)
-async def login(request: Request, login_data: LoginRequest, db: Session = Depends(get_db)):
+async def login(request: Request, login_data: LoginRequest, db: Session = Depends(get_db)):  # type: ignore[no-untyped-def]
     """用户登录"""
     ip_address = request.client.host if request.client else None
     user_agent = request.headers.get("user-agent")
 
     user = db.query(User).filter(User.username == login_data.username).first()
 
-    if not user or not verify_password(login_data.password, user.hashed_password):
+    if not user or not verify_password(login_data.password, user.hashed_password):  # type: ignore[arg-type]
         # Record failure only when user exists (avoid leaking user existence)
         if user:
             db.add(
@@ -54,7 +54,7 @@ async def login(request: Request, login_data: LoginRequest, db: Session = Depend
             user_id=user.id, ip_address=ip_address, user_agent=user_agent, login_status="success"
         )
     )
-    user.last_login_at = datetime.utcnow()
+    user.last_login_at = datetime.utcnow()  # type: ignore[assignment]
     db.commit()
 
     logger.info(f"User {user.username} logged in from {ip_address}")
@@ -65,13 +65,13 @@ async def login(request: Request, login_data: LoginRequest, db: Session = Depend
 
 
 @router.post("/logout")
-async def logout(current_user: User = Depends(get_current_user)):
+async def logout(current_user: User = Depends(get_current_user)):  # type: ignore[no-untyped-def]
     """用户登出（客户端删除 Token）"""
     logger.info(f"User {current_user.username} logged out")
     return {"message": "登出成功"}
 
 
 @router.get("/me", response_model=UserResponse)
-async def get_me(current_user: User = Depends(get_current_user)):
+async def get_me(current_user: User = Depends(get_current_user)):  # type: ignore[no-untyped-def]
     """获取当前用户信息"""
     return UserResponse.model_validate(current_user)

@@ -33,10 +33,10 @@ from app.tools.k8s.common import init_k8s_client, log_tool_start, log_tool_succe
 class GetServicesTool(BaseOpTool):
     """获取 Service 列表工具"""
 
-    def __init__(self, db=None):
+    def __init__(self, db=None):  # type: ignore[no-untyped-def]
         self.k8s_client = init_k8s_client(db)
 
-    async def execute(
+    async def execute(  # type: ignore[no-untyped-def]
         self,
         namespace: str = "default",
         **kwargs
@@ -88,10 +88,10 @@ class GetServicesTool(BaseOpTool):
 class GetIngressTool(BaseOpTool):
     """获取 Ingress 列表工具"""
 
-    def __init__(self, db=None):
+    def __init__(self, db=None):  # type: ignore[no-untyped-def]
         self.k8s_client = init_k8s_client(db)
 
-    async def execute(
+    async def execute(  # type: ignore[no-untyped-def]
         self,
         namespace: str = "default",
         **kwargs

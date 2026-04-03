@@ -129,7 +129,84 @@ uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 ---
 
-### Docker Deployment (Recommended for Production)
+### 🐳 Quick Deploy with Docker Hub (Fastest)
+
+Pull the pre-built image from Docker Hub — no need to build locally.
+
+#### 1. Create Environment File
+
+```bash
+mkdir -p opsclaw && cd opsclaw
+cat > .env << 'EOF'
+# LLM Configuration (required - choose one provider)
+DEFAULT_LLM_PROVIDER=openai          # openai / claude / zhipu / ollama / openrouter
+OPENAI_API_KEY=your_key_here         # if using OpenAI
+# ZHIPU_API_KEY=your_key_here        # if using Zhipu
+# OLLAMA_BASE_URL=http://your-server:11434/v1  # if using Ollama
+
+# JWT Secret (MUST change in production!)
+JWT_SECRET_KEY=change-me-to-a-random-string
+
+# Optional: Kubernetes Integration
+K8S_ENABLED=false
+K8S_DEFAULT_NAMESPACE=default
+
+# Optional: Prometheus / Loki
+PROMETHEUS_ENABLED=false
+PROMETHEUS_URL=http://localhost:9090
+LOKI_ENABLED=false
+LOKI_URL=http://localhost:3100
+
+# Optional: Feishu Integration
+FEISHU_ENABLED=false
+# FEISHU_APP_ID=cli_xxx
+# FEISHU_APP_SECRET=xxx
+EOF
+```
+
+#### 2. Pull and Run
+
+```bash
+# Single container (simplest)
+docker run -d \
+  --name ops-agent \
+  -p 8000:80 \
+  --env-file .env \
+  -v opsclaw-data:/app/workspace/data \
+  lanjiaxuan/ops-agent:v4.0
+
+# Or with custom port
+docker run -d \
+  --name ops-agent \
+  -p 32799:80 \
+  --env-file .env \
+  -v opsclaw-data:/app/workspace/data \
+  lanjiaxuan/ops-agent:v4.0
+```
+
+> **Note**: Mounting `opsclaw-data` volume is recommended to persist database and configuration across container restarts.
+
+#### 3. Verify
+
+```bash
+# Check health
+curl http://localhost:8000/api/v1/health
+
+# View logs
+docker logs -f ops-agent
+
+# Restart
+docker restart ops-agent
+```
+
+#### 4. Access
+
+- **Web UI**: http://localhost:8000
+- **Default Account**: `admin` / `admin123`
+
+---
+
+### 🐳 Docker Deployment from Source
 
 #### 1. Configure Environment
 

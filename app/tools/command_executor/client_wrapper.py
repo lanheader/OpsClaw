@@ -138,7 +138,7 @@ class CommandExecutor:
                 logger.info(f"Command succeeded, output length: {len(output)}")
 
             # 记录命令历史
-            self._record_command(command, exit_code, output[:1000], error[:500] if error else "", timeout)
+            self._record_command(command, exit_code, output[:1000], error[:500] if error else "", timeout)  # type: ignore[arg-type]
 
             return {
                 "success": success,
@@ -168,7 +168,7 @@ class CommandExecutor:
                 "timeout": timeout,
             }
 
-    def _record_command(
+    def _record_command(  # type: ignore[no-untyped-def]
         self,
         command: str,
         exit_code: int,
@@ -202,7 +202,7 @@ class CommandExecutor:
         """
         return self.command_history[-limit:][::-1]
 
-    def clear_command_history(self):
+    def clear_command_history(self):  # type: ignore[no-untyped-def]
         """清空命令历史"""
         self.command_history = []
 
@@ -225,7 +225,7 @@ class RedisExecutor(CommandExecutor):
         self.host = host
         self.port = port
 
-    async def execute(
+    async def execute(  # type: ignore[no-untyped-def]
         self,
         command: str,
         user_id: int,
@@ -288,7 +288,7 @@ class MySQLExecutor(CommandExecutor):
         self.host = host
         self.port = port
 
-    async def execute(
+    async def execute(  # type: ignore[no-untyped-def]
         self,
         query: str,
         user_id: int,

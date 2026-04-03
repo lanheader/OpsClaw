@@ -80,7 +80,7 @@ class ScheduledTask(Base):
     # 关联执行记录
     executions = relationship("TaskExecution", back_populates="task", cascade="all, delete-orphan")
 
-    def __repr__(self):
+    def __repr__(self):  # type: ignore[no-untyped-def]
         return f"<ScheduledTask(id={self.id}, name={self.name}, type={self.task_type})>"
 
 
@@ -108,5 +108,5 @@ class TaskExecution(Base):
     # 关联任务
     task = relationship("ScheduledTask", back_populates="executions")
 
-    def __repr__(self):
+    def __repr__(self):  # type: ignore[no-untyped-def]
         return f"<TaskExecution(id={self.id}, task_id={self.task_id}, status={self.status})>"

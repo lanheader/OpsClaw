@@ -48,13 +48,13 @@ logger = get_logger(__name__)
 class GetConfigMapsTool(BaseOpTool):
     """获取 ConfigMap 列表工具"""
 
-    def __init__(self, db=None):
+    def __init__(self, db=None):  # type: ignore[no-untyped-def]
         self.k8s_client = init_k8s_client(db)
         self.logger = get_logger(__name__)
         self.request_context = get_request_context()
         self.session_id = self.request_context.get('session_id', 'no-sess')
 
-    async def execute(self, namespace: str = "default", **kwargs) -> Dict[str, Any]:
+    async def execute(self, namespace: str = "default", **kwargs) -> Dict[str, Any]:  # type: ignore[no-untyped-def]
         """执行工具操作"""
         self.logger.info(
             f"🔧 [{self.session_id}] 执行工具: get_configmaps | namespace: {namespace}"
@@ -95,13 +95,13 @@ class GetConfigMapsTool(BaseOpTool):
 class GetSecretsTool(BaseOpTool):
     """获取 Secret 列表工具"""
 
-    def __init__(self, db=None):
+    def __init__(self, db=None):  # type: ignore[no-untyped-def]
         self.k8s_client = init_k8s_client(db)
         self.logger = get_logger(__name__)
         self.request_context = get_request_context()
         self.session_id = self.request_context.get('session_id', 'no-sess')
 
-    async def execute(self, namespace: str = "default", **kwargs) -> Dict[str, Any]:
+    async def execute(self, namespace: str = "default", **kwargs) -> Dict[str, Any]:  # type: ignore[no-untyped-def]
         """执行工具操作"""
         self.logger.info(
             f"🔧 [{self.session_id}] 执行工具: get_secrets | namespace: {namespace}"
@@ -142,13 +142,13 @@ class GetSecretsTool(BaseOpTool):
 class GetPVCsTool(BaseOpTool):
     """获取 PVC 列表工具"""
 
-    def __init__(self, db=None):
+    def __init__(self, db=None):  # type: ignore[no-untyped-def]
         self.k8s_client = init_k8s_client(db)
         self.logger = get_logger(__name__)
         self.request_context = get_request_context()
         self.session_id = self.request_context.get('session_id', 'no-sess')
 
-    async def execute(self, namespace: str = "default", **kwargs) -> Dict[str, Any]:
+    async def execute(self, namespace: str = "default", **kwargs) -> Dict[str, Any]:  # type: ignore[no-untyped-def]
         """执行工具操作"""
         self.logger.info(
             f"🔧 [{self.session_id}] 执行工具: get_pvcs | namespace: {namespace}"
@@ -161,7 +161,7 @@ class GetPVCsTool(BaseOpTool):
                     "name": pvc.metadata.name,
                     "namespace": pvc.metadata.namespace,
                     "status": pvc.status.phase,
-                    "capacity": pvc.spec.resources.requests.storage,
+                    "capacity": pvc.spec.resources.requests.get("storage") if pvc.spec.resources and pvc.spec.resources.requests else None,
                     "access_modes": pvc.spec.access_modes,
                     "storage_class": pvc.spec.storage_class_name,
                 }
@@ -191,12 +191,12 @@ class GetPVCsTool(BaseOpTool):
 class GetNodesTool(BaseOpTool):
     """获取 Node 列表工具"""
 
-    def __init__(self, db=None):
+    def __init__(self, db=None):  # type: ignore[no-untyped-def]
         self.k8s_client = init_k8s_client(db)
         self.logger = get_logger(__name__)
         self.request_context = get_request_context()
         self.session_id = self.request_context.get('session_id', 'no-sess')
-    async def execute(self, label_selector: Optional[str] = None, **kwargs) -> Dict[str, Any]:
+    async def execute(self, label_selector: Optional[str] = None, **kwargs) -> Dict[str, Any]:  # type: ignore[no-untyped-def]
         """执行工具操作"""
         self.logger.info(
             f"🔧 [{self.session_id}] 执行工具: get_nodes | label_selector: {label_selector}"
@@ -255,12 +255,12 @@ class GetNodesTool(BaseOpTool):
 class GetEventsTool(BaseOpTool):
     """获取集群事件工具"""
 
-    def __init__(self, db=None):
+    def __init__(self, db=None):  # type: ignore[no-untyped-def]
         self.k8s_client = init_k8s_client(db)
         self.logger = get_logger(__name__)
         self.request_context = get_request_context()
         self.session_id = self.request_context.get('session_id', 'no-sess')
-    async def execute(self, namespace: str = "default", limit: int = 100, **kwargs) -> Dict[str, Any]:
+    async def execute(self, namespace: str = "default", limit: int = 100, **kwargs) -> Dict[str, Any]:  # type: ignore[no-untyped-def]
         """执行工具操作"""
         self.logger.info(
             f"🔧 [{self.session_id}] 执行工具: get_events | namespace: {namespace}, limit={limit}"
@@ -308,12 +308,12 @@ class GetEventsTool(BaseOpTool):
 class GetResourceQuotasTool(BaseOpTool):
     """获取资源配额列表工具"""
 
-    def __init__(self, db=None):
+    def __init__(self, db=None):  # type: ignore[no-untyped-def]
         self.k8s_client = init_k8s_client(db)
         self.logger = get_logger(__name__)
         self.request_context = get_request_context()
         self.session_id = self.request_context.get('session_id', 'no-sess')
-    async def execute(self, namespace: str = "default", **kwargs) -> Dict[str, Any]:
+    async def execute(self, namespace: str = "default", **kwargs) -> Dict[str, Any]:  # type: ignore[no-untyped-def]
         """执行工具操作"""
         self.logger.info(
             f"🔧 [{self.session_id}] 执行工具: get_resource_quotas | namespace: {namespace}"
@@ -358,12 +358,12 @@ class GetResourceQuotasTool(BaseOpTool):
 class DescribeNodeTool(BaseOpTool):
     """获取节点详细描述信息工具"""
 
-    def __init__(self, db=None):
+    def __init__(self, db=None):  # type: ignore[no-untyped-def]
         self.k8s_client = init_k8s_client(db)
         self.logger = get_logger(__name__)
         self.request_context = get_request_context()
         self.session_id = self.request_context.get('session_id', 'no-sess')
-    async def execute(self, name: str, **kwargs) -> Dict[str, Any]:
+    async def execute(self, name: str, **kwargs) -> Dict[str, Any]:  # type: ignore[no-untyped-def]
         """执行工具操作"""
         self.logger.info(
             f"🔧 [{self.session_id}] 执行工具: describe_node | name={name}"

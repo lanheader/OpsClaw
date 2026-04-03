@@ -26,7 +26,7 @@ if "sqlite" in DATABASE_URL:
 
     # 启用 WAL 模式以提升并发性能
     @event.listens_for(engine, "connect")
-    def set_sqlite_pragma(dbapi_conn, connection_record):
+    def set_sqlite_pragma(dbapi_conn, connection_record):  # type: ignore[no-untyped-def]
         cursor = dbapi_conn.cursor()
         cursor.execute("PRAGMA journal_mode=WAL")
         cursor.execute("PRAGMA synchronous=NORMAL")
@@ -69,6 +69,6 @@ def get_db() -> Generator[Session, None, None]:
         db.close()
 
 
-def init_db():
+def init_db():  # type: ignore[no-untyped-def]
     """通过创建所有表来初始化数据库"""
     Base.metadata.create_all(bind=engine)

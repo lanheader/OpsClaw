@@ -65,7 +65,7 @@ class IntegrationConfig:
         ).first()
 
         if setting:
-            setting.value = value
+            setting.value = value  # type: ignore[assignment]
         else:
             setting = SystemSetting(
                 key=key,
@@ -81,7 +81,7 @@ class IntegrationConfig:
     @staticmethod
     def is_k8s_enabled(db: Session) -> bool:
         """检查 K8s 集成是否启用"""
-        return IntegrationConfig.get_setting(db, "k8s.enabled", False)
+        return IntegrationConfig.get_setting(db, "k8s.enabled", False)  # type: ignore[no-any-return]
 
     @staticmethod
     def get_k8s_auth_mode(db: Session) -> str:
@@ -91,51 +91,51 @@ class IntegrationConfig:
         Returns:
             "kubeconfig" (kubeconfig 内容) 或 "token" (ServiceAccount Token)
         """
-        return IntegrationConfig.get_setting(db, "k8s.auth_mode", "kubeconfig")
+        return IntegrationConfig.get_setting(db, "k8s.auth_mode", "kubeconfig")  # type: ignore[no-any-return]
 
     @staticmethod
     def get_k8s_kubeconfig(db: Session) -> Optional[str]:
         """获取 K8s kubeconfig 内容（直接存储在数据库中）"""
-        return IntegrationConfig.get_setting(db, "k8s.kubeconfig")
+        return IntegrationConfig.get_setting(db, "k8s.kubeconfig")  # type: ignore[no-any-return]
 
     @staticmethod
     def get_k8s_token(db: Session) -> Optional[str]:
         """获取 K8s ServiceAccount Token"""
-        return IntegrationConfig.get_setting(db, "k8s.token")
+        return IntegrationConfig.get_setting(db, "k8s.token")  # type: ignore[no-any-return]
 
     @staticmethod
     def get_k8s_api_host(db: Session) -> Optional[str]:
         """获取 K8s API Server 地址"""
-        return IntegrationConfig.get_setting(db, "k8s.api_host")
+        return IntegrationConfig.get_setting(db, "k8s.api_host")  # type: ignore[no-any-return]
 
     @staticmethod
     def get_k8s_ca_cert(db: Session) -> Optional[str]:
         """获取 K8s CA 证书"""
-        return IntegrationConfig.get_setting(db, "k8s.ca_cert")
+        return IntegrationConfig.get_setting(db, "k8s.ca_cert")  # type: ignore[no-any-return]
 
     # ========== Prometheus 配置 ==========
 
     @staticmethod
     def is_prometheus_enabled(db: Session) -> bool:
         """检查 Prometheus 集成是否启用"""
-        return IntegrationConfig.get_setting(db, "prometheus.enabled", False)
+        return IntegrationConfig.get_setting(db, "prometheus.enabled", False)  # type: ignore[no-any-return]
 
     @staticmethod
     def get_prometheus_url(db: Session) -> Optional[str]:
         """获取 Prometheus URL"""
-        return IntegrationConfig.get_setting(db, "prometheus.url")
+        return IntegrationConfig.get_setting(db, "prometheus.url")  # type: ignore[no-any-return]
 
     # ========== Loki 配置 ==========
 
     @staticmethod
     def is_loki_enabled(db: Session) -> bool:
         """检查 Loki 集成是否启用"""
-        return IntegrationConfig.get_setting(db, "loki.enabled", False)
+        return IntegrationConfig.get_setting(db, "loki.enabled", False)  # type: ignore[no-any-return]
 
     @staticmethod
     def get_loki_url(db: Session) -> Optional[str]:
         """获取 Loki URL"""
-        return IntegrationConfig.get_setting(db, "loki.url")
+        return IntegrationConfig.get_setting(db, "loki.url")  # type: ignore[no-any-return]
 
     # ========== 配置字典 ==========
 

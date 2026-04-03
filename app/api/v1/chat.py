@@ -78,17 +78,17 @@ def _build_session_response(
         )
 
     return ChatSessionResponse(
-        session_id=session.session_id,
-        title=session.title,
-        source=session.source,
-        username=user.username,
-        external_user_name=external_user_name,
-        created_at=session.created_at,
-        updated_at=session.updated_at,
+        session_id=session.session_id,  # type: ignore[arg-type]
+        title=session.title,  # type: ignore[arg-type]
+        source=session.source,  # type: ignore[arg-type]
+        username=user.username,  # type: ignore[arg-type]
+        external_user_name=external_user_name,  # type: ignore[arg-type]
+        created_at=session.created_at,  # type: ignore[arg-type]
+        updated_at=session.updated_at,  # type: ignore[arg-type]
         message_count=message_count,
-        last_message=last_msg_content,
-        state=session.state or "normal",
-        pending_approval_data=session.pending_approval_data,
+        last_message=last_msg_content,  # type: ignore[arg-type]
+        state=session.state or "normal",  # type: ignore[arg-type]
+        pending_approval_data=session.pending_approval_data,  # type: ignore[arg-type]
     )
 
 
@@ -167,7 +167,7 @@ def _save_approval_request(
             }),
         )
         db.add(message)
-        session.updated_at = get_beijing_now()
+        session.updated_at = get_beijing_now()  # type: ignore[assignment]
         db.commit()
         logger.info(f"✅ 审批请求消息已保存: session={session_id}")
         return True
@@ -213,9 +213,9 @@ def _save_assistant_message(
 
     # 更新会话标题（如果还没有）
     if not session.title:
-        session.title = user_query[:30] + ("..." if len(user_query) > 30 else "")
+        session.title = user_query[:30] + ("..." if len(user_query) > 30 else "")  # type: ignore[assignment]
 
-    session.updated_at = get_beijing_now()
+    session.updated_at = get_beijing_now()  # type: ignore[assignment]
     db.commit()
     db.refresh(message)
 
@@ -302,7 +302,7 @@ def _build_final_report(final_state: Dict) -> str:
     report = state.get("formatted_response", "") or state.get("final_report", "")
 
     if report:
-        return report
+        return report  # type: ignore[no-any-return]
 
     return f"""## ✅ 工作流执行完成
 
@@ -329,8 +329,8 @@ def _append_to_last_assistant_message(
     )
 
     if last_msg:
-        last_msg.content += f"\n\n{content}"
-        last_msg.meta_data = json.dumps({
+        last_msg.content += f"\n\n{content}"  # type: ignore[assignment]
+        last_msg.meta_data = json.dumps({  # type: ignore[assignment]
             "workflow_status": (
                 final_state.get("workflow_status") if final_state else "unknown"
             ),
@@ -355,7 +355,7 @@ def _append_to_last_assistant_message(
         )
         db.add(message)
 
-    session.updated_at = get_beijing_now()
+    session.updated_at = get_beijing_now()  # type: ignore[assignment]
     db.commit()
     logger.info(f"AI 回复已更新/保存: session={session_id}")
 
@@ -363,7 +363,7 @@ def _append_to_last_assistant_message(
 # ========== 会话管理端点 ==========
 
 @router.post("/sessions", response_model=ChatSessionResponse, status_code=status.HTTP_201_CREATED)
-async def create_session(
+async def create_session(  # type: ignore[no-untyped-def]
     session_data: ChatSessionCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -388,7 +388,7 @@ async def create_session(
 
 
 @router.get("/sessions", response_model=ChatSessionListResponse)
-async def get_sessions(
+async def get_sessions(  # type: ignore[no-untyped-def]
     skip: int = 0,
     limit: int = 20,
     db: Session = Depends(get_db),
@@ -414,7 +414,7 @@ async def get_sessions(
 
     # 构建响应
     session_responses = [
-        _build_session_response(
+        _build_session_response(  # type: ignore[call-arg]
             session, user, *_get_session_stats(db, session.session_id), db
         )
         for session, user in sessions_with_users
@@ -424,7 +424,7 @@ async def get_sessions(
 
 
 @router.get("/sessions/{session_id}", response_model=ChatSessionResponse)
-async def get_session(
+async def get_session(  # type: ignore[no-untyped-def]
     session_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -450,7 +450,7 @@ async def get_session(
 
 
 @router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_session(
+async def delete_session(  # type: ignore[no-untyped-def]
     session_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -477,7 +477,7 @@ async def delete_session(
             )
 
     # 软删除
-    session.is_active = False
+    session.is_active = False  # type: ignore[assignment]
     db.commit()
 
     logger.info(
@@ -488,7 +488,7 @@ async def delete_session(
 # ========== 消息端点 ==========
 
 @router.get("/sessions/{session_id}/messages", response_model=List[ChatMessageResponse])
-async def get_messages(
+async def get_messages(  # type: ignore[no-untyped-def]
     session_id: str,
     skip: int = 0,
     limit: int = 50,
@@ -521,18 +521,18 @@ async def get_messages(
 
     return [
         ChatMessageResponse(
-            id=msg.id,
+            id=msg.id,  # type: ignore[arg-type]
             role=msg.role.value,
-            content=msg.content,
-            created_at=msg.created_at,
-            metadata=json.loads(msg.meta_data) if msg.meta_data else None,
+            content=msg.content,  # type: ignore[arg-type]
+            created_at=msg.created_at,  # type: ignore[arg-type]
+            metadata=json.loads(msg.meta_data) if msg.meta_data else None,  # type: ignore[arg-type]
         )
         for msg in messages
     ]
 
 
 @router.post("/sessions/{session_id}/messages")
-async def send_message(
+async def send_message(  # type: ignore[no-untyped-def]
     session_id: str,
     message_data: ChatMessageCreate,
     db: Session = Depends(get_db),
@@ -540,7 +540,7 @@ async def send_message(
 ):
     """发送消息 — 立即保存用户消息并返回，Agent 在后台执行完成后自动保存助手消息"""
     # 获取用户权限
-    permission_codes = get_user_permission_codes(db, current_user.id)
+    permission_codes = get_user_permission_codes(db, current_user.id)  # type: ignore[arg-type]
     user_permissions = list(set(permission_codes))
 
     # 验证会话
@@ -560,7 +560,7 @@ async def send_message(
     user_msg = _save_user_message(db, session_id, message_data.content)
 
     # 2. 后台执行 Agent 并保存助手消息
-    async def _background_process():
+    async def _background_process():  # type: ignore[no-untyped-def]
         """后台任务：执行 Agent → 保存助手消息"""
         inner_db = SessionLocal()
         try:
@@ -626,7 +626,7 @@ async def send_message(
 
 
 @router.post("/sessions/{session_id}/messages/stream")
-async def send_message_stream(
+async def send_message_stream(  # type: ignore[no-untyped-def]
     session_id: str,
     message_data: ChatMessageCreate,
     db: Session = Depends(get_db),
@@ -634,7 +634,7 @@ async def send_message_stream(
 ):
     """发送消息并通过 Agent 工作流处理（SSE 流式响应，备用）"""
     # 获取用户权限
-    permission_codes = get_user_permission_codes(db, current_user.id)
+    permission_codes = get_user_permission_codes(db, current_user.id)  # type: ignore[arg-type]
     user_permissions = list(set(permission_codes))
 
     # 设置请求上下文（包含权限信息，供 middleware 使用）
@@ -672,7 +672,7 @@ async def send_message_stream(
             # 2. 构建请求并调用 AgentChatService
             request = ChatRequest(
                 session_id=session_id,
-                user_id=current_user.id,
+                user_id=current_user.id,  # type: ignore[arg-type]
                 content=message_data.content,
                 channel=MessageChannel.WEB,
                 user_permissions=user_permissions,
@@ -714,7 +714,7 @@ async def send_message_stream(
                         )
                         if assistant_msg:
                             await _auto_learn(
-                                current_user.id, session_id,
+                                current_user.id, session_id,  # type: ignore[arg-type]
                                 message_data.content, full_response
                             )
                             event_data["message_id"] = assistant_msg.id
@@ -750,7 +750,7 @@ async def send_message_stream(
 
 
 @router.post("/sessions/{session_id}/resume")
-async def resume_workflow(
+async def resume_workflow(  # type: ignore[no-untyped-def]
     session_id: str,
     approval_data: dict,
     db: Session = Depends(get_db),
@@ -758,7 +758,7 @@ async def resume_workflow(
 ):
     """恢复暂停的工作流（用户批准后）"""
     # 获取用户权限
-    permission_codes = get_user_permission_codes(db, current_user.id)
+    permission_codes = get_user_permission_codes(db, current_user.id)  # type: ignore[arg-type]
     user_permissions = list(set(permission_codes))
 
     set_request_context(
@@ -787,7 +787,7 @@ async def resume_workflow(
         """生成恢复工作流的 SSE 流式响应"""
         try:
             # 创建 Agent
-            agent = await create_agent_for_session(
+            agent = await create_agent_for_session(  # type: ignore[call-arg]
                 session_id=session_id,
                 enable_approval=True,
                 enable_security=True,

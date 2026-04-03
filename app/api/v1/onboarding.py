@@ -50,13 +50,13 @@ def _update_setting(db: Session, key: str, value: str) -> None:
     """更新系统设置值"""
     setting = db.query(SystemSetting).filter(SystemSetting.key == key).first()
     if setting:
-        setting.value = value
+        setting.value = value  # type: ignore[assignment]
     else:
         logger.warning(f"Setting not found: {key}")
 
 
 @router.get("/status", response_model=OnboardingStatusResponse)
-async def get_onboarding_status(
+async def get_onboarding_status(  # type: ignore[no-untyped-def]
     db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
 ):
     """获取初始化状态"""
@@ -87,7 +87,7 @@ async def get_onboarding_status(
 
 
 @router.post("/step1")
-async def submit_step1(
+async def submit_step1(  # type: ignore[no-untyped-def]
     data: Step1Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -101,7 +101,7 @@ async def submit_step1(
         )
 
     # 更新密码
-    current_user.hashed_password = hash_password(data.password)
+    current_user.hashed_password = hash_password(data.password)  # type: ignore[assignment]
 
     # 更新邮箱
     # 检查邮箱是否已被其他用户使用
@@ -113,7 +113,7 @@ async def submit_step1(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="邮箱已被其他用户使用"
         )
-    current_user.email = data.email
+    current_user.email = data.email  # type: ignore[assignment]
 
     # 更新飞书 ID
     # 检查飞书ID是否已被其他用户使用
@@ -125,7 +125,7 @@ async def submit_step1(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="飞书用户ID已被其他用户使用"
         )
-    current_user.feishu_user_id = data.feishu_user_id
+    current_user.feishu_user_id = data.feishu_user_id  # type: ignore[assignment]
 
     db.commit()
     logger.info(f"Admin {current_user.username} completed step 1: account settings")
@@ -134,7 +134,7 @@ async def submit_step1(
 
 
 @router.post("/step2")
-async def submit_step2(
+async def submit_step2(  # type: ignore[no-untyped-def]
     data: Step2Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -159,8 +159,8 @@ async def submit_step2(
     for setting_data in k8s_settings:
         key, value, category, name, value_type, description = setting_data[:6]
         is_sensitive = setting_data[6] if len(setting_data) > 6 else False
-        _get_or_create_setting(db, key, value, category, name, value_type, description, is_sensitive)
-        _update_setting(db, key, value)
+        _get_or_create_setting(db, key, value, category, name, value_type, description, is_sensitive)  # type: ignore[arg-type]
+        _update_setting(db, key, value)  # type: ignore[arg-type]
 
     db.commit()
     logger.info(f"Admin {current_user.username} completed step 2: Kubernetes config")
@@ -169,7 +169,7 @@ async def submit_step2(
 
 
 @router.post("/step3")
-async def submit_step3(
+async def submit_step3(  # type: ignore[no-untyped-def]
     data: Step3Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -200,7 +200,7 @@ async def submit_step3(
 
 
 @router.post("/step4")
-async def submit_step4(
+async def submit_step4(  # type: ignore[no-untyped-def]
     data: Step4Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -231,7 +231,7 @@ async def submit_step4(
 
 
 @router.post("/complete", response_model=OnboardingSummaryResponse)
-async def complete_onboarding(
+async def complete_onboarding(  # type: ignore[no-untyped-def]
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -260,7 +260,7 @@ async def complete_onboarding(
 
     return OnboardingSummaryResponse(
         account_configured=True,
-        k8s_enabled=k8s_enabled.value == "1" if k8s_enabled else False,
-        prometheus_enabled=prom_enabled.value == "1" if prom_enabled else False,
-        loki_enabled=loki_enabled.value == "1" if loki_enabled else False,
+        k8s_enabled=k8s_enabled.value == "1" if k8s_enabled else False,  # type: ignore[arg-type]
+        prometheus_enabled=prom_enabled.value == "1" if prom_enabled else False,  # type: ignore[arg-type]
+        loki_enabled=loki_enabled.value == "1" if loki_enabled else False,  # type: ignore[arg-type]
     )

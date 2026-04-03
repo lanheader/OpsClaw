@@ -24,5 +24,5 @@ class RolePermission(Base):
     # 唯一约束
     __table_args__ = (UniqueConstraint("role_id", "permission_id", name="uq_role_permission"),)
 
-    def __repr__(self):
+    def __repr__(self):  # type: ignore[no-untyped-def]
         return f"<RolePermission(role_id={self.role_id}, permission_id={self.permission_id})>"

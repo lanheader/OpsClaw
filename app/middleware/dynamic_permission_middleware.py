@@ -79,7 +79,7 @@ class DynamicPermissionMiddleware(AgentMiddleware):
 
     def __init__(
         self,
-        permissions: Set[str] = None,
+        permissions: Set[str] = None,  # type: ignore[assignment]
         user_id: Optional[int] = None,
         allow_no_permission_mode: bool = False,
     ):
@@ -143,7 +143,7 @@ class DynamicPermissionMiddleware(AgentMiddleware):
     async def awrap_tool_call(
         self,
         request: ToolCallRequest,
-        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage]],
+        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage]],  # type: ignore[override]
     ) -> ToolMessage:
         """
         在工具调用前拦截，检查权限

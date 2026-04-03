@@ -38,7 +38,7 @@ class LLMTestResponse(BaseModel):
 
 
 @router.post("/test", response_model=LLMTestResponse)
-async def test_llm_connection(
+async def test_llm_connection(  # type: ignore[no-untyped-def]
     request: LLMTestRequest,
     current_user: User = Depends(get_current_admin),
     db: Session = Depends(get_db),

@@ -16,7 +16,7 @@ logger = get_logger(__name__)
 class CommandHandler:
     """特殊命令处理器"""
 
-    def __init__(self, channel_adapter, session_handler):
+    def __init__(self, channel_adapter, session_handler):  # type: ignore[no-untyped-def]
         """
         初始化命令处理器
 

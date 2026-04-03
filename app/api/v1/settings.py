@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 @router.get("", response_model=Dict[str, List[SystemSettingResponse]])
-async def get_all_settings(
+async def get_all_settings(  # type: ignore[no-untyped-def]
     db: Session = Depends(get_db), current_user: User = Depends(get_current_admin)
 ):
     """获取所有系统设置（按分类分组）"""
@@ -34,20 +34,20 @@ async def get_all_settings(
     for setting in settings:
         category = setting.category
         if category not in grouped_settings:
-            grouped_settings[category] = []
+            grouped_settings[category] = []  # type: ignore[index]
 
         # 如果是敏感信息，不返回实际值
         setting_dict = SystemSettingResponse.model_validate(setting)
         if setting.is_sensitive and setting.value:
             setting_dict.value = "******"
 
-        grouped_settings[category].append(setting_dict)
+        grouped_settings[category].append(setting_dict)  # type: ignore[index]
 
     return grouped_settings
 
 
 @router.get("/{key}", response_model=SystemSettingResponse)
-async def get_setting(
+async def get_setting(  # type: ignore[no-untyped-def]
     key: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_admin)
 ):
     """获取单个系统设置"""
@@ -64,7 +64,7 @@ async def get_setting(
 
 
 @router.post("", response_model=SystemSettingResponse, status_code=status.HTTP_201_CREATED)
-async def create_setting(
+async def create_setting(  # type: ignore[no-untyped-def]
     setting_data: SystemSettingCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin),
@@ -89,7 +89,7 @@ async def create_setting(
 
 
 @router.put("/{key}", response_model=SystemSettingResponse)
-async def update_setting(
+async def update_setting(  # type: ignore[no-untyped-def]
     key: str,
     setting_data: SystemSettingUpdate,
     db: Session = Depends(get_db),
@@ -120,7 +120,7 @@ async def update_setting(
 
 
 @router.post("/batch", response_model=Dict[str, str])
-async def batch_update_settings(
+async def batch_update_settings(  # type: ignore[no-untyped-def]
     batch_data: SystemSettingBatchUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin),
@@ -143,15 +143,15 @@ async def batch_update_settings(
         if setting.value_type == "boolean":
             # 统一存 0/1
             if isinstance(value, bool):
-                setting.value = "1" if value else "0"
+                setting.value = "1" if value else "0"  # type: ignore[assignment]
             elif isinstance(value, str):
-                setting.value = "1" if value.lower() in ("true", "1", "yes") else "0"
+                setting.value = "1" if value.lower() in ("true", "1", "yes") else "0"  # type: ignore[assignment]
             else:
-                setting.value = "1" if value else "0"
+                setting.value = "1" if value else "0"  # type: ignore[assignment]
         elif setting.value_type == "json":
-            setting.value = json.dumps(value, ensure_ascii=False)
+            setting.value = json.dumps(value, ensure_ascii=False)  # type: ignore[assignment]
         else:
-            setting.value = str(value)
+            setting.value = str(value)  # type: ignore[assignment]
 
         updated_count += 1
 
@@ -166,7 +166,7 @@ async def batch_update_settings(
 
 
 @router.post("/init", response_model=Dict[str, str])
-async def init_default_settings(
+async def init_default_settings(  # type: ignore[no-untyped-def]
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin),
 ):
@@ -229,7 +229,7 @@ async def init_default_settings(
 
 
 @router.delete("/{key}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_setting(
+async def delete_setting(  # type: ignore[no-untyped-def]
     key: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_admin)
 ):
     """删除系统设置"""

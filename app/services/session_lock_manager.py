@@ -166,14 +166,14 @@ class SessionLockContext:
             logger.error(f"⏰ 获取会话锁超时: {self.session_id} ({self.timeout}s)")
             raise
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(self, exc_type, exc_val, exc_tb):  # type: ignore[no-untyped-def]
         if self._acquired and self._lock:
             self._lock.release()
             logger.info(f"🔓 释放会话锁: {self.session_id}")
         return False  # 不抑制异常
 
 
-async def with_session_lock(session_id: str, coro, timeout: Optional[float] = None):
+async def with_session_lock(session_id: str, coro, timeout: Optional[float] = None):  # type: ignore[no-untyped-def]
     """
     在会话锁保护下执行协程
 

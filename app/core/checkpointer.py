@@ -81,8 +81,8 @@ class SQLiteCheckpointerFactory(CheckpointerFactory):
         logger.info(f"创建 SQLite checkpointer 连接: {self.db_path}")
 
         # 建立持久连接（进程生命周期内保持）
-        self._conn = await aiosqlite.connect(self.db_path)
-        self._checkpointer = AsyncSqliteSaver(self._conn)
+        self._conn = await aiosqlite.connect(self.db_path)  # type: ignore[assignment]
+        self._checkpointer = AsyncSqliteSaver(self._conn)  # type: ignore[arg-type]
 
         # 初始化表结构（自动创建 checkpoints 和 checkpoint_writes 表）
         await self._checkpointer.setup()

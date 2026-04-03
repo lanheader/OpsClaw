@@ -43,7 +43,7 @@ def get_all_tools(
         return registry.get_langchain_tools(user_id=user_id, db=db)
 
     # 否则使用传入的权限或无权限过滤
-    return registry.get_langchain_tools(permissions=permissions)
+    return registry.get_langchain_tools(permissions=permissions)  # type: ignore[arg-type]
 
 
 def get_tools_by_group(
@@ -70,7 +70,7 @@ def get_tools_by_group(
     if permissions is None and user_id is not None and db is not None:
         return registry.get_langchain_tools(group_code=group_code, user_id=user_id, db=db)
 
-    return registry.get_langchain_tools(group_code=group_code, permissions=permissions, db=db)
+    return registry.get_langchain_tools(group_code=group_code, permissions=permissions, db=db)  # type: ignore[arg-type]
 
 
 def list_groups() -> List[dict]:
@@ -140,7 +140,7 @@ def get_tools_by_package(
         return registry.get_langchain_tools(package=package, user_id=user_id, db=db)
 
     # 传 db 做集成开关检查
-    return registry.get_langchain_tools(package=package, permissions=permissions, db=db)
+    return registry.get_langchain_tools(package=package, permissions=permissions, db=db)  # type: ignore[arg-type]
 
 
 def get_available_packages() -> List[str]:

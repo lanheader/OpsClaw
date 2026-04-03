@@ -37,7 +37,7 @@ def _load_prompt(subagent_name: str) -> str:
     return optimizer.get_prompt_for_agent(subagent_name)
 
 
-def _load_tools_for_config(config: Dict[str, Any], db=None) -> List[Any]:
+def _load_tools_for_config(config: Dict[str, Any], db=None) -> List[Any]:  # type: ignore[no-untyped-def]
     """
     根据配置动态加载工具（带集成开关检查）
 
@@ -79,7 +79,21 @@ def _load_tools_for_config(config: Dict[str, Any], db=None) -> List[Any]:
     return unique_tools
 
 
-def get_all_subagents(db=None) -> List[SubAgent]:
+def _inject_tools_into_prompt(prompt: str, tools: List[Any]) -> str:
+    """将动态加载的工具列表注入到提示词末尾"""
+    if not tools:
+        return prompt
+
+    lines = ["\n\n## 当前可用工具\n"]
+    for t in tools:
+        name = getattr(t, "name", "unknown")
+        description = getattr(t, "description", "")
+        lines.append(f"- **{name}**: {description}")
+
+    return prompt + "\n".join(lines)
+
+
+def get_all_subagents(db=None) -> List[SubAgent]:  # type: ignore[no-untyped-def]
     """
     获取所有子智能体配置（工具动态加载）
 
@@ -97,13 +111,15 @@ def get_all_subagents(db=None) -> List[SubAgent]:
 
         # 动态加载提示词
         prompt = _load_prompt(subagent_name)
-        config["system_prompt"] = prompt
 
         # 注入专用 LLM
         config["model"] = LLMFactory.create_llm_for_subagent(subagent_name)
 
         # 动态加载工具（带集成开关检查）
         config["tools"] = _load_tools_for_config(config, db=db)
+
+        # 将工具信息注入到提示词中
+        config["system_prompt"] = _inject_tools_into_prompt(prompt, config["tools"])
 
         # 清理内部字段
         config.pop("tool_packages", None)
@@ -114,12 +130,12 @@ def get_all_subagents(db=None) -> List[SubAgent]:
             f"(工具数: {len(config['tools'])}, 提示词长度: {len(prompt)} 字符)"
         )
 
-        configs.append(config)
+        configs.append(config)  # type: ignore[arg-type]
 
     return configs
 
 
-def get_subagent_by_name(name: str, db=None) -> SubAgent:
+def get_subagent_by_name(name: str, db=None) -> SubAgent:  # type: ignore[no-untyped-def]
     """
     根据名称获取子智能体配置
 

@@ -61,7 +61,7 @@ class ApprovalConfigService:
             requires_approval = metadata.risk_level == RiskLevel.HIGH
 
             # 查找现有记录
-            existing = existing_tools.get(tool_name)
+            existing = existing_tools.get(tool_name)  # type: ignore[call-overload]
 
             if existing:
                 # 更新现有记录（保留 requires_approval 的手动配置）
@@ -135,7 +135,7 @@ class ApprovalConfigService:
 
             tools_to_approve.add(config.tool_name)
 
-        return tools_to_approve
+        return tools_to_approve  # type: ignore[return-value]
 
     @staticmethod
     def set_tool_approval_enabled(
@@ -162,7 +162,7 @@ class ApprovalConfigService:
             logger.warning(f"工具不存在: {tool_name}")
             return False
 
-        config.requires_approval = requires_approval
+        config.requires_approval = requires_approval  # type: ignore[assignment]
         db.commit()
         logger.info(f"更新工具审批状态: {tool_name} -> requires_approval={requires_approval}")
         return True

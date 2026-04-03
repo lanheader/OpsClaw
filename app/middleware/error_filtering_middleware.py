@@ -49,10 +49,10 @@ class ErrorFilteringMiddleware(AgentMiddleware):
         "invalid tool",
     ]
 
-    def __init__(self):
+    def __init__(self):  # type: ignore[no-untyped-def]
         logger.info("✅ 错误消息过滤中间件已启用")
 
-    async def awrap_model_call(self, request, handler):
+    async def awrap_model_call(self, request, handler):  # type: ignore[no-untyped-def]
         """
         在 LLM 调用前过滤错误消息
 
@@ -138,7 +138,7 @@ class ErrorFilteringMiddleware(AgentMiddleware):
 
         return False
 
-    async def awrap_tool_call(self, request, handler):
+    async def awrap_tool_call(self, request, handler):  # type: ignore[no-untyped-def]
         """
         工具调用不需要过滤消息
 

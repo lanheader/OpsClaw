@@ -102,7 +102,7 @@ class ChannelContext:
         self.user_id = user_id
         self.user_permissions = user_permissions or set()
         self.message_id = message_id  # 保存原始消息ID
-        self.metadata = {}
+        self.metadata = {}  # type: ignore[var-annotated]
 
     def has_permission(self, permission: str) -> bool:
         """检查用户是否有指定权限"""
@@ -126,9 +126,9 @@ class BaseChannelAdapter(ABC):
     """
 
     # 渠道类型标识（子类必须覆盖）
-    channel_type: str = None
+    channel_type: str = None  # type: ignore[assignment]
 
-    def __init__(self, config: Dict[str, Any] = None):
+    def __init__(self, config: Dict[str, Any] = None):  # type: ignore[assignment]
         """
         初始化适配器
 
@@ -250,7 +250,7 @@ class BaseChannelAdapter(ABC):
         默认实现：
             直接返回 raw_content.get("text", "")
         """
-        return raw_content.get("text", "")
+        return raw_content.get("text", "")  # type: ignore[no-any-return]
 
     async def add_reaction(
         self,

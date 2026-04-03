@@ -63,10 +63,10 @@ class WorkflowExecution(Base):
     # 执行指标
     duration_seconds = Column(Integer, nullable=True, comment="总执行时长（秒）")
 
-    def __repr__(self):
+    def __repr__(self):  # type: ignore[no-untyped-def]
         return f"<WorkflowExecution(id={self.id}, task={self.task_id}, type={self.workflow_type}, status={self.status})>"
 
-    def to_dict(self):
+    def to_dict(self):  # type: ignore[no-untyped-def]
         """转换为字典用于 API 响应"""
         return {
             "id": self.id,
@@ -83,7 +83,7 @@ class WorkflowExecution(Base):
             "state": self.state,  # 可选包含完整状态
         }
 
-    def calculate_duration(self):
+    def calculate_duration(self):  # type: ignore[no-untyped-def]
         """如果已完成则计算并更新时长"""
         if self.completed_at and self.created_at:
             delta = self.completed_at - self.created_at

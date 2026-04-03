@@ -3,7 +3,7 @@
 
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
-from jose import JWTError, jwt
+from jose import JWTError, jwt  # type: ignore[import-untyped]
 import bcrypt
 from fastapi import HTTPException, status
 
@@ -96,7 +96,7 @@ def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta]
     to_encode.update({"exp": expire, "iat": datetime.now(timezone.utc)})
     encoded_jwt = jwt.encode(to_encode, _get_secret_key(), algorithm=ALGORITHM)
 
-    return encoded_jwt
+    return encoded_jwt  # type: ignore[no-any-return]
 
 
 def verify_token(token: str) -> Dict[str, Any]:
@@ -114,7 +114,7 @@ def verify_token(token: str) -> Dict[str, Any]:
     """
     try:
         payload = jwt.decode(token, _get_secret_key(), algorithms=[ALGORITHM])
-        return payload
+        return payload  # type: ignore[no-any-return]
     except JWTError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

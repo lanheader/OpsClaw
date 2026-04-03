@@ -39,7 +39,7 @@ class KubernetesConfigUpdate(KubernetesConfigBase):
 
     @field_validator('kubeconfig_content')
     @classmethod
-    def validate_kubeconfig_mode(cls, v, info):
+    def validate_kubeconfig_mode(cls, v, info):  # type: ignore[no-untyped-def]
         """当 auth_mode 为 kubeconfig 时，kubeconfig_content 必须提供"""
         if info.data.get('auth_mode') == 'kubeconfig' and not v:
             raise ValueError('kubeconfig 模式需要提供 kubeconfig_content')
@@ -47,7 +47,7 @@ class KubernetesConfigUpdate(KubernetesConfigBase):
 
     @field_validator('api_host', 'token')
     @classmethod
-    def validate_token_mode(cls, v, info):
+    def validate_token_mode(cls, v, info):  # type: ignore[no-untyped-def]
         """当 auth_mode 为 token 时，api_host 和 token 必须提供"""
         if info.data.get('auth_mode') == 'token':
             # 在 token 模式下检查必填字段
