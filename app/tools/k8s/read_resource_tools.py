@@ -72,7 +72,7 @@ class GetConfigMapsTool(BaseOpTool):
                 for cm in configmaps.items
             ]
             log_tool_success("get_configmaps", len(data))
-            return tool_success_response(data, "get_configmaps", source="kubernetes-sdk")
+            return await tool_success_response(data, "get_configmaps", source="kubernetes-sdk")
         except Exception as e:
             return tool_error_response(
                 e, "get_configmaps",
@@ -119,7 +119,7 @@ class GetSecretsTool(BaseOpTool):
                 for secret in secrets.items
             ]
             log_tool_success("get_secrets", len(data))
-            return tool_success_response(data, "get_secrets", source="kubernetes-sdk")
+            return await tool_success_response(data, "get_secrets", source="kubernetes-sdk")
         except Exception as e:
             return tool_error_response(
                 e, "get_secrets",
@@ -168,7 +168,7 @@ class GetPVCsTool(BaseOpTool):
                 for pvc in pvcs.items
             ]
             log_tool_success("get_pvcs", len(data))
-            return tool_success_response(data, "get_pvcs", source="kubernetes-sdk")
+            return await tool_success_response(data, "get_pvcs", source="kubernetes-sdk")
         except Exception as e:
             return tool_error_response(
                 e, "get_pvcs",
@@ -232,7 +232,7 @@ class GetNodesTool(BaseOpTool):
                 for node in nodes.items
             ]
             log_tool_success("get_nodes", len(data))
-            return tool_success_response(data, "get_nodes", source="kubernetes-sdk")
+            return await tool_success_response(data, "get_nodes", source="kubernetes-sdk")
         except Exception as e:
             return tool_error_response(
                 e, "get_nodes",
@@ -286,7 +286,7 @@ class GetEventsTool(BaseOpTool):
                 for event in events.items
             ]
             log_tool_success("get_events", len(data))
-            return tool_success_response(data, "get_events", source="kubernetes-sdk")
+            return await tool_success_response(data, "get_events", source="kubernetes-sdk")
         except Exception as e:
             return tool_error_response(
                 e, "get_events",
@@ -336,7 +336,7 @@ class GetResourceQuotasTool(BaseOpTool):
                 for quota in quotas.items
             ]
             log_tool_success("get_resource_quotas", len(data))
-            return tool_success_response(data, "get_resource_quotas", source="kubernetes-sdk")
+            return await tool_success_response(data, "get_resource_quotas", source="kubernetes-sdk")
         except Exception as e:
             return tool_error_response(
                 e, "get_resource_quotas",
@@ -411,7 +411,7 @@ class DescribeNodeTool(BaseOpTool):
                 }
             }
             log_tool_success("describe_node")
-            return tool_success_response(data, "describe_node", source="kubernetes-sdk")
+            return await tool_success_response(data, "describe_node", source="kubernetes-sdk")
         except Exception as e:
             return tool_error_response(
                 e, "describe_node",

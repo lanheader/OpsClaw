@@ -4,10 +4,9 @@ import logging
 from typing import List, Dict, Any, Optional, Set
 
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, and_
 
 from app.models.approval_config import ApprovalConfig
-from app.tools.registry import ToolRegistry, get_tool_registry
+from app.tools.registry import get_tool_registry
 from app.tools.base import RiskLevel
 
 logger = logging.getLogger(__name__)
@@ -15,6 +14,32 @@ logger = logging.getLogger(__name__)
 
 class ApprovalConfigService:
     """审批配置服务"""
+
+    @staticmethod
+    def get_user_role(user_id: Optional[int], db: Session) -> Optional[str]:
+        """
+        获取用户角色名称
+
+        Args:
+            user_id: 用户 ID
+            db: 数据库会话
+
+        Returns:
+            用户角色名称，如果不存在则返回 None
+        """
+        if user_id is None:
+            return None
+
+        from app.models.user_role import UserRole
+        from app.models.role import Role
+
+        roles = (
+            db.query(Role.name)
+            .join(UserRole, Role.id == UserRole.role_id)
+            .filter(UserRole.user_id == user_id)
+            .all()
+        )
+        return roles[0][0] if roles else None
 
     @staticmethod
     def sync_tools_to_db(db: Session) -> int:

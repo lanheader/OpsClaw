@@ -56,9 +56,7 @@ async def run_alert_workflow(task_id: str, initial_state: OpsState):  # type: ig
 
         # 创建 Agent
         agent = create_agent_for_session(  # type: ignore[call-arg]
-            session_id=task_id,
             enable_approval=True,
-            enable_security=True,
         )
 
         # 【重要】LangGraph checkpointer 需要 config 中的 thread_id

@@ -67,7 +67,7 @@ class GetDeploymentsTool(BaseOpTool):
             ]
 
             log_tool_success("get_deployments", len(data))
-            return tool_success_response(data, "get_deployments", source="kubernetes-sdk")
+            return await tool_success_response(data, "get_deployments", source="kubernetes-sdk")
 
         except Exception as e:
             return tool_error_response(
@@ -124,7 +124,7 @@ class GetStatefulSetsTool(BaseOpTool):
             ]
 
             log_tool_success("get_statefulsets", len(data))
-            return tool_success_response(data, "get_statefulsets", source="kubernetes-sdk")
+            return await tool_success_response(data, "get_statefulsets", source="kubernetes-sdk")
 
         except Exception as e:
             return tool_error_response(
@@ -169,7 +169,11 @@ class GetDaemonSetsTool(BaseOpTool):
                         if ds.status.current_number_scheduled
                         else 0
                     ),
-                    "desired_number_scheduled": ds.spec.desired_number_scheduled,
+                    "desired_number_scheduled": (
+                        ds.status.desired_number_scheduled
+                        if ds.status.desired_number_scheduled
+                        else 0
+                    ),
                     "number_ready": (
                         ds.status.number_ready
                         if ds.status.number_ready
@@ -185,7 +189,7 @@ class GetDaemonSetsTool(BaseOpTool):
             ]
 
             log_tool_success("get_daemonsets", len(data))
-            return tool_success_response(data, "get_daemonsets", source="kubernetes-sdk")
+            return await tool_success_response(data, "get_daemonsets", source="kubernetes-sdk")
 
         except Exception as e:
             return tool_error_response(

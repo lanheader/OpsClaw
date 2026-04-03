@@ -31,21 +31,18 @@ from sqlalchemy.orm import Session
 
 from app.services.approval_config_service import ApprovalConfigService
 from app.models.database import SessionLocal
-from app.models.role import Role
-from app.models.user_role import UserRole
 from app.utils.logger import get_logger, get_request_context
 
 logger = get_logger(__name__)
 
 
 # deepagents 内置工具列表（这些工具不需要审批检查）
+# 只保留只读操作，写操作需要走审批流程
 BUILTIN_TOOLS = {
-    # DeepAgents 内置工具
+    # DeepAgents 内置工具（只读）
     "write_todos",
     "task",  # subagent 委派
     "read_file",
-    "write_file",
-    "edit_file",
     "ls",
     "glob",
     "grep",
@@ -147,8 +144,8 @@ class DynamicApprovalMiddleware(AgentMiddleware):
             should_close_db = True
 
         try:
-            # 获取用户角色
-            user_role = self._get_user_role(user_id, db)
+            # 获取用户角色（委托给服务层）
+            user_role = ApprovalConfigService.get_user_role(user_id, db)
 
             # 从审批配置获取需要审批的工具
             tools_need_approval = ApprovalConfigService.get_tools_require_approval(
@@ -160,50 +157,22 @@ class DynamicApprovalMiddleware(AgentMiddleware):
                 f"需审批工具数={len(tools_need_approval)}"
             )
 
-            # 写入缓存
-            self._approval_cache[cache_key] = tools_need_approval  # type: ignore[name-defined]
             return tools_need_approval
 
         except Exception as e:
             logger.warning(f"⚠️ 加载审批配置失败: {e}，安全起见拦截所有高危险工具")
-            # 加载失败时默认拦截所有已知的危险工具
+            # 加载失败时默认拦截所有已知的危险工具（包括内置写工具）
             return {
                 "force_delete_pod", "delete_pod", "delete_deployment",
                 "delete_service", "delete_config_map", "delete_secret",
                 "restart_deployment", "scale_deployment", "update_deployment_image",
+                "write_file", "edit_file",
             }
 
         finally:
             if should_close_db:
                 db.close()
 
-    def _get_user_role(self, user_id: Optional[int], db: Session) -> Optional[str]:
-        """
-        获取用户角色
-
-        Args:
-            user_id: 用户 ID
-            db: 数据库会话
-
-        Returns:
-            用户角色名称，如果不存在则返回 None
-        """
-        if user_id is None:
-            return None
-
-        user_roles = (
-            db.query(Role.name)
-            .join(UserRole, Role.id == UserRole.role_id)
-            .filter(UserRole.user_id == user_id)
-            .all()
-        )
-
-        if user_roles:
-            role_name = user_roles[0][0]
-            logger.debug(f"🔐 获取到用户角色: {role_name}")
-            return role_name  # type: ignore[no-any-return]
-
-        return None
 
     async def aafter_model(
         self,

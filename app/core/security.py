@@ -37,12 +37,6 @@ def get_access_token_expire_days() -> int:
     return _get_access_token_expire_days()
 
 
-# 向后兼容的常量导出（延迟加载，避免模块导入时调用 get_settings）
-# 注意：这些现在需要通过函数访问，或者在使用时获取
-ACCESS_TOKEN_EXPIRE_MINUTES = None  # 已废弃，使用 get_access_token_expire_minutes()
-ACCESS_TOKEN_EXPIRE_DAYS = None  # 已废弃，使用 get_access_token_expire_days()
-
-
 def hash_password(password: str) -> str:
     """
     加密密码

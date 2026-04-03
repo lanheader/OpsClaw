@@ -135,8 +135,10 @@ def setup_logging():  # type: ignore[no-untyped-def]
     for name, level in LOGGING_LEVELS.items():
         logging_logger = logging.getLogger(name)
         logging_logger.setLevel(level)
-        # 确保 uvicorn 使用我们的 handler
-        logging_logger.handlers = [InterceptHandler()]
+        # 清除现有的 handlers，防止重复
+        logging_logger.handlers.clear()
+        # 不要为每个 logger 单独添加 handler，让它们使用根 logger 的 handler
+        logging_logger.propagate = True
 
     logger.info("✅ Loguru 日志系统初始化完成")
 

@@ -65,7 +65,7 @@ class GetServicesTool(BaseOpTool):
             ]
 
             log_tool_success("get_services", len(data))
-            return tool_success_response(data, "get_services", source="kubernetes-sdk")
+            return await tool_success_response(data, "get_services", source="kubernetes-sdk")
 
         except Exception as e:
             return tool_error_response(
@@ -131,7 +131,7 @@ class GetIngressTool(BaseOpTool):
             ]
 
             log_tool_success("get_ingress", len(data))
-            return tool_success_response(data, "get_ingress", source="kubernetes-sdk")
+            return await tool_success_response(data, "get_ingress", source="kubernetes-sdk")
 
         except Exception as e:
             return tool_error_response(

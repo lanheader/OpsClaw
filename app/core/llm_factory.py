@@ -1,43 +1,51 @@
 """
 记忆增强的 LLM 工厂类
 
-支持：
+使用简单工厂模式，支持：
 - 创建 LLM 客户端（多个提供商）
 - 创建 Embedding 客户端（向量检索）
+- 易于扩展新的 Provider
 """
 
 from langchain_core.language_models import BaseChatModel
-from langchain_openai import ChatOpenAI
-from typing import Any, Dict, Optional, List, cast
+from typing import Any, Dict, Optional, Type
 import logging
-import httpx
 import socket
 
 from app.core.config import Settings, get_settings
-
-# 尝试导入可选依赖
-try:
-    from langchain_anthropic import ChatAnthropic
-except ImportError:
-    ChatAnthropic = None  # type: ignore
-
-try:
-    from langchain_community.chat_models import ChatZhipuAI
-except ImportError:
-    ChatZhipuAI = None  # type: ignore
+from app.core.llm_providers import (
+    BaseLLMProvider,
+    OpenAIProvider,
+    ClaudeProvider,
+    ZhipuProvider,
+    OllamaProvider,
+    OpenRouterProvider,
+)
 
 logger = logging.getLogger(__name__)
 
 
 class LLMFactory:
     """
-    LLM 工厂类。
+    LLM 工厂类（简单工厂模式）
 
-    根据配置创建不同的 LLM 客户端（OpenAI, Claude, ZhipuAI, Ollama, OpenRouter）。
+    根据配置创建不同的 LLM 客户端。
+    新增 Provider 只需：
+    1. 在 llm_providers.py 中创建新的 Provider 类
+    2. 在 PROVIDER_REGISTRY 中注册
     """
 
     _client_cache: Dict[str, Any] = {}
-    _connection_tested: Dict[str, bool] = {}  # 缓存连接测试结果
+    _connection_tested: Dict[str, bool] = {}
+
+    # Provider 注册表：provider_name -> Provider 类
+    PROVIDER_REGISTRY: Dict[str, Type[BaseLLMProvider]] = {
+        "openai": OpenAIProvider,
+        "claude": ClaudeProvider,
+        "zhipu": ZhipuProvider,
+        "ollama": OllamaProvider,
+        "openrouter": OpenRouterProvider,
+    }
 
     @staticmethod
     def quick_test_connection(provider: str, settings: Optional[Settings] = None) -> bool:
@@ -135,13 +143,6 @@ class LLMFactory:
             return False
 
     @staticmethod
-    def _annotate_llm_client(client: BaseChatModel, provider: str, model_name: str) -> BaseChatModel:
-        """为 LLM 客户端挂载诊断元数据，便于中间件记录真实 provider/model。"""
-        setattr(client, "_ops_provider", provider)
-        setattr(client, "_ops_model", model_name)
-        return client
-
-    @staticmethod
     def create_llm(
         provider: Optional[str] = None,
         settings: Optional[Settings] = None,
@@ -212,252 +213,33 @@ class LLMFactory:
         settings: Settings,
         model_override: Optional[str] = None,
     ) -> BaseChatModel:
-        if provider == "openai":
-            return LLMFactory._create_openai_llm(settings, model_override=model_override)
-        elif provider == "claude":
-            return LLMFactory._create_claude_llm(settings, model_override=model_override)
-        elif provider == "zhipu":
-            return LLMFactory._create_zhipu_llm(settings, model_override=model_override)
-        elif provider == "ollama":
-            return LLMFactory._create_ollama_llm(settings, model_override=model_override)
-        elif provider == "openrouter":
-            return LLMFactory._create_openrouter_llm(settings, model_override=model_override)
-        else:
+        """
+        创建 Provider 客户端
+
+        Args:
+            provider: Provider 名称
+            settings: 配置对象
+            model_override: 可选的模型名称
+
+        Returns:
+            LLM 客户端实例
+
+        Raises:
+            ValueError: 如果 provider 不支持
+        """
+        # 从注册表获取 Provider 类
+        provider_class = LLMFactory.PROVIDER_REGISTRY.get(provider)
+
+        if provider_class is None:
+            supported = ", ".join(LLMFactory.PROVIDER_REGISTRY.keys())
             raise ValueError(
                 f"Unsupported LLM provider: {provider}. "
-                f"Supported providers: openai, claude, zhipu, ollama, openrouter"
+                f"Supported providers: {supported}"
             )
 
-    @staticmethod
-    def _create_openai_llm(
-        settings: Settings, model_override: Optional[str] = None
-    ) -> BaseChatModel:
-        """
-        创建 OpenAI LLM 客户端。
-
-        参数：
-            settings: 配置对象
-            model_override: 可选的模型名称，用于覆盖配置中的模型
-
-        返回：
-            ChatOpenAI 实例
-
-        异常：
-            ValueError: 如果 API key 未配置
-        """
-        if not settings.OPENAI_API_KEY:
-            raise ValueError(
-                "OPENAI_API_KEY is not configured. "
-                "Please set it in .env file or environment variables."
-            )
-
-        model_name = model_override or settings.OPENAI_MODEL
-        logger.info(
-            f"Creating OpenAI client: model={model_name}, "
-            f"temperature={settings.OPENAI_TEMPERATURE}, "
-            f"timeout={settings.OPENAI_REQUEST_TIMEOUT}s"
-        )
-
-        openai_kwargs = {
-            "model": model_name,
-            "temperature": settings.OPENAI_TEMPERATURE,
-            "max_tokens": settings.OPENAI_MAX_TOKENS,
-            "api_key": cast(Any, settings.OPENAI_API_KEY),
-            "base_url": settings.OPENAI_BASE_URL,
-            "timeout": settings.OPENAI_REQUEST_TIMEOUT,
-        }
-        client = cast(Any, ChatOpenAI)(**openai_kwargs)
-        return LLMFactory._annotate_llm_client(client, "openai", model_name)
-
-    @staticmethod
-    def _create_claude_llm(
-        settings: Settings, model_override: Optional[str] = None
-    ) -> BaseChatModel:
-        """
-        创建 Claude LLM 客户端。
-
-        参数：
-            settings: 配置对象
-            model_override: 可选的模型名称，用于覆盖配置中的模型
-
-        返回：
-            ChatAnthropic 实例
-
-        异常：
-            ValueError: 如果 API key 未配置
-            ImportError: 如果 langchain-anthropic 未安装
-        """
-        if ChatAnthropic is None:
-            raise ImportError(
-                "langchain-anthropic is not installed. "
-                "Please install it with: pip install langchain-anthropic"
-            )
-
-        if not settings.CLAUDE_API_KEY:
-            raise ValueError(
-                "CLAUDE_API_KEY is not configured. "
-                "Please set it in .env file or environment variables."
-            )
-
-        model_name = model_override or settings.CLAUDE_MODEL
-        logger.info(
-            f"Creating Claude client: model={model_name}, "
-            f"temperature={settings.CLAUDE_TEMPERATURE}, "
-            f"timeout={settings.CLAUDE_REQUEST_TIMEOUT}s"
-        )
-
-        claude_kwargs = {
-            "model": model_name,
-            "model_name": model_name,
-            "temperature": settings.CLAUDE_TEMPERATURE,
-            "max_tokens": settings.CLAUDE_MAX_TOKENS,
-            "api_key": settings.CLAUDE_API_KEY,
-            "timeout": settings.CLAUDE_REQUEST_TIMEOUT,
-        }
-        client = cast(Any, ChatAnthropic)(**claude_kwargs)
-        return LLMFactory._annotate_llm_client(client, "claude", model_name)
-
-    @staticmethod
-    def _create_zhipu_llm(
-        settings: Settings, model_override: Optional[str] = None
-    ) -> BaseChatModel:
-        """
-        创建智谱 AI LLM 客户端。
-
-        参数：
-            settings: 配置对象
-            model_override: 可选的模型名称，用于覆盖配置中的模型
-
-        返回：
-            ChatZhipuAI 实例
-
-        异常：
-            ValueError: 如果 API key 未配置
-            ImportError: 如果 langchain-community 未安装
-        """
-        if ChatZhipuAI is None:
-            raise ImportError(
-                "langchain-community with ZhipuAI support is not installed. "
-                "Please install it with: pip install langchain-community"
-            )
-
-        if not settings.ZHIPU_API_KEY:
-            raise ValueError(
-                "ZHIPU_API_KEY is not configured. "
-                "Please set it in .env file or environment variables."
-            )
-
-        model_name = model_override or settings.ZHIPU_MODEL
-        logger.info(
-            f"Creating ZhipuAI client: model={model_name}, "
-            f"temperature={settings.ZHIPU_TEMPERATURE}, "
-            f"timeout={settings.ZHIPU_REQUEST_TIMEOUT}s"
-        )
-
-        zhipu_kwargs = {
-            "model": model_name,
-            "temperature": settings.ZHIPU_TEMPERATURE,
-            "api_key": settings.ZHIPU_API_KEY,
-            "request_timeout": settings.ZHIPU_REQUEST_TIMEOUT,
-        }
-        client = cast(Any, ChatZhipuAI)(**zhipu_kwargs)
-        return LLMFactory._annotate_llm_client(client, "zhipu", model_name)
-
-    @staticmethod
-    def _create_ollama_llm(
-        settings: Settings, model_override: Optional[str] = None
-    ) -> BaseChatModel:
-        """
-        创建 Ollama LLM 客户端（本地部署）。
-
-        使用 Ollama 的 OpenAI 兼容 API 来支持工具调用。
-        Ollama 提供 /v1 端点，兼容 OpenAI API 格式。
-
-        参数：
-            settings: 配置对象
-            model_override: 可选的模型名称，用于覆盖配置中的模型
-
-        返回：
-            ChatOpenAI 实例（配置为使用 Ollama 的 OpenAI 兼容端点）
-
-        异常：
-            ImportError: 如果 langchain-openai 未安装
-        """
-        model_name = model_override or settings.OLLAMA_MODEL
-
-        # Ollama 的 OpenAI 兼容端点
-        # 例如: http://localhost:11434/v1
-        base_url = settings.OLLAMA_BASE_URL.rstrip("/")
-        if not base_url.endswith("/v1"):
-            base_url = f"{base_url}/v1"
-
-        logger.info(
-            f"Creating Ollama client (OpenAI compatible): model={model_name}, "
-            f"base_url={base_url}"
-        )
-
-        ollama_kwargs = {
-            "model": model_name,
-            "temperature": settings.OLLAMA_TEMPERATURE,
-            "base_url": base_url,
-            "api_key": "ollama",  # Ollama 不需要真实 API key，但 ChatOpenAI 要求提供
-            "timeout": 600,  # 大模型推理可能需要更长时间
-        }
-        client = cast(Any, ChatOpenAI)(**ollama_kwargs)
-        return LLMFactory._annotate_llm_client(client, "ollama", model_name)
-
-    @staticmethod
-    def _create_openrouter_llm(
-        settings: Settings, model_override: Optional[str] = None
-    ) -> BaseChatModel:
-        """
-        创建 OpenRouter LLM 客户端。
-
-        OpenRouter 是一个聚合服务，提供对多个 LLM 提供商的统一访问接口。
-        使用 OpenAI 兼容的 API 格式。
-
-        参数：
-            settings: 配置对象
-            model_override: 可选的模型名称，用于覆盖配置中的模型
-
-        返回：
-            ChatOpenAI 实例（配置为使用 OpenRouter）
-
-        异常：
-            ValueError: 如果 API key 未配置
-
-        支持的模型示例：
-            - anthropic/claude-3.5-sonnet
-            - anthropic/claude-3-opus
-            - openai/gpt-4-turbo
-            - openai/o1-preview
-            - google/gemini-pro-1.5
-            - meta-llama/llama-3.1-405b-instruct
-            - mistralai/mistral-large
-        """
-        if not settings.OPENROUTER_API_KEY:
-            raise ValueError(
-                "OPENROUTER_API_KEY is not configured. "
-                "Please set it in .env file or environment variables."
-            )
-
-        model_name = model_override or settings.OPENROUTER_MODEL
-        logger.info(
-            f"Creating OpenRouter client: model={model_name}, "
-            f"temperature={settings.OPENROUTER_TEMPERATURE}, "
-            f"timeout={settings.OPENROUTER_REQUEST_TIMEOUT}s"
-        )
-
-        openrouter_kwargs = {
-            "model": model_name,
-            "temperature": settings.OPENROUTER_TEMPERATURE,
-            "max_tokens": settings.OPENROUTER_MAX_TOKENS,
-            "api_key": cast(Any, settings.OPENROUTER_API_KEY),
-            "base_url": settings.OPENROUTER_BASE_URL,
-            "timeout": settings.OPENROUTER_REQUEST_TIMEOUT,
-        }
-        client = cast(Any, ChatOpenAI)(**openrouter_kwargs)
-        return LLMFactory._annotate_llm_client(client, "openrouter", model_name)
+        # 创建 Provider 实例并生成客户端
+        provider_instance = provider_class(settings)
+        return provider_instance.create_client(model_override=model_override)
 
 
 # LLM 客户端单例

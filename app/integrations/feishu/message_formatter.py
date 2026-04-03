@@ -349,6 +349,13 @@ def clean_xml_tags(content: str) -> str:
     # 定义需要清理的 XML 标签模式
     # 这些标签通常用于结构化输出，但在飞书中显示时需要移除
     xml_patterns = [
+        # 工具调用块（标签 + 后面跟随的 JSON 参数，整块移除）
+        (r'<tool_code>.*?</tool_code>\s*\{.*?\}', ''),
+        (r'<tool_name>.*?</tool_name>\s*\{.*?\}', ''),
+        # 剩余的工具调用标签（无 JSON 的情况）
+        (r'<tool_code>.*?</tool_code>', ''),
+        (r'<tool_name>.*?</tool_name>', ''),
+        (r'<tool_args>.*?</tool_args>', ''),
         # 常见的结构化标签
         (r'<result>(.*?)</result>', r'\1'),
         (r'<summary>(.*?)</summary>', r'\1'),

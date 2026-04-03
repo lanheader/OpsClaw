@@ -134,7 +134,7 @@ class QueryLogsTool(BaseOpTool):
             # 提取日志行
             logs = client._extract_log_lines(result)
 
-            return tool_success_response(
+            return await tool_success_response(
                 {
                     "query": query,
                     "logs": logs,
@@ -269,7 +269,7 @@ class QueryErrorLogsTool(BaseOpTool):
             # 提取日志行
             logs = client._extract_log_lines(result)
 
-            return tool_success_response(
+            return await tool_success_response(
                 {
                     "query": query,
                     "logs": logs,
@@ -376,7 +376,7 @@ class SearchLogsTool(BaseOpTool):
             # 提取日志行
             logs = client._extract_log_lines(result)
 
-            return tool_success_response(
+            return await tool_success_response(
                 {
                     "query": query,
                     "pattern": pattern,

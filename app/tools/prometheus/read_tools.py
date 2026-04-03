@@ -104,7 +104,7 @@ class QueryCPUUsageTool(BaseOpTool):
             if result.get("status") == "success":
                 data = result.get("data", {})
                 _log_tool_success("query_cpu_usage", result_count=len(data.get("result", [])))
-                return tool_success_response(
+                return await tool_success_response(
                     {
                         "metric": "cpu_usage",
                         "values": data.get("result", []),
@@ -180,7 +180,7 @@ class QueryMemoryUsageTool(BaseOpTool):
             if result.get("status") == "success":
                 data = result.get("data", {})
                 _log_tool_success("query_memory_usage", result_count=len(data.get("result", [])))
-                return tool_success_response(
+                return await tool_success_response(
                     {
                         "metric": "memory_usage",
                         "values": data.get("result", []),
@@ -277,7 +277,7 @@ class QueryRangeTool(BaseOpTool):
                 data = result.get("data", {})
                 result_count = len(data.get("result", []))
                 _log_tool_success("query_range", result_count=result_count)
-                return tool_success_response(
+                return await tool_success_response(
                     {
                         "query": query,
                         "values": data.get("result", []),

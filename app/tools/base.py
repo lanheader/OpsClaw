@@ -10,14 +10,20 @@ from typing import Dict, Any, Optional, List, Set, Callable
 from functools import wraps
 import traceback
 import re
+import json
+import os
 import inspect
 from typing import get_type_hints
+from datetime import datetime
 
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 from app.utils.logger import get_logger, get_request_context
 
 logger = get_logger(__name__)
+
+# 单条 ToolMessage 允许的最大字符数，超过则写文件返回摘要
+_TOOL_RESPONSE_MAX_CHARS = 3000
 
 
 # ==================== 统一错误处理 ====================
@@ -110,7 +116,98 @@ def tool_error_response(
     return response
 
 
-def tool_success_response(
+async def _make_data_summary(data: Any, tool_name: str) -> Dict[str, Any]:
+    """对大数据生成摘要，写文件，返回摘要 + 路径。"""
+    ctx = get_request_context()
+    session_id = ctx.get("session_id", "unknown")
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    # 写两份：带时间戳的归档文件 + _latest.json 固定路径（方便 LLM 记忆）
+    data_dir = os.path.join("workspace", "data", session_id)
+    os.makedirs(data_dir, exist_ok=True)
+
+    # 归档文件（带时间戳）
+    archive_file = os.path.join(data_dir, f"{tool_name}_{ts}.json")
+    # 最新文件（固定路径）
+    latest_file = os.path.join(data_dir, f"{tool_name}_latest.json")
+    # read_file 路径（相对路径）
+    agent_path = f"workspace/data/{session_id}/{tool_name}_latest.json"
+
+    try:
+        data_json = json.dumps(data, ensure_ascii=False, indent=2, default=str)
+        # 写归档
+        with open(archive_file, "w", encoding="utf-8") as f:
+            f.write(data_json)
+        # 写最新
+        with open(latest_file, "w", encoding="utf-8") as f:
+            f.write(data_json)
+    except Exception as e:
+        logger.warning(f"写数据文件失败: {e}")
+        agent_path = None
+
+    # 用 LLM 生成智能摘要
+    try:
+        from app.core.llm_factory import LLMFactory
+        llm = LLMFactory.create_llm()
+
+        data_preview = json.dumps(data, ensure_ascii=False, default=str)[:2000]
+        prompt = f"""分析以下工具返回的数据，生成结构化摘要（JSON 格式）。
+
+工具名称: {tool_name}
+数据预览（前 2000 字符）:
+{data_preview}
+
+要求：
+1. 提取关键统计信息（总数、错误数、时间范围等）
+2. 识别异常模式（高频错误、异常值、趋势）
+3. 返回 3-5 条最重要的数据样本
+4. 用中文描述发现的问题或特征
+
+返回格式（纯 JSON，不要 markdown 代码块）:
+{{
+  "total": 数据总条数,
+  "key_findings": ["发现1", "发现2"],
+  "preview": [样本1, 样本2, 样本3],
+  "statistics": {{"字段名": 统计值}}
+}}"""
+
+        response = await llm.ainvoke(prompt)
+        summary_text = response.content.strip().replace("```json", "").replace("```", "").strip()
+        summary = json.loads(summary_text)
+        summary["tool_name"] = tool_name
+
+    except Exception as e:
+        logger.warning(f"LLM 生成摘要失败: {e}，回退到规则摘要")
+        summary = {"tool_name": tool_name}
+        if isinstance(data, dict):
+            if "logs" in data:
+                logs = data["logs"]
+                summary["total"] = len(logs)
+                summary["preview"] = logs[:3]
+            elif "values" in data:
+                summary["series_count"] = len(data["values"])
+                summary["preview"] = data["values"][:3]
+            else:
+                for k, v in data.items():
+                    if isinstance(v, list):
+                        summary[f"{k}_count"] = len(v)
+                        summary[f"{k}_preview"] = v[:3]
+                    else:
+                        summary[k] = v
+        elif isinstance(data, list):
+            summary["total"] = len(data)
+            summary["preview"] = data[:3]
+        else:
+            summary["data"] = str(data)[:500]
+
+    if agent_path:
+        summary["data_file"] = agent_path
+        summary["note"] = f"完整数据已保存，如需详细分析请使用 read_file 工具读取，路径: {agent_path}（相对路径，不要加 /）"
+
+    return summary
+
+
+async def tool_success_response(
     data: Any,
     tool_name: str,
     execution_mode: str = "sdk",
@@ -136,14 +233,24 @@ def tool_success_response(
     # 记录成功日志
     if isinstance(data, list):
         logger.info(f"✅ [{session_id}] 工具 {tool_name} 执行成功: 返回 {len(data)} 条记录")
-    elif isinstance(data, dict):
-        logger.info(f"✅ [{session_id}] 工具 {tool_name} 执行成功")
     else:
         logger.info(f"✅ [{session_id}] 工具 {tool_name} 执行成功")
 
+    # 检查数据量，超过阈值则写文件返回摘要
+    try:
+        data_str = json.dumps(data, ensure_ascii=False, default=str)
+    except Exception:
+        data_str = str(data)
+
+    if len(data_str) > _TOOL_RESPONSE_MAX_CHARS:
+        logger.info(f"📦 [{session_id}] 工具 {tool_name} 数据量过大 ({len(data_str)} chars)，自动写文件返回摘要")
+        actual_data = await _make_data_summary(data, tool_name)
+    else:
+        actual_data = data
+
     response = {
         "success": True,
-        "data": data,
+        "data": actual_data,
         "tool_name": tool_name,
         "execution_mode": execution_mode,
     }

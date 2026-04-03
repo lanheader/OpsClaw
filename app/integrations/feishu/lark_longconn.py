@@ -14,7 +14,10 @@ from typing import Optional
 
 import lark_oapi as lark  # type: ignore[import]
 
-from app.integrations.feishu.callback import handle_card_action, handle_message_receive
+from app.integrations.messaging.message_processor import MessageProcessor
+from app.integrations.messaging.base_channel import IncomingMessage, MessageType, MessageAction
+from app.integrations.messaging.adapters.feishu_adapter import FeishuChannelAdapter
+from app.core.config import get_settings
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -129,33 +132,69 @@ class FeishuLongConnClient:
 
     def _async_handle_message(self, message, sender):  # type: ignore[no-untyped-def]
         """把消息处理提交到 FastAPI 主线程的 event loop（线程安全）"""
-        message_dict = {
-            "message_id": message.message_id,
-            "message_type": message.message_type,
-            "chat_id": message.chat_id,
-            "content": message.content,
-            "root_id": getattr(message, "root_id", None),
-            "parent_id": getattr(message, "parent_id", None),
-            "thread_id": getattr(message, "thread_id", None),
-            "upper_message_id": getattr(message, "upper_message_id", None),
-            "sender": {
-                "sender_id": {
-                    "user_id": (
-                        sender.sender_id.user_id if sender and sender.sender_id else "unknown"
-                    )
-                }
-            },
-        }
+        # 解析消息内容
+        try:
+            content_obj = json.loads(message.content) if message.content else {}
+        except json.JSONDecodeError:
+            content_obj = {}
+            logger.warning(f"⚠️  消息内容解析失败: {message.content}")
+
+        # 提取文本内容
+        text = ""
+        if message.message_type == "text":
+            text = content_obj.get("text", "")
+        elif message.message_type == "post":
+            # 富文本消息
+            text = json.dumps(content_obj, ensure_ascii=False)
+        else:
+            text = str(content_obj)
+
+        # 构造 IncomingMessage
+        incoming_msg = IncomingMessage(
+            channel_type="feishu",
+            channel_id="feishu_longconn",
+            message_id=message.message_id,
+            message_type=MessageType.TEXT,
+            action_type=MessageAction.RECEIVE,
+            sender_id=sender.sender_id.user_id if sender and sender.sender_id else "unknown",
+            sender_name=None,
+            chat_id=message.chat_id,
+            raw_content=content_obj,
+            raw_headers={},
+            text=text,
+            metadata={
+                "root_id": getattr(message, "root_id", None),
+                "parent_id": getattr(message, "parent_id", None),
+                "thread_id": getattr(message, "thread_id", None),
+                "upper_message_id": getattr(message, "upper_message_id", None),
+            }
+        )
+
         logger.info(
-            f"📤 提交消息处理任务: chat_id={message_dict['chat_id']}, type={message_dict['message_type']}"
+            f"📤 提交消息处理任务: chat_id={incoming_msg.chat_id}, "
+            f"type={incoming_msg.message_type}, text={text[:50]}..."
         )
 
         if self._main_loop is None or self._main_loop.is_closed():
             logger.error("❌ 主 event loop 不可用，消息处理失败")
             return
 
+        # 创建飞书适配器和消息处理器
+        async def process_message():  # type: ignore[no-untyped-def]
+            """异步处理消息"""
+            settings = get_settings()
+            feishu_config = {
+                "app_id": settings.FEISHU_APP_ID,
+                "app_secret": settings.FEISHU_APP_SECRET,
+                "verification_token": settings.FEISHU_VERIFICATION_TOKEN,
+                "encrypt_key": settings.FEISHU_ENCRYPT_KEY,
+            }
+            adapter = FeishuChannelAdapter(feishu_config)
+            processor = MessageProcessor(adapter)
+            await processor.process_message(incoming_msg)
+
         future = asyncio.run_coroutine_threadsafe(
-            handle_message_receive(message_dict),
+            process_message(),
             self._main_loop,
         )
         future.add_done_callback(
@@ -165,14 +204,6 @@ class FeishuLongConnClient:
                 else logger.info("✅ 消息处理完成")
             )
         )
-
-    def _async_handle_card_action(self, action, operator):  # type: ignore[no-untyped-def]
-        """异步处理卡片动作"""
-        try:
-            asyncio.run(handle_card_action(action, operator))
-
-        except Exception as e:
-            logger.error(f"异步处理卡片动作失败: {e}")
 
     def start(self, main_loop: Optional[asyncio.AbstractEventLoop] = None):  # type: ignore[no-untyped-def]
         """

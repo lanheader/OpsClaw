@@ -89,7 +89,7 @@ class DeletePodTool(BaseOpTool):
             }
 
             _log_tool_success("delete_pod", f"Pod {name} 已删除")
-            return tool_success_response(data, "delete_pod", source="kubernetes-sdk")
+            return await tool_success_response(data, "delete_pod", source="kubernetes-sdk")
 
         except Exception as e:
             return tool_error_response(
@@ -140,7 +140,7 @@ class DeleteDeploymentTool(BaseOpTool):
             }
 
             _log_tool_success("delete_deployment", f"Deployment {name} 已删除")
-            return tool_success_response(data, "delete_deployment", source="kubernetes-sdk")
+            return await tool_success_response(data, "delete_deployment", source="kubernetes-sdk")
 
         except Exception as e:
             return tool_error_response(
@@ -191,7 +191,7 @@ class DeleteServiceTool(BaseOpTool):
             }
 
             _log_tool_success("delete_service", f"Service {name} 已删除")
-            return tool_success_response(data, "delete_service", source="kubernetes-sdk")
+            return await tool_success_response(data, "delete_service", source="kubernetes-sdk")
 
         except Exception as e:
             return tool_error_response(
@@ -242,7 +242,7 @@ class DeleteConfigMapTool(BaseOpTool):
             }
 
             _log_tool_success("delete_configmap", f"ConfigMap {name} 已删除")
-            return tool_success_response(data, "delete_configmap", source="kubernetes-sdk")
+            return await tool_success_response(data, "delete_configmap", source="kubernetes-sdk")
 
         except Exception as e:
             return tool_error_response(
@@ -293,7 +293,7 @@ class DeleteSecretTool(BaseOpTool):
             }
 
             _log_tool_success("delete_secret", f"Secret {name} 已删除")
-            return tool_success_response(data, "delete_secret", source="kubernetes-sdk")
+            return await tool_success_response(data, "delete_secret", source="kubernetes-sdk")
 
         except Exception as e:
             return tool_error_response(
@@ -349,7 +349,7 @@ class ForceDeletePodTool(BaseOpTool):
             }
 
             _log_tool_success("force_delete_pod", f"Pod {name} 已强制删除")
-            return tool_success_response(data, "force_delete_pod", source="kubernetes-sdk")
+            return await tool_success_response(data, "force_delete_pod", source="kubernetes-sdk")
 
         except Exception as e:
             return tool_error_response(

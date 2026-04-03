@@ -126,7 +126,7 @@ class Settings(BaseSettings):
 
     # ========== 消息渠道架构配置 ==========
     USE_NEW_MESSAGING_ARCH: bool = Field(
-        default=False,
+        default=True,
         description="是否使用新的消息渠道抽象架构（True=新架构, False=旧 callback.py）"
     )
 

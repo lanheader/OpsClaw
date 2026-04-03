@@ -36,8 +36,8 @@ from app.utils.llm_helper import ensure_final_report_in_state
 logger = get_logger(__name__)
 
 # 常量
-AGENT_TIMEOUT = 600  # 2 分钟（整体执行超时）
-LLM_CALL_TIMEOUT = 300  # 单次 LLM 调用超时（秒）
+AGENT_TIMEOUT = 1200  # 20 分钟（整体执行超时）
+LLM_CALL_TIMEOUT = 600  # 单次 LLM 调用超时（10分钟）
 
 
 # ========== 数据模型 ==========
@@ -331,73 +331,74 @@ async def _inject_memory(text: str, session_id: str, user_id: int) -> str:
 
 
 def _extract_reply(final_state: Dict[str, Any], workflow_completed: bool) -> Optional[str]:
-    """提取最终回复（统一清理 XML 标签）"""
+    """
+    提取最终回复（按 DeepAgents 官方推荐方式）
+
+    优先级：
+    1. 从 messages 列表提取最后一条 AI 消息（最可靠）
+    2. 从特定字段提取（兜底）
+
+    Args:
+        final_state: 累积的最终状态
+        workflow_completed: 工作流是否完成
+
+    Returns:
+        清理后的回复文本，或 None
+    """
     try:
-        if final_state:
-            try:
-                final_state = ensure_final_report_in_state(final_state)
-            except Exception as e:
-                logger.warning(f"⚠️ ensure_final_report_in_state 失败: {e}")
+        if not final_state:
+            return None
 
-            # 按优先级提取回复
-            for key in ["formatted_response", "final_report", "final_answer", "response"]:
-                reply = final_state.get(key, "")
-                if reply:
-                    logger.info(f"📝 从 final_state 提取到回复 (key={key}, 长度: {len(reply)})")
-                    return _clean_reply(reply)
+        # 方法 1：从 messages 列表提取（推荐）
+        messages = final_state.get("messages", [])
+        if messages:
+            for msg in reversed(messages):
+                content = None
 
-            # 从 messages 中提取
-            messages = final_state.get("messages", [])
-            if messages:
-                for msg in reversed(messages):
-                    if isinstance(msg, dict):
-                        msg_type = msg.get("type", "")
+                # 处理 dict 格式
+                if isinstance(msg, dict):
+                    msg_type = msg.get("type", "")
+                    if "ai" in str(msg_type).lower():
                         content = msg.get("content", "")
-                        # 匹配 "ai", "AIMessage", "AIMessageChunk" 等
-                        if ("ai" in str(msg_type).lower()) and content:
-                            logger.info(f"📝 从 messages 提取到回复 (type={msg_type}, 长度: {len(content)})")
-                            return _clean_reply(content)
-                    elif hasattr(msg, 'type'):
-                        # langchain Message 对象
-                        if 'ai' in str(msg.type).lower():
-                            content = getattr(msg, 'content', None) or ""
-                            if content:
-                                logger.info(f"📝 从 messages 提取到回复 (AIMessage obj, 长度: {len(content)})")
-                                return _clean_reply(content)
 
-            # 调试：打印 final_state keys 和 messages 结构
-            logger.warning(f"⚠️ 未能从 final_state 提取回复. keys={list(final_state.keys())}, messages_count={len(messages) if messages else 0}")
-            if messages and len(messages) > 0:
-                last_msg = messages[-1]
-                if isinstance(last_msg, dict):
-                    logger.warning(f"  最后一条消息: type={last_msg.get('type')}, has_content={bool(last_msg.get('content'))}")
-                else:
-                    logger.warning(f"  最后一条消息: class={type(last_msg).__name__}, type={getattr(last_msg, 'type', None)}, content={getattr(last_msg, 'content', None)[:100] if getattr(last_msg, 'content', None) else None}")  # type: ignore[index]
+                # 处理 LangChain Message 对象
+                elif hasattr(msg, 'type') and 'ai' in str(msg.type).lower():
+                    # 优先使用 text 属性，兜底使用 content
+                    content = getattr(msg, 'text', None) or getattr(msg, 'content', None)
 
-            # 兜底1：从 _raw_node_state 的 messages 里提取（langchain Message 对象）
-            raw_state = final_state.get("_raw_node_state")
-            if isinstance(raw_state, dict) and "messages" in raw_state:
-                for msg in reversed(raw_state["messages"]):
-                    content = None
-                    if isinstance(msg, dict):
-                        content = msg.get("content", "")
-                    elif hasattr(msg, "content"):
-                        content = msg.content
-                    if content and isinstance(content, str) and len(content) > 5:
-                        logger.info(f"📝 从 _raw_node_state.messages 提取到回复 (长度: {len(content)})")
-                        return _clean_reply(content)
+                # 验证内容有效性
+                if content and isinstance(content, str):
+                    # 跳过包含工具调用标签的中间状态
+                    if "<tool_code>" in content or "<tool_name>" in content:
+                        logger.debug(f"⏭️ 跳过中间状态 (含工具调用标签)")
+                        continue
 
-            # 兜底2：遍历所有字段，找到第一个看起来像回复的字符串
-            for key, val in final_state.items():
-                if key in ("raw_state", "workflow_status", "intent_type", "diagnosis_round"):
+                    logger.info(f"📝 从 messages 提取到回复 (长度: {len(content)})")
+                    return _clean_reply(content)
+
+        # 方法 2：从特定字段提取（兜底）
+        for key in ["formatted_response", "final_report", "final_answer", "response"]:
+            reply = final_state.get(key, "")
+            if reply and isinstance(reply, str):
+                # 跳过包含工具调用标签的中间状态
+                if "<tool_code>" in reply or "<tool_name>" in reply:
+                    logger.debug(f"⏭️ 跳过字段 {key} (含工具调用标签)")
                     continue
-                if isinstance(val, str) and len(val) > 10 and not val.startswith("{"):
-                    logger.info(f"📝 兜底从 final_state['{key}'] 提取回复 (长度: {len(val)})")
-                    return _clean_reply(val)
+
+                logger.info(f"📝 从字段 {key} 提取到回复 (长度: {len(reply)})")
+                return _clean_reply(reply)
+
+        # 未找到有效回复
+        logger.warning(
+            f"⚠️ 未能提取回复 | "
+            f"keys={list(final_state.keys())}, "
+            f"messages_count={len(messages) if messages else 0}"
+        )
 
     except Exception as e:
         logger.error(f"❌ 提取回复失败: {e}")
 
+    # 兜底消息
     if workflow_completed:
         return "✅ 任务已完成，但没有生成文本回复。"
 
@@ -421,33 +422,82 @@ async def _execute_agent_stream(
     timeout: int = AGENT_TIMEOUT,
 ) -> AsyncGenerator[Tuple[EventType, Dict, Optional[Dict], Optional[Any]], None]:
     """
-    执行 Agent 并流式返回事件
+    执行 Agent 并流式返回事件（使用 DeepAgents v2 格式）
 
     Yields:
         (event_type, event_data, state_update, raw_node_state)
     """
     start_time = time.time()
 
-    async for event in agent.astream(input_state, config=config):
+    async for chunk in agent.astream(
+        input_state,
+        config=config,
+        stream_mode="updates",  # v2: 明确指定模式
+        version="v2",           # v2: 使用统一事件格式
+        subgraphs=True,         # v2: 启用子智能体事件
+    ):
         # 超时检查
         elapsed = time.time() - start_time
         if elapsed > timeout:
-            yield EventType.ERROR, {"message": f"处理超时（{elapsed:.0f}s）"}, None  # type: ignore[misc]
+            yield EventType.ERROR, {"message": f"处理超时（{elapsed:.0f}s）"}, None, None  # type: ignore[misc]
             return
 
-        # 调试：打印原始事件
-        if isinstance(event, dict):
-            logger.warning(f"🔍 [DEBUG STREAM] event type=dict, keys={list(event.keys())[:5]}, sample={str({k: (str(v)[:100] if not isinstance(v, (list,dict)) else f'{type(v).__name__}({len(v)})') for k,v in list(event.items())[:3]})}")
-        else:
-            logger.warning(f"🔍 [DEBUG STREAM] event type={type(event).__name__}, repr={repr(event)[:300]}")
+        # 1. 处理审批中断
+        if "__interrupt__" in chunk:
+            interrupt_data = chunk["__interrupt__"]
+            approval_info = _extract_approval_info(interrupt_data)
+            if approval_info:
+                try:
+                    from app.services.session_state_manager import SessionStateManager
+                    SessionStateManager.set_awaiting_approval(
+                        session_id, approval_data=approval_info
+                    )
+                except Exception as e:
+                    logger.warning(f"⚠️ 保存审批状态失败: {e}")
 
-        # 处理事件
-        result = _process_event(event, session_id)
-        if result:
-            yield result  # type: ignore[misc]
-        else:
-            # 调试：打印未处理的事件
-            logger.warning(f"🔍 [DEBUG] 未处理事件: keys={list(event.keys()) if isinstance(event, dict) else type(event).__name__}, content_preview={str(event)[:200]}")
+                yield (  # type: ignore[misc]
+                    EventType.APPROVAL_REQUEST,
+                    {
+                        "message": approval_info.get("message", "等待审批"),
+                        "commands": approval_info.get("commands", []),
+                        "session_id": session_id,
+                        "action_requests": approval_info.get("action_requests", []),
+                    },
+                    None,
+                    None,
+                )
+            continue
+
+        # 2. 处理 updates 事件（节点状态更新）
+        chunk_type = chunk.get("type") if isinstance(chunk, dict) else None
+        if chunk_type == "updates":
+            chunk_data = chunk.get("data", {})
+            for node_name, node_state in chunk_data.items():
+                # 跳过中间件事件和内部节点
+                if "Middleware" in node_name or node_name.startswith("__"):
+                    logger.debug(f"⏭️ 跳过中间件/内部节点事件: {node_name}")
+                    continue
+
+                status_msg = _get_status_message(node_name)
+                state_update = _extract_state_from_node(node_state)
+
+                logger.info(f"📍 节点 {node_name} 执行完成")
+
+                yield (  # type: ignore[misc]
+                    EventType.STATUS,
+                    {"status": "processing", "message": status_msg},
+                    state_update,
+                    node_state,
+                )
+
+        # 3. 处理 error 事件
+        elif chunk_type == "error":
+            yield (  # type: ignore[misc]
+                EventType.ERROR,
+                {"message": chunk.get("error", "未知错误")},
+                None,
+                None,
+            )
 
 
 class AgentChatService:
@@ -466,7 +516,14 @@ class AgentChatService:
         self,
         request: ChatRequest,
     ) -> AsyncGenerator[StreamEvent, None]:
-        """流式处理消息（用于 Web SSE）"""
+        """
+        流式处理消息（用于 Web SSE）
+
+        使用 DeepAgents 官方 v2 组合模式：
+        - stream_mode=["updates", "messages"]
+        - updates: 追踪节点状态、检测审批中断
+        - messages: 实时 token 流式输出（主智能体，ns=()）
+        """
         logger.info(
             f"🚀 [AgentChatService] 开始流式处理: "
             f"session={request.session_id}, channel={request.channel.value}"
@@ -474,67 +531,120 @@ class AgentChatService:
 
         final_state: Dict[str, Any] = {}
         workflow_completed = False
-        full_response = ""
+        streamed_content = ""
 
         try:
-            # 发送处理中状态
             yield StreamEvent(
                 type=EventType.STATUS,
                 data={"status": "processing", "message": "🤖 Agent 正在分析您的请求..."}
             )
 
-            # 使用会话锁保护处理过程
             async with SessionLockContext(request.session_id, timeout=AGENT_TIMEOUT):
                 logger.info(f"🔒 获取会话锁成功: {request.session_id}")
 
-                # 准备并执行
                 agent, input_state, config = await self._prepare_agent(request)
 
-                # 使用 asyncio.timeout 保护整体执行时间
                 try:
                     async with asyncio.timeout(AGENT_TIMEOUT):
-                        async for event_type, event_data, state_update in _execute_agent_stream(  # type: ignore[misc]
-                            agent, input_state, config, request.session_id
+                        async for chunk in agent.astream(
+                            input_state,
+                            config=config,
+                            stream_mode=["updates", "messages"],  # 官方组合模式
+                            version="v2",
+                            subgraphs=True,
                         ):
-                            # 发送状态更新
-                            if event_type == EventType.STATUS:
-                                yield StreamEvent(type=EventType.STATUS, data=event_data)
+                            chunk_type = chunk.get("type") if isinstance(chunk, dict) else None
 
-                            # 处理审批中断
-                            elif event_type == EventType.APPROVAL_REQUEST:
-                                yield StreamEvent(type=EventType.APPROVAL_REQUEST, data=event_data)
-                                return
+                            # 1. 检测审批中断
+                            if "__interrupt__" in chunk:
+                                interrupt_data = chunk["__interrupt__"]
+                                approval_info = _extract_approval_info(interrupt_data)
+                                if approval_info:
+                                    try:
+                                        from app.services.session_state_manager import SessionStateManager
+                                        SessionStateManager.set_awaiting_approval(
+                                            session_id=request.session_id,
+                                            approval_data=approval_info,
+                                        )
+                                    except Exception as e:
+                                        logger.warning(f"⚠️ 保存审批状态失败: {e}")
+                                    yield StreamEvent(
+                                        type=EventType.APPROVAL_REQUEST,
+                                        data={
+                                            "message": approval_info.get("message", "等待审批"),
+                                            "commands": approval_info.get("commands", []),
+                                            "session_id": request.session_id,
+                                            "action_requests": approval_info.get("action_requests", []),
+                                        },
+                                    )
+                                    return
 
-                            # 更新 final_state
-                            if state_update:
-                                final_state.update(state_update)
-                                workflow_completed = True
+                            # 2. updates 事件：追踪节点状态
+                            elif chunk_type == "updates":
+                                for node_name, node_state in chunk.get("data", {}).items():
+                                    if "Middleware" in node_name or node_name.startswith("__"):
+                                        logger.debug(f"⏭️ 跳过中间件节点: {node_name}")
+                                        continue
+                                    logger.info(f"📍 节点 {node_name} 执行完成")
+                                    yield StreamEvent(
+                                        type=EventType.STATUS,
+                                        data={"status": "processing", "message": _get_status_message(node_name)},
+                                    )
+                                    state_update = _extract_state_from_node(node_state)
+                                    if state_update:
+                                        final_state.update(state_update)
+                                        workflow_completed = True
+
+                            # 3. messages 事件：实时 token 流式输出（官方推荐）
+                            elif chunk_type == "messages":
+                                ns = chunk.get("ns", ())
+                                # 只流式输出主智能体的内容（ns 为空元组表示主智能体）
+                                if not ns:
+                                    message_chunk, _metadata = chunk["data"]
+                                    content = getattr(message_chunk, "content", "") or ""
+                                    # 跳过包含工具调用标签的中间状态
+                                    if content and "<tool_code>" not in content and "<tool_name>" not in content:
+                                        streamed_content += content
+                                        yield StreamEvent(
+                                            type=EventType.CHUNK,
+                                            data={"content": content},
+                                        )
+
                 except asyncio.TimeoutError:
                     logger.error(f"⏰ Agent 执行超时: session={request.session_id}")
                     yield StreamEvent(
                         type=EventType.ERROR,
-                        data={"message": f"Agent 执行超时（{AGENT_TIMEOUT}s），请稍后重试"}
+                        data={"message": f"Agent 执行超时（{AGENT_TIMEOUT}s），请稍后重试"},
                     )
                     return
 
-                # 提取最终回复
-                full_response = _extract_reply(final_state, workflow_completed) or ""
-
             logger.info(f"🔓 释放会话锁: {request.session_id}")
 
-            # 发送回复
-            if full_response:
-                yield StreamEvent(type=EventType.CHUNK, data={"content": full_response})
+            # 如果 messages 流式已输出内容，直接 DONE
+            if streamed_content:
                 yield StreamEvent(
                     type=EventType.DONE,
                     data={
                         "message_id": None,
                         "final_state": final_state,
-                        "workflow_completed": workflow_completed
-                    }
+                        "workflow_completed": workflow_completed,
+                    },
                 )
             else:
-                yield StreamEvent(type=EventType.ERROR, data={"message": "未能生成有效回复"})
+                # messages 流式无内容时，从 final_state 提取（兜底）
+                full_response = _extract_reply(final_state, workflow_completed) or ""
+                if full_response:
+                    yield StreamEvent(type=EventType.CHUNK, data={"content": full_response})
+                    yield StreamEvent(
+                        type=EventType.DONE,
+                        data={
+                            "message_id": None,
+                            "final_state": final_state,
+                            "workflow_completed": workflow_completed,
+                        },
+                    )
+                else:
+                    yield StreamEvent(type=EventType.ERROR, data={"message": "未能生成有效回复"})
 
         except Exception as e:
             logger.exception(f"❌ 流式处理失败: {e}")

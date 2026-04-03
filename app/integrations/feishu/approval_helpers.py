@@ -134,10 +134,8 @@ async def handle_approval_response(  # type: ignore[no-untyped-def]
 
     try:
         # 创建 Agent
-        agent = await create_agent_for_session(  # type: ignore[call-arg]
-            session_id=session_id,
+        agent = await create_agent_for_session(
             enable_approval=True,
-            enable_security=True,
         )
 
         # 获取线程配置

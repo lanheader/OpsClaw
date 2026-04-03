@@ -1,30 +1,66 @@
 import os
 from collections import defaultdict
-from typing import Any, Optional, Set, Dict, List
+from typing import Any, Optional, Set, List
 
 from deepagents import create_deep_agent, SubAgent
 from deepagents.backends.filesystem import FilesystemBackend
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, ToolMessage
 from sqlalchemy.orm import Session
 
 from app.middleware.error_filtering_middleware import ErrorFilteringMiddleware
 from app.middleware.logging_middleware import LoggingMiddleware
 from app.middleware.dynamic_permission_middleware import DynamicPermissionMiddleware
 from app.middleware.dynamic_approval_middleware import DynamicApprovalMiddleware
-from langchain.agents.middleware.summarization import SummarizationMiddleware
 from app.core.llm_factory import LLMFactory
 from app.core.checkpointer import get_checkpointer
 from app.services.unified_prompt_optimizer import get_prompt_optimizer
 from app.tools.registry import get_tool_registry
 from app.utils.logger import get_logger
 from app.memory import get_langgraph_store
-from app.core.constants import MiddlewareConfig
+from app.deepagents.subagents import get_all_subagents
+
 
 logger = get_logger(__name__)
 
+FILE_OUTPUT_PROMPT = """
+<language_rule>
+- 你必须始终使用中文（简体中文）回复用户
+- 所有分析报告、诊断结果、修复建议都必须使用中文
+- 工具调用参数保持英文（如 namespace、label 等），但回复内容的描述必须用中文
+- 专业术语可以保留英文原文，但需附中文解释（如 CPU 使用率、OOM 等）
+</language_rule>
 
-# ========== 组件加载函数 ==========
+<file_output>
+完成分析后，你可以使用 `write_file` 工具生成报告文件。
+
+**重要：路径必须使用相对路径，不要加前导斜杠 /**
+
+**write_file 工具参数：**
+- file_path: 文件路径（相对路径，不要加 /）
+- content: 文件内容
+
+正确示例：
+- write_file(file_path="workspace/reports/2026-04-03/sess_abc_diagnosis.md", content="...")
+- write_file(file_path="workspace/runbooks/pod_crash.md", content="...")
+- write_file(file_path="workspace/exports/sess_abc_data.json", content="...")
+
+错误示例（不要这样写）：
+- ❌ write_file(path="workspace/reports/...", content="...")  # 参数名错误，应该是 file_path
+- ❌ write_file(file_path="/workspace/reports/...", content="...")  # 不要用绝对路径
+- ❌ write_file(file_path="reports/...", content="...")  # 缺少 workspace/ 前缀
+
+工具采集的大数据已自动保存到 workspace/data/{session_id}/ 目录。
+如需读取完整数据，使用 read_file 工具，路径格式：workspace/data/{session_id}/{tool_name}_latest.json
+
+报告格式使用 Markdown，包含：
+1. 问题摘要
+2. 根因分析
+3. 证据（工具调用结果）
+4. 修复建议
+5. 验证步骤
+</file_output>
+"""
+
 
 def _get_llm(llm: Optional[BaseChatModel] = None) -> BaseChatModel:
     """获取 LLM 实例"""
@@ -35,8 +71,6 @@ def _get_llm(llm: Optional[BaseChatModel] = None) -> BaseChatModel:
 
 def _load_all_subagents(db: Optional[Session] = None) -> List[SubAgent]:
     """加载所有 Subagent 列表（工具按集成开关动态过滤）"""
-    from app.deepagents.subagents import get_all_subagents
-
     subagents = get_all_subagents(db=db)
 
     # 日志输出
@@ -121,45 +155,21 @@ def _get_skills_config() -> tuple:
     skills_dir = os.path.join(project_root, "workspace", "skills")
     has_skills = os.path.isdir(skills_dir)
 
+    # 始终返回 FilesystemBackend，否则 write_file 会写入内存（StateBackend）
+    backend = FilesystemBackend(root_dir=project_root, virtual_mode=True)
+
     if has_skills:
         logger.info(f"📋 Skills 目录: {skills_dir}")
         return (
             project_root,
             skills_dir,
             True,
-            FilesystemBackend(root_dir=project_root, virtual_mode=False),
+            backend,
             ["workspace/skills/"]
         )
 
-    return project_root, skills_dir, False, None, None
+    return project_root, skills_dir, False, backend, None
 
-
-# 文件输出指令（添加到 system_prompt 末尾）
-FILE_OUTPUT_PROMPT = """
-<language_rule>
-- 你必须始终使用中文（简体中文）回复用户
-- 所有分析报告、诊断结果、修复建议都必须使用中文
-- 工具调用参数保持英文（如 namespace、label 等），但回复内容的描述必须用中文
-- 专业术语可以保留英文原文，但需附中文解释（如 CPU 使用率、OOM 等）
-</language_rule>
-
-<file_output>
-完成分析后，你可以使用 `write_file` 工具生成报告文件：
-- 诊断报告保存到: /workspace/reports/{YYYY-MM-DD}/{session_id}_diagnosis.md
-- Runbook 保存到: /workspace/runbooks/{problem_type}.md
-- 分析数据导出到: /workspace/exports/{session_id}_data.json
-
-报告格式使用 Markdown，包含：
-1. 问题摘要
-2. 根因分析
-3. 证据（工具调用结果）
-4. 修复建议
-5. 验证步骤
-</file_output>
-"""
-
-
-# ========== 基础 Agent 创建（应用启动时调用一次） ==========
 
 async def create_base_agent(user_id: Optional[int] = None, db: Optional[Session] = None) -> Any:
     """
@@ -191,7 +201,7 @@ async def create_base_agent(user_id: Optional[int] = None, db: Optional[Session]
     _, _, _, backend, skills = _get_skills_config()
 
     # 5. 确保输出目录存在
-    for output_dir in ["reports", "runbooks", "exports"]:
+    for output_dir in ["workspace/reports", "workspace/runbooks", "workspace/exports", "workspace/data"]:
         os.makedirs(os.path.join(project_root, output_dir), exist_ok=True)
 
     # 获取需要审批的工具（从已加载的工具列表中筛选）
@@ -200,19 +210,11 @@ async def create_base_agent(user_id: Optional[int] = None, db: Optional[Session]
     try:
         from app.services.approval_config_service import ApprovalConfigService
 
-        # 查用户角色
+        # 查用户角色（委托给服务层）
         user_role = None
         if user_id is not None and db is not None:
             try:
-                from app.models.user_role import UserRole
-                from app.models.role import Role
-                roles = (
-                    db.query(Role.name)
-                    .join(UserRole, Role.id == UserRole.role_id)
-                    .filter(UserRole.user_id == user_id)
-                    .all()
-                )
-                user_role = roles[0][0] if roles else None
+                user_role = ApprovalConfigService.get_user_role(user_id, db)
             except Exception as e:
                 logger.warning(f"获取用户角色失败: {e}")
 
@@ -229,6 +231,8 @@ async def create_base_agent(user_id: Optional[int] = None, db: Optional[Session]
                 _db, user_role=user_role
             )
             # 关键：只对用户可用的工具中的需审批工具设置 interrupt_on
+            # 注意：DeepAgents 内置工具（write_file, edit_file）不在 tool_names 中，
+            # 它们的审批由 DynamicApprovalMiddleware 处理，不走 interrupt_on 机制
             for tool_name in tools_need_approval:
                 if tool_name in tool_names:
                     interrupt_on[tool_name] = True
@@ -251,18 +255,10 @@ async def create_base_agent(user_id: Optional[int] = None, db: Optional[Session]
     custom_middleware = [
         ErrorFilteringMiddleware(),
         LoggingMiddleware(),
-        # 消息摘要中间件：防止 token 超长（使用 MiddlewareConfig 配置）
-        SummarizationMiddleware(
-            model=llm,  # 必填参数：用于生成摘要的 LLM
-            trigger=("messages", MiddlewareConfig.COMPRESSION_THRESHOLD),  # 超过 30 条消息触发摘要
-            keep=("messages", MiddlewareConfig.MAX_FULL_MESSAGES),  # 保留最近 20 条完整消息
-        ),
-        # 权限中间件：从请求上下文获取权限，检查工具调用权限
         DynamicPermissionMiddleware(),
-        # 审批中间件：日志记录模式（实际拦截由 interrupt_on 保证）
         DynamicApprovalMiddleware(),
     ]
-    logger.info("🔧 已加载中间件: 错误过滤、日志记录、消息摘要、权限检查、审批检查")
+    logger.info("🔧 已加载中间件: 错误过滤、日志记录、权限检查、审批检查")
 
     # 7. 从数据库加载 system_prompt（优先数据库，降级到默认提示词）
     prompt_optimizer = get_prompt_optimizer()
@@ -298,21 +294,18 @@ async def create_base_agent(user_id: Optional[int] = None, db: Optional[Session]
         model=llm,
         system_prompt=system_prompt,
         tools=tools,
-        subagents=subagents,  # type: ignore[arg-type]
+        subagents=subagents,
         middleware=custom_middleware,
         checkpointer=checkpointer,
         store=store,
         backend=backend,
         skills=skills,
-        interrupt_on=interrupt_on if interrupt_on else None,  # type: ignore[arg-type]
+        interrupt_on=interrupt_on if interrupt_on else None,
     )
 
     logger.info("✅ Agent 创建完成")
     return agent
 
-
-
-# ========== 动态 Agent 包装器 ==========
 
 class DynamicAgentWrapper:
     """
@@ -414,8 +407,6 @@ def _ensure_final_report(state: dict) -> dict:
     from app.utils.llm_helper import ensure_final_report_in_state
     return ensure_final_report_in_state(state)
 
-
-# ========== 主入口函数（兼容接口） ==========
 
 async def get_ops_agent(
     user_permissions: Optional[Set[str]] = None,

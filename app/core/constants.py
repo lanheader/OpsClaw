@@ -5,23 +5,17 @@
 """
 
 from enum import Enum
-from typing import List
-
-
-# ==================== 严重程度枚举 ====================
 
 class Severity(str, Enum):
-    """严重程度"""
+    """严重程度枚举"""
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
     CRITICAL = "critical"
 
 
-# ==================== 任务状态枚举 ====================
-
 class TaskStatus(str, Enum):
-    """任务状态"""
+    """任务状态枚举"""
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
@@ -29,20 +23,15 @@ class TaskStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
-# ==================== 风险等级枚举 ====================
-
 class RiskLevel(str, Enum):
-    """风险等级"""
+    """风险等级枚举"""
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
     CRITICAL = "critical"
 
-
-# ==================== 关键词常量 ====================
-
 class AnalysisKeywords(str, Enum):
-    """分析关键词"""
+    """分析关键词（关键词常量）"""
     CONCLUSION = "结论"
     SUGGESTION = "建议"
     RECOMMENDATION = "建议"
@@ -63,9 +52,6 @@ SENTENCE_ANALYSIS_KEYWORDS = [
     AnalysisKeywords.CAUSE.value,
 ]
 
-
-# ==================== 故障处理关键词 ====================
-
 class IncidentKeywords(str, Enum):
     """故障处理关键词"""
     ALERT = "告警"
@@ -81,8 +67,6 @@ class IncidentKeywords(str, Enum):
 # 用于快速检查是否是故障处理
 INCIDENT_KEYWORDS_LIST = [kw.value for kw in IncidentKeywords]
 
-
-# ==================== 中间件配置 ====================
 
 class MiddlewareConfig:
     """中间件配置"""
@@ -100,8 +84,6 @@ class MiddlewareConfig:
     MAX_HISTORY_SIZE = 1000     # 最大历史记录数
 
 
-# ==================== 向量存储配置 ====================
-
 class VectorStoreConfig:
     """向量存储配置"""
 
@@ -109,8 +91,6 @@ class VectorStoreConfig:
     MAX_SEARCH_RESULTS = 100    # 最大搜索结果数
     SIMILARITY_THRESHOLD = 0.7  # 默认相似度阈值
 
-
-# ==================== LLM 调用配置 ====================
 
 class LLMConfig:
     """LLM 调用配置"""
@@ -126,8 +106,6 @@ class LLMConfig:
     MAX_TOKENS = 4096
     TEMPERATURE = 0.7
 
-
-# ==================== 辅助函数 ====================
 
 def is_incident_handling(query: str) -> bool:
     """判断查询是否与故障处理相关"""

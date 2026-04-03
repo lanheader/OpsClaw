@@ -110,7 +110,7 @@ class GetConversationHistoryTool(BaseOpTool):
             # 构建摘要
             user_questions = [msg["content"] for msg in history if msg["role"] == "user"]
 
-            return tool_success_response(
+            return await tool_success_response(
                 data={
                     "session_id": session_id,
                     "total_messages": len(history),
@@ -221,7 +221,7 @@ class ListUserSessionsTool(BaseOpTool):
 
             db.close()
 
-            return tool_success_response(
+            return await tool_success_response(
                 data={
                     "total_sessions": len(result),
                     "sessions": result,
@@ -316,7 +316,7 @@ class SearchConversationTool(BaseOpTool):
 
             db.close()
 
-            return tool_success_response(
+            return await tool_success_response(
                 data={
                     "keyword": keyword,
                     "matches": len(matches),

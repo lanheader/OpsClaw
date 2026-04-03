@@ -76,7 +76,7 @@ class GetPodsTool(BaseOpTool):
             ]
 
             log_tool_success("get_pods", len(data))
-            return tool_success_response(data, "get_pods", source="kubernetes-sdk")
+            return await tool_success_response(data, "get_pods", source="kubernetes-sdk")
 
         except Exception as e:
             return tool_error_response(
@@ -128,7 +128,7 @@ class GetPodTool(BaseOpTool):
             }
 
             log_tool_success("get_pod")
-            return tool_success_response(data, "get_pod", source="kubernetes-sdk")
+            return await tool_success_response(data, "get_pod", source="kubernetes-sdk")
 
         except Exception as e:
             return tool_error_response(
@@ -181,7 +181,7 @@ class GetPodLogsTool(BaseOpTool):
             }
 
             log_tool_success("get_pod_logs", len(log_lines))
-            return tool_success_response(data, "get_pod_logs", source="kubernetes-sdk")
+            return await tool_success_response(data, "get_pod_logs", source="kubernetes-sdk")
 
         except Exception as e:
             error_msg = str(e)
@@ -243,7 +243,7 @@ class GetPodEventsTool(BaseOpTool):
             ]
 
             log_tool_success("get_pod_events", len(data))
-            return tool_success_response(data, "get_pod_events", source="kubernetes-sdk")
+            return await tool_success_response(data, "get_pod_events", source="kubernetes-sdk")
 
         except Exception as e:
             return tool_error_response(
@@ -401,7 +401,7 @@ class DescribePodTool(BaseOpTool):
                 data["volumes"].append(volume_info)
 
             log_tool_success("describe_pod")
-            return tool_success_response(data, "describe_pod", source="kubernetes-sdk")
+            return await tool_success_response(data, "describe_pod", source="kubernetes-sdk")
 
         except Exception as e:
             return tool_error_response(

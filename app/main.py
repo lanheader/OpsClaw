@@ -2,17 +2,40 @@
 """FastAPI application entry point for ops-agent-langgraph"""
 
 import logging
-import sys
 import os
+import sys
 from contextlib import asynccontextmanager
 
-# ============ 第一优先级：尽早抑制噪音日志（在任何导入之前）============
-# 很多第三方库在导入时就输出 DEBUG 日志，需要尽早抑制
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
+from app.api.v1 import alert
+from app.api.v1 import approval_config
+from app.api.v1 import auth
+from app.api.v1 import chat
+from app.api.v1 import feishu
+from app.api.v1 import inspection
+from app.api.v1 import integrations
+from app.api.v1 import knowledge_base
+from app.api.v1 import llm
+from app.api.v1 import messaging
+from app.api.v1 import onboarding
+from app.api.v1 import permissions
+from app.api.v1 import prompts
+from app.api.v1 import roles
+from app.api.v1 import scheduled_tasks
+from app.api.v1 import settings as settings_api
+from app.api.v1 import tools
+from app.api.v1 import users
+from app.api.v1 import workflow
+from app.utils.logger import RequestContextFilter, ContextFormatter
+from app.utils.logger import _suppress_third_party_logs
+from app.utils.loguru_config import setup_logging as setup_loguru, logger as loguru_logger
 
 # 设置 LiteLLM 日志级别（通过环境变量）
 os.environ.setdefault("LITELLM_LOG", "WARNING")
 
-# 设置根日志级别为 WARNING，避免导入时的噪音
 logging.getLogger().setLevel(logging.WARNING)
 
 # 抑制特定库的日志
@@ -27,7 +50,6 @@ logger = None  # 初始化 logger 变量
 
 if USE_LOGURU:
     try:
-        from app.utils.loguru_config import setup_logging as setup_loguru, logger as loguru_logger
         setup_loguru()
         logger = loguru_logger
     except ImportError:
@@ -43,51 +65,22 @@ if not USE_LOGURU or logger is None:
 from app.core.config import get_settings
 settings = get_settings()
 
-# ============ 第三优先级：导入其他模块 ============
-from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-
-from app.api.v1 import auth
-from app.api.v1 import feishu
-from app.api.v1 import integrations
-from app.api.v1 import llm
-from app.api.v1 import permissions
-from app.api.v1 import roles
-from app.api.v1 import settings as settings_api
-from app.api.v1 import users
-from app.api.v1 import approval_config
-from app.api.v1 import alert
-from app.api.v1 import chat
-from app.api.v1 import inspection
-from app.api.v1 import workflow
-from app.api.v1 import knowledge_base
-from app.api.v1 import messaging
-from app.api.v1 import tools
-from app.api.v1 import prompts
-from app.api.v1 import scheduled_tasks
-from app.api.v1 import onboarding
-from app.utils.logger import RequestContextFilter, ContextFormatter
-
-# ============ 完善日志系统配置 ============
-# 在所有模块导入后，完善日志配置
-
 if USE_LOGURU:
-    # Loguru 已经在前面设置好了
-    logger.info("🚀 应用启动 - 使用 Loguru 日志系统")  # type: ignore[union-attr]
+    logger.info("🚀 应用启动 - 使用 loguru 日志系统")
 else:
-    # 完善标准 logging 配置（带请求上下文支持）
-    from app.utils.logger import _suppress_third_party_logs
     _suppress_third_party_logs()
 
     # 创建根日志记录器
     root_logger = logging.getLogger()
     root_logger.setLevel(getattr(logging, settings.LOG_LEVEL))
 
-    # 清除之前的临时 handler
+    # 清除之前的所有 handler（防止重复）
     root_logger.handlers.clear()
 
-    # 创建控制台处理器
+    # 防止日志传播到父记录器（避免重复）
+    root_logger.propagate = False
+
+    # 创建控制台处理器（只添加一次）
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(getattr(logging, settings.LOG_LEVEL))
 

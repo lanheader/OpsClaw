@@ -102,7 +102,7 @@ class RestartDeploymentTool(BaseOpTool):
             }
 
             _log_tool_success("restart_deployment", f"Deployment {name} 已触发重启")
-            return tool_success_response(data, "restart_deployment", source="kubernetes-sdk")
+            return await tool_success_response(data, "restart_deployment", source="kubernetes-sdk")
 
         except Exception as e:
             return tool_error_response(
@@ -162,7 +162,7 @@ class ScaleDeploymentTool(BaseOpTool):
             }
 
             _log_tool_success("scale_deployment", f"副本数调整为 {replicas}")
-            return tool_success_response(data, "scale_deployment", source="kubernetes-sdk")
+            return await tool_success_response(data, "scale_deployment", source="kubernetes-sdk")
 
         except Exception as e:
             return tool_error_response(
@@ -251,7 +251,7 @@ class UpdateDeploymentImageTool(BaseOpTool):
             }
 
             _log_tool_success("update_deployment_image", f"镜像更新为 {image}")
-            return tool_success_response(data, "update_deployment_image", source="kubernetes-sdk")
+            return await tool_success_response(data, "update_deployment_image", source="kubernetes-sdk")
 
         except Exception as e:
             return tool_error_response(
