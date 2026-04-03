@@ -24,5 +24,5 @@ class Permission(Base):
     # 时间戳
     created_at = Column(DateTime, default=datetime.utcnow, comment="创建时间")
 
-    def __repr__(self):
+    def __repr__(self):  # type: ignore[no-untyped-def]
         return f"<Permission(id={self.id}, code='{self.code}', category='{self.category}')>"

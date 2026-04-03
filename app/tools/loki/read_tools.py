@@ -24,7 +24,7 @@ from app.utils.logger import get_logger, get_request_context
 logger = get_logger(__name__)
 
 
-def _log_tool_start(tool_name: str, **kwargs):
+def _log_tool_start(tool_name: str, **kwargs):  # type: ignore[no-untyped-def]
     """记录工具开始执行的日志"""
     ctx = get_request_context()
     session_id = ctx.get('session_id', 'no-sess')
@@ -32,7 +32,7 @@ def _log_tool_start(tool_name: str, **kwargs):
     logger.info(f"🔧 [{session_id}] 执行工具: {tool_name} | 参数: {params}")
 
 
-def _log_tool_success(tool_name: str, result_count: int = None):
+def _log_tool_success(tool_name: str, result_count: int = None):  # type: ignore[assignment]
     """记录工具执行成功的日志"""
     ctx = get_request_context()
     session_id = ctx.get('session_id', 'no-sess')
@@ -60,11 +60,11 @@ class QueryLogsTool(BaseOpTool):
     执行 LogQL 查询语句获取日志。
     """
 
-    def __init__(self, db=None):
+    def __init__(self, db=None):  # type: ignore[no-untyped-def]
         self.db = db
         self.fallback = get_loki_fallback()
 
-    async def execute(
+    async def execute(  # type: ignore[no-untyped-def]
         self,
         query: str,
         limit: int = 1000,
@@ -91,7 +91,7 @@ class QueryLogsTool(BaseOpTool):
                     end=end or "now"
                 )
                 _log_tool_success("query_logs")
-                return result
+                return result  # type: ignore[no-any-return]
             except Exception as fallback_error:
                 return tool_error_response(
                     fallback_error, "query_logs",
@@ -199,11 +199,11 @@ class QueryErrorLogsTool(BaseOpTool):
     快速查询错误级别的日志。
     """
 
-    def __init__(self, db=None):
+    def __init__(self, db=None):  # type: ignore[no-untyped-def]
         self.db = db
         self.fallback = get_loki_fallback()
 
-    async def execute(
+    async def execute(  # type: ignore[no-untyped-def]
         self,
         namespace: Optional[str] = None,
         app: Optional[str] = None,
@@ -236,7 +236,7 @@ class QueryErrorLogsTool(BaseOpTool):
                     limit=limit
                 )
                 _log_tool_success("query_error_logs")
-                return result
+                return result  # type: ignore[no-any-return]
             except Exception as fallback_error:
                 return tool_error_response(
                     fallback_error, "query_error_logs",
@@ -303,11 +303,11 @@ class SearchLogsTool(BaseOpTool):
     在日志中搜索指定的字符串或正则表达式。
     """
 
-    def __init__(self, db=None):
+    def __init__(self, db=None):  # type: ignore[no-untyped-def]
         self.db = db
         self.fallback = get_loki_fallback()
 
-    async def execute(
+    async def execute(  # type: ignore[no-untyped-def]
         self,
         pattern: str,
         namespace: Optional[str] = None,
@@ -342,7 +342,7 @@ class SearchLogsTool(BaseOpTool):
                     limit=limit
                 )
                 _log_tool_success("search_logs")
-                return result
+                return result  # type: ignore[no-any-return]
             except Exception as fallback_error:
                 return tool_error_response(
                     fallback_error, "search_logs",

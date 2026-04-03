@@ -25,9 +25,6 @@ from app.core.config import get_settings
 
 logger = get_logger(__name__)
 
-
-# ========== 辅助函数 ==========
-
 def _is_bot_mentioned(message: Dict[str, Any], bot_id: str) -> bool:
     """
     检查消息是否 @ 了机器人
@@ -51,9 +48,6 @@ def _is_bot_mentioned(message: Dict[str, Any], bot_id: str) -> bool:
         logger.warning(f"检查 @机器人 失败: {e}")
         return False
 
-
-# ========== 新架构适配器函数 ==========
-
 async def handle_message_receive(message: Dict[str, Any]) -> None:
     """
     处理飞书消息接收（重定向到新架构）
@@ -68,7 +62,7 @@ async def handle_message_receive(message: Dict[str, Any]) -> None:
             settings.FEISHU_WEBHOOK_REQUIRE_MENTION):
 
             bot_id = settings.FEISHU_APP_ID
-            if not _is_bot_mentioned(message, bot_id):
+            if not _is_bot_mentioned(message, bot_id):  # type: ignore[arg-type]
                 logger.info("⏭️  消息未 @ 机器人，跳过处理")
                 return
 
@@ -80,12 +74,12 @@ async def handle_message_receive(message: Dict[str, Any]) -> None:
             return
 
         # 解析消息为新架构格式
-        message = IncomingMessage(
+        message = IncomingMessage(  # type: ignore[assignment]
             channel_type="feishu",
             channel_id="feishu_main",
             message_id=message.get("message_id", ""),
-            message_type="text",
-            action_type="receive",
+            message_type="text",  # type: ignore[arg-type]
+            action_type="receive",  # type: ignore[arg-type]
             sender_id=_extract_sender_id(message),
             sender_name=None,  # 后续获取
             chat_id=message.get("chat_id", ""),
@@ -96,7 +90,7 @@ async def handle_message_receive(message: Dict[str, Any]) -> None:
 
         # 使用新架构处理消息
         processor = MessageProcessor(adapter)
-        await processor.process_message(message)
+        await processor.process_message(message)  # type: ignore[arg-type]
 
     except Exception as e:
         logger.exception(f"❌ 处理飞书消息失败: {e}")
@@ -153,7 +147,7 @@ def _extract_sender_id(message: Dict[str, Any]) -> str:
     try:
         sender = message.get("sender", {})
         sender_id = sender.get("sender_id", {}).get("user_id", "")
-        return sender_id
+        return sender_id  # type: ignore[no-any-return]
     except Exception:
         return ""
 
@@ -168,11 +162,11 @@ def _extract_message_text(message: Dict[str, Any]) -> str:
             try:
                 raw_content = json.loads(raw_content)
             except (json.JSONDecodeError, ValueError):
-                return raw_content  # 纯文本直接返回
+                return raw_content  # 纯文本直接返回  # type: ignore[no-any-return]
 
         # 文本消息
         if "text" in raw_content:
-            return raw_content.get("text", "")
+            return raw_content.get("text", "")  # type: ignore[no-any-return]
 
         # 富文本消息
         if "rich_text" in raw_content:
@@ -189,8 +183,6 @@ def _extract_message_text(message: Dict[str, Any]) -> str:
         return ""
 
 
-# ========== 加密解密函数（用于兼容）==========
-
 async def decrypt_message(encrypt_key: str, encrypted_data: str) -> str:
     """
     解密飞书消息（保留用于兼容）
@@ -203,7 +195,7 @@ async def decrypt_message(encrypt_key: str, encrypted_data: str) -> str:
 
         # AES 解密
         cipher = AES.new(
-            encrypt_key.encode("utf-8")[:16].encode("utf-8"),
+            encrypt_key.encode("utf-8")[:16].encode("utf-8"),  # type: ignore[attr-defined]
             AES.MODE_ECB
         )
         decrypted_bytes = cipher.decrypt(encrypted_bytes)

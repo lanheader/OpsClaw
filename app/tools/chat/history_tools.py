@@ -46,10 +46,10 @@ class ChatToolCategory(str):
 class GetConversationHistoryTool(BaseOpTool):
     """查询对话历史工具"""
 
-    def __init__(self, db=None):
+    def __init__(self, db=None):  # type: ignore[no-untyped-def]
         self.db = db
 
-    async def execute(
+    async def execute(  # type: ignore[override]
         self,
         session_id: str,
         limit: int = 10,
@@ -150,10 +150,10 @@ class GetConversationHistoryTool(BaseOpTool):
 class ListUserSessionsTool(BaseOpTool):
     """列出用户的所有会话工具"""
 
-    def __init__(self, db=None):
+    def __init__(self, db=None):  # type: ignore[no-untyped-def]
         self.db = db
 
-    async def execute(
+    async def execute(  # type: ignore[override]
         self,
         user_id: Optional[int] = None,
         sender_id: Optional[str] = None,  # 飞书 sender_id
@@ -254,10 +254,10 @@ class ListUserSessionsTool(BaseOpTool):
 class SearchConversationTool(BaseOpTool):
     """搜索对话内容工具"""
 
-    def __init__(self, db=None):
+    def __init__(self, db=None):  # type: ignore[no-untyped-def]
         self.db = db
 
-    async def execute(
+    async def execute(  # type: ignore[override]
         self,
         session_id: Optional[str] = None,
         keyword: str = "",

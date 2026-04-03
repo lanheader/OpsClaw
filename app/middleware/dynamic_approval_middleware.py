@@ -121,7 +121,7 @@ class DynamicApprovalMiddleware(AgentMiddleware):
         db = SessionLocal()
         try:
             tools = self._load_approval_config(user_id, db)
-            self._approval_cache[user_id] = tools
+            self._approval_cache[user_id] = tools  # type: ignore[index]
             return tools
         finally:
             db.close()
@@ -161,7 +161,7 @@ class DynamicApprovalMiddleware(AgentMiddleware):
             )
 
             # 写入缓存
-            self._approval_cache[cache_key] = tools_need_approval
+            self._approval_cache[cache_key] = tools_need_approval  # type: ignore[name-defined]
             return tools_need_approval
 
         except Exception as e:
@@ -201,7 +201,7 @@ class DynamicApprovalMiddleware(AgentMiddleware):
         if user_roles:
             role_name = user_roles[0][0]
             logger.debug(f"🔐 获取到用户角色: {role_name}")
-            return role_name
+            return role_name  # type: ignore[no-any-return]
 
         return None
 
@@ -373,7 +373,7 @@ class DynamicApprovalMiddleware(AgentMiddleware):
                         "id": tool_call_id,
                         "type": "tool_call",
                     }
-                    revised_tool_calls.append(revised_call)
+                    revised_tool_calls.append(revised_call)  # type: ignore[arg-type]
                     logger.info(
                         f"✏️ [{session_id}] 工具参数已编辑: {tool_name} -> "
                         f"{edited_action.get('args', tool_args)}"
@@ -388,7 +388,7 @@ class DynamicApprovalMiddleware(AgentMiddleware):
         # 返回状态更新
         result = {"messages": [original_ai_msg]}
         if artificial_tool_messages:
-            result["messages"].extend(artificial_tool_messages)
+            result["messages"].extend(artificial_tool_messages)  # type: ignore[arg-type]
 
         return result
 

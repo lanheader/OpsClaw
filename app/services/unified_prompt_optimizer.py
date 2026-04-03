@@ -68,7 +68,7 @@ class UnifiedPromptOptimizer:
 
                 if prompt:
                     logger.info(f"✅ 从数据库加载提示词: {subagent_name} (version {prompt.version})")
-                    return prompt.content
+                    return prompt.content  # type: ignore[return-value]
             finally:
                 db.close()
         except Exception as e:
@@ -82,20 +82,20 @@ class UnifiedPromptOptimizer:
         if cached:
             # 检查是否过期
             if datetime.now(timezone.utc) - cached["timestamp"] < timedelta(seconds=self.CACHE_TTL_SECONDS):
-                return cached["prompt"]
+                return cached["prompt"]  # type: ignore[no-any-return]
             else:
                 # 缓存过期，删除
                 del self._cache[subagent_name]
         return None
 
-    def _set_cache(self, subagent_name: str, prompt: str):
+    def _set_cache(self, subagent_name: str, prompt: str):  # type: ignore[no-untyped-def]
         """设置缓存"""
         self._cache[subagent_name] = {
             "prompt": prompt,
             "timestamp": datetime.now(timezone.utc),
         }
 
-    def clear_cache(self, subagent_name: Optional[str] = None):
+    def clear_cache(self, subagent_name: Optional[str] = None):  # type: ignore[no-untyped-def]
         """清除缓存"""
         if subagent_name:
             self._cache.pop(subagent_name, None)

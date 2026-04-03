@@ -40,7 +40,7 @@ async def execute_redis_command_tool(
     # 权限检查
     check_tool_permission(db, user_id, "command.execute", raise_exception=True)
 
-    return await execute_redis_command.ainvoke({"command": command, "host": host, "port": port, "timeout": timeout})
+    return await execute_redis_command.ainvoke({"command": command, "host": host, "port": port, "timeout": timeout})  # type: ignore[no-any-return]
 
 
 @tool
@@ -66,7 +66,7 @@ async def execute_mysql_query_tool(
     # 权限检查
     check_tool_permission(db, user_id, "command.execute", raise_exception=True)
 
-    return await execute_mysql_query.ainvoke({"query": query, "database": database, "timeout": timeout})
+    return await execute_mysql_query.ainvoke({"query": query, "database": database, "timeout": timeout})  # type: ignore[no-any-return]
 
 
 @tool
@@ -90,7 +90,7 @@ async def execute_safe_shell_command_tool(
     # 权限检查
     check_tool_permission(db, user_id, "command.execute", raise_exception=True)
 
-    return await execute_safe_shell_command.ainvoke({"command": command, "timeout": timeout})
+    return await execute_safe_shell_command.ainvoke({"command": command, "timeout": timeout})  # type: ignore[no-any-return]
 
 
 __all__ = [

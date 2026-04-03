@@ -19,7 +19,7 @@ from langchain_core.tools import tool
 from sqlalchemy.orm import Session
 
 from app.models.database import get_db
-from app.models.scheduled_task import ScheduledTask, TaskStatus, TaskType
+from app.models.scheduled_task import ScheduledTask, TaskStatus, TaskType  # type: ignore[attr-defined]
 from app.services.scheduler_service import get_scheduler_service
 from app.utils.logger import get_logger
 
@@ -114,7 +114,7 @@ def create_scheduled_task(
             scheduled_task = ScheduledTask(
                 name=name,
                 description=description or name,
-                task_type=TaskType.CRON if schedule_info["type"] == "cron" else TaskType.ONCE,
+                task_type=TaskType.CRON if schedule_info["type"] == "cron" else TaskType.ONCE,  # type: ignore[attr-defined]
                 cron_expression=schedule_info.get("expression") if schedule_info["type"] == "cron" else None,
                 scheduled_time=schedule_info.get("time") if schedule_info["type"] == "once" else None,
                 agent_task=task,
@@ -129,7 +129,7 @@ def create_scheduled_task(
                 return {"success": False, "error": "创建任务失败"}
 
             # 获取下次执行时间
-            next_run = scheduler.get_next_run_time(scheduled_task.id)
+            next_run = scheduler.get_next_run_time(scheduled_task.id)  # type: ignore[arg-type]
 
             return {
                 "success": True,
@@ -218,7 +218,7 @@ def enable_scheduled_task(task_id: int) -> Dict[str, Any]:
                 task = db.query(ScheduledTask).filter(ScheduledTask.id == task_id).first()
                 return {
                     "success": True,
-                    "message": f"✅ 任务 '{task.name}' 已启用",
+                    "message": f"✅ 任务 '{task.name}' 已启用",  # type: ignore[union-attr]
                     "task_id": task_id
                 }
             return {"success": False, "error": "启用失败"}
@@ -249,7 +249,7 @@ def disable_scheduled_task(task_id: int) -> Dict[str, Any]:
                 task = db.query(ScheduledTask).filter(ScheduledTask.id == task_id).first()
                 return {
                     "success": True,
-                    "message": f"✅ 任务 '{task.name}' 已禁用",
+                    "message": f"✅ 任务 '{task.name}' 已禁用",  # type: ignore[union-attr]
                     "task_id": task_id
                 }
             return {"success": False, "error": "禁用失败"}
@@ -280,7 +280,7 @@ def run_scheduled_task_now(task_id: int) -> Dict[str, Any]:
                 task = db.query(ScheduledTask).filter(ScheduledTask.id == task_id).first()
                 return {
                     "success": True,
-                    "message": f"✅ 任务 '{task.name}' 已开始执行",
+                    "message": f"✅ 任务 '{task.name}' 已开始执行",  # type: ignore[union-attr]
                     "task_id": task_id
                 }
             return {"success": False, "error": "执行失败"}

@@ -73,7 +73,7 @@ class ScheduledTaskCreate(BaseModel):
 
     @field_validator('cron_expr')
     @classmethod
-    def validate_cron(cls, v):
+    def validate_cron(cls, v):  # type: ignore[no-untyped-def]
         if not validate_cron_expression(v):
             raise ValueError(f'无效的 Cron 表达式: {v}。请使用标准 5 字段格式，如 "0 8 * * 1-5"')
         return v
@@ -95,7 +95,7 @@ class ScheduledTaskUpdate(BaseModel):
 
     @field_validator('cron_expr')
     @classmethod
-    def validate_cron(cls, v):
+    def validate_cron(cls, v):  # type: ignore[no-untyped-def]
         if v is not None and not validate_cron_expression(v):
             raise ValueError(f'无效的 Cron 表达式: {v}')
         return v

@@ -19,7 +19,7 @@ from app.utils.logger import get_logger, get_request_context
 logger = get_logger(__name__)
 
 
-def _log_tool_start(tool_name: str, **kwargs):
+def _log_tool_start(tool_name: str, **kwargs):  # type: ignore[no-untyped-def]
     """记录工具开始执行的日志"""
     ctx = get_request_context()
     session_id = ctx.get('session_id', 'no-sess')
@@ -27,7 +27,7 @@ def _log_tool_start(tool_name: str, **kwargs):
     logger.info(f"🔧 [{session_id}] 执行工具: {tool_name} | 参数: {params}")
 
 
-def _log_tool_success(tool_name: str, message: str = None):
+def _log_tool_success(tool_name: str, message: str = None):  # type: ignore[assignment]
     """记录工具执行成功的日志"""
     ctx = get_request_context()
     session_id = ctx.get('session_id', 'no-sess')
@@ -37,7 +37,7 @@ def _log_tool_success(tool_name: str, message: str = None):
         logger.info(f"✅ [{session_id}] 工具完成: {tool_name}")
 
 
-def _log_tool_error(tool_name: str, error: str):
+def _log_tool_error(tool_name: str, error: str):  # type: ignore[no-untyped-def]
     """记录工具执行失败的日志"""
     ctx = get_request_context()
     session_id = ctx.get('session_id', 'no-sess')

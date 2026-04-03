@@ -46,7 +46,7 @@ def _normalize_message_content(content: Any) -> str:
         return "\n".join(parts).strip()
 
     if isinstance(content, dict):
-        text = content.get("text")
+        text = content.get("text")  # type: ignore[assignment]
         return str(text).strip() if text else ""
 
     return str(content).strip()
@@ -187,7 +187,7 @@ def _build_operate_report(
 ) -> str:
     remediation_plan = state.get("remediation_plan") if isinstance(state.get("remediation_plan"), dict) else {}
     verification = collected_data.get("verification") if isinstance(collected_data.get("verification"), dict) else {}
-    action = _normalize_message_content(remediation_plan.get("action"))
+    action = _normalize_message_content(remediation_plan.get("action"))  # type: ignore[union-attr]
     success = bool(state.get("execution_success"))
 
     lines = ["🚀 执行成功" if success else "❌ 执行失败", ""]
@@ -217,13 +217,13 @@ def synthesize_final_report_from_state(state: Dict[str, Any]) -> str:
     remediation_plan = state.get("remediation_plan") if isinstance(state.get("remediation_plan"), dict) else {}
     collected_data = state.get("collected_data") if isinstance(state.get("collected_data"), dict) else {}
 
-    evidence_lines = _stringify_items(_ensure_list(analysis_result.get("evidence")))
-    recommendation_lines = _stringify_items(_ensure_list(analysis_result.get("recommendations")))
-    plan_lines = _stringify_items(_ensure_list(remediation_plan.get("steps")))
+    evidence_lines = _stringify_items(_ensure_list(analysis_result.get("evidence")))  # type: ignore[union-attr]
+    recommendation_lines = _stringify_items(_ensure_list(analysis_result.get("recommendations")))  # type: ignore[union-attr]
+    plan_lines = _stringify_items(_ensure_list(remediation_plan.get("steps")))  # type: ignore[union-attr]
 
     recommendation_lines.extend(
         line
-        for line in _stringify_items(_ensure_list(remediation_plan.get("recommendations")))
+        for line in _stringify_items(_ensure_list(remediation_plan.get("recommendations")))  # type: ignore[union-attr]
         if line not in recommendation_lines
     )
     plan_lines = [line for line in plan_lines if line not in recommendation_lines]
@@ -233,10 +233,10 @@ def synthesize_final_report_from_state(state: Dict[str, Any]) -> str:
         summary_lines.append(f"- 已采集数据项: {', '.join(sorted(collected_data.keys()))}")
 
     if intent_type == "query":
-        return _build_query_report(analysis_result, collected_data, recommendation_lines)
+        return _build_query_report(analysis_result, collected_data, recommendation_lines)  # type: ignore[arg-type]
 
     if intent_type == "operate":
-        return _build_operate_report(state, collected_data, recommendation_lines, plan_lines)
+        return _build_operate_report(state, collected_data, recommendation_lines, plan_lines)  # type: ignore[arg-type]
 
     if intent_type == "diagnose" or root_cause or evidence_lines:
         lines = ["🔍 诊断结果", ""]
@@ -371,7 +371,7 @@ def extract_json_from_llm_response(
             json_end = content.find("```", json_start)
             if json_end > json_start:
                 json_str = content[json_start:json_end].strip()
-                return json.loads(json_str)
+                return json.loads(json_str)  # type: ignore[no-any-return]
         except (json.JSONDecodeError, ValueError) as e:
             logger.debug(f"解析 ```json 代码块失败: {e}")
 
@@ -386,13 +386,13 @@ def extract_json_from_llm_response(
             json_end = content.find("```", json_start)
             if json_end > json_start:
                 json_str = content[json_start:json_end].strip()
-                return json.loads(json_str)
+                return json.loads(json_str)  # type: ignore[no-any-return]
         except (json.JSONDecodeError, ValueError) as e:
             logger.debug(f"解析 ``` 代码块失败: {e}")
 
     # 尝试直接解析
     try:
-        return json.loads(content)
+        return json.loads(content)  # type: ignore[no-any-return]
     except json.JSONDecodeError:
         pass
 
@@ -403,7 +403,7 @@ def extract_json_from_llm_response(
             end = content.rfind("}") + 1
             if end > start:
                 json_str = content[start:end]
-                return json.loads(json_str)
+                return json.loads(json_str)  # type: ignore[no-any-return]
     except (json.JSONDecodeError, ValueError) as e:
         logger.debug(f"提取 JSON 对象失败: {e}")
 
@@ -414,7 +414,7 @@ def extract_json_from_llm_response(
             end = content.rfind("]") + 1
             if end > start:
                 json_str = content[start:end]
-                return json.loads(json_str)
+                return json.loads(json_str)  # type: ignore[no-any-return]
     except (json.JSONDecodeError, ValueError) as e:
         logger.debug(f"提取 JSON 数组失败: {e}")
 

@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 _executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="sqlite_fts_store_")
 
 
-def _run_async(coro):
+def _run_async(coro):  # type: ignore[no-untyped-def]
     """
     在同步上下文中安全运行异步协程
 
@@ -96,7 +96,7 @@ class SQLiteFTSStore(BaseStore):
         ("memories", "sessions"),
     ]
 
-    def __init__(self, db_path: str = None):
+    def __init__(self, db_path: str = None):  # type: ignore[assignment]
         """
         初始化 SQLite FTS5 存储适配器
 
@@ -119,7 +119,7 @@ class SQLiteFTSStore(BaseStore):
         conn.row_factory = sqlite3.Row
         return conn
 
-    def _init_tables(self):
+    def _init_tables(self):  # type: ignore[no-untyped-def]
         """初始化数据库表"""
         with self._get_connection() as conn:
             # 故障记忆表（FTS5）
@@ -616,7 +616,7 @@ class SQLiteFTSStore(BaseStore):
         # 应用前缀过滤
         if prefix:
             prefix_tuple = (
-                tuple(prefix) if isinstance(prefix, (list, NamespacePath)) else prefix
+                tuple(prefix) if isinstance(prefix, (list, NamespacePath)) else prefix  # type: ignore[misc]
             )
             all_namespaces = [
                 ns
@@ -628,7 +628,7 @@ class SQLiteFTSStore(BaseStore):
         # 应用后缀过滤
         if suffix:
             suffix_tuple = (
-                tuple(suffix) if isinstance(suffix, (list, NamespacePath)) else suffix
+                tuple(suffix) if isinstance(suffix, (list, NamespacePath)) else suffix  # type: ignore[misc]
             )
             all_namespaces = [
                 ns
@@ -642,7 +642,7 @@ class SQLiteFTSStore(BaseStore):
             all_namespaces = [ns for ns in all_namespaces if len(ns) <= max_depth]
 
         # 应用偏移和限制
-        return all_namespaces[offset : offset + limit]
+        return all_namespaces[offset : offset + limit]  # type: ignore[return-value]
 
     async def abatch(self, ops: Iterable[Op]) -> list[Result]:
         """
@@ -658,36 +658,36 @@ class SQLiteFTSStore(BaseStore):
 
         for op in ops:
             try:
-                op_type = op.get("op")
+                op_type = op.get("op")  # type: ignore[union-attr]
 
                 if op_type == "put":
                     await self.aput(
-                        tuple(op["namespace"]),
-                        op["key"],
-                        op["value"],
+                        tuple(op["namespace"]),  # type: ignore[arg-type]
+                        op["key"],  # type: ignore[arg-type]
+                        op["value"],  # type: ignore[arg-type]
                     )
                     results.append(None)
 
                 elif op_type == "get":
                     result = await self.aget(
-                        tuple(op["namespace"]),
-                        op["key"],
+                        tuple(op["namespace"]),  # type: ignore[arg-type]
+                        op["key"],  # type: ignore[arg-type]
                     )
                     results.append(result)
 
                 elif op_type == "delete":
                     await self.adelete(
-                        tuple(op["namespace"]),
-                        op["key"],
+                        tuple(op["namespace"]),  # type: ignore[arg-type]
+                        op["key"],  # type: ignore[arg-type]
                     )
                     results.append(None)
 
                 elif op_type == "search":
-                    result = await self.asearch(
-                        tuple(op["namespace"]),
-                        query=op.get("query"),
-                        filter=op.get("filter"),
-                        limit=op.get("limit", 10),
+                    result = await self.asearch(  # type: ignore[assignment]
+                        tuple(op["namespace"]),  # type: ignore[arg-type]
+                        query=op.get("query"),  # type: ignore[union-attr]
+                        filter=op.get("filter"),  # type: ignore[union-attr]
+                        limit=op.get("limit", 10),  # type: ignore[union-attr]
                     )
                     results.append(result)
 
@@ -696,7 +696,7 @@ class SQLiteFTSStore(BaseStore):
                     results.append(None)
 
             except Exception as e:
-                logger.error(f"abatch operation failed: {op.get('op')}, error: {e}")
+                logger.error(f"abatch operation failed: {op.get('op')}, error: {e}")  # type: ignore[union-attr]
                 results.append(None)
 
         return results
@@ -713,7 +713,7 @@ class SQLiteFTSStore(BaseStore):
         ttl: float | None | NotProvided = NOT_PROVIDED,
     ) -> None:
         """同步存储数据"""
-        return _run_async(self.aput(namespace, key, value, index=index, ttl=ttl))
+        return _run_async(self.aput(namespace, key, value, index=index, ttl=ttl))  # type: ignore[no-any-return]
 
     def get(
         self,
@@ -723,7 +723,7 @@ class SQLiteFTSStore(BaseStore):
         refresh_ttl: bool | None = None,
     ) -> Optional[Item]:
         """同步获取数据"""
-        return _run_async(self.aget(namespace, key, refresh_ttl=refresh_ttl))
+        return _run_async(self.aget(namespace, key, refresh_ttl=refresh_ttl))  # type: ignore[no-any-return]
 
     def delete(
         self,
@@ -731,7 +731,7 @@ class SQLiteFTSStore(BaseStore):
         key: str,
     ) -> None:
         """同步删除数据"""
-        return _run_async(self.adelete(namespace, key))
+        return _run_async(self.adelete(namespace, key))  # type: ignore[no-any-return]
 
     def search(
         self,
@@ -745,7 +745,7 @@ class SQLiteFTSStore(BaseStore):
         refresh_ttl: bool | None = None,
     ) -> list[SearchItem]:
         """同步关键词搜索"""
-        return _run_async(
+        return _run_async(  # type: ignore[no-any-return]
             self.asearch(
                 namespace_prefix,
                 query=query,
@@ -766,7 +766,7 @@ class SQLiteFTSStore(BaseStore):
         offset: int = 0,
     ) -> list[tuple[str, ...]]:
         """同步列出命名空间"""
-        return _run_async(
+        return _run_async(  # type: ignore[no-any-return]
             self.alist_namespaces(
                 prefix=prefix,
                 suffix=suffix,
@@ -778,7 +778,7 @@ class SQLiteFTSStore(BaseStore):
 
     def batch(self, ops: Iterable[Op]) -> list[Result]:
         """同步批量操作"""
-        return _run_async(self.abatch(ops))
+        return _run_async(self.abatch(ops))  # type: ignore[no-any-return]
 
 
 # ==================== 全局单例 ====================

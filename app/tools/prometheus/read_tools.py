@@ -33,7 +33,7 @@ def _get_prometheus_url_from_db() -> Optional[str]:
             SystemSetting.key == "prometheus.url"
         ).first()
         if setting:
-            return setting.value
+            return setting.value  # type: ignore[return-value]
     except Exception as e:
         logger.warning(f"从数据库读取 Prometheus URL 失败: {e}")
     finally:
@@ -42,7 +42,7 @@ def _get_prometheus_url_from_db() -> Optional[str]:
     return None
 
 
-def _log_tool_start(tool_name: str, **kwargs):
+def _log_tool_start(tool_name: str, **kwargs):  # type: ignore[no-untyped-def]
     """记录工具开始执行的日志"""
     ctx = get_request_context()
     session_id = ctx.get('session_id', 'no-sess')
@@ -50,7 +50,7 @@ def _log_tool_start(tool_name: str, **kwargs):
     logger.info(f"🔧 [{session_id}] 执行工具: {tool_name} | 参数: {params}")
 
 
-def _log_tool_success(tool_name: str, result_count: int = None):
+def _log_tool_success(tool_name: str, result_count: int = None):  # type: ignore[assignment]
     """记录工具执行成功的日志"""
     ctx = get_request_context()
     session_id = ctx.get('session_id', 'no-sess')
@@ -78,10 +78,10 @@ class QueryCPUUsageTool(BaseOpTool):
     查询指定标签过滤的 CPU 使用率指标。
     """
 
-    def __init__(self, db=None):
+    def __init__(self, db=None):  # type: ignore[no-untyped-def]
         self.db = db
 
-    async def execute(
+    async def execute(  # type: ignore[no-untyped-def]
         self,
         labels: Optional[Dict[str, str]] = None,
         time_range: str = "1h",
@@ -154,10 +154,10 @@ class QueryMemoryUsageTool(BaseOpTool):
     查询指定标签过滤的内存使用率指标。
     """
 
-    def __init__(self, db=None):
+    def __init__(self, db=None):  # type: ignore[no-untyped-def]
         self.db = db
 
-    async def execute(
+    async def execute(  # type: ignore[no-untyped-def]
         self,
         labels: Optional[Dict[str, str]] = None,
         time_range: str = "1h",
@@ -241,10 +241,10 @@ class QueryRangeTool(BaseOpTool):
     执行指定时间范围的 PromQL 查询。
     """
 
-    def __init__(self, db=None):
+    def __init__(self, db=None):  # type: ignore[no-untyped-def]
         self.db = db
 
-    async def execute(
+    async def execute(  # type: ignore[no-untyped-def]
         self,
         query: str,
         start: Optional[str] = None,
@@ -294,7 +294,7 @@ class QueryRangeTool(BaseOpTool):
         except Exception as e:
             logger.error(f"Prometheus 范围查询失败: {e}")
             return tool_error_response(
-                str(e), "query_range",
+                str(e), "query_range",  # type: ignore[arg-type]
                 context={"query": query, "start": start, "end": end, "step": step},
                 suggestion="请检查 PromQL 查询语法是否正确，以及 Prometheus 服务是否正常运行"
             )

@@ -33,7 +33,7 @@ class ChatMessage(Base):
     )
 
     # 消息内容
-    role = Column(Enum(MessageRole), nullable=False, comment="消息角色")
+    role = Column(Enum(MessageRole), nullable=False, comment="消息角色")  # type: ignore[var-annotated]
     content = Column(Text, nullable=False, comment="消息内容")
 
     # 元数据（JSON 格式存储工具调用、错误信息等）
@@ -42,5 +42,5 @@ class ChatMessage(Base):
     # 时间戳
     created_at = Column(DateTime, default=datetime.utcnow, index=True, comment="创建时间")
 
-    def __repr__(self):
+    def __repr__(self):  # type: ignore[no-untyped-def]
         return f"<ChatMessage(id={self.id}, session_id='{self.session_id}', role='{self.role}')>"

@@ -135,7 +135,7 @@ async def classify_approval_intent(
         ]
 
         response = await llm.ainvoke(messages)
-        response_text = response.content.strip()
+        response_text = response.content.strip()  # type: ignore[union-attr]
 
         logger.info(f"LLM 响应: {response_text}")
 
@@ -155,13 +155,13 @@ def _parse_json_response(response_text: str) -> Dict[str, Any]:
     """解析 JSON 响应"""
     try:
         # 尝试直接解析
-        return json.loads(response_text)
+        return json.loads(response_text)  # type: ignore[no-any-return]
     except json.JSONDecodeError:
         # 尝试提取 JSON
         json_match = re.search(r"\{[^{}]*\}", response_text, re.DOTALL)
         if json_match:
             try:
-                return json.loads(json_match.group(0))
+                return json.loads(json_match.group(0))  # type: ignore[no-any-return]
             except json.JSONDecodeError:
                 pass
 

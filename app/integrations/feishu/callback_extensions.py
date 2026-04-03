@@ -14,7 +14,7 @@ from app.models.user import User
 logger = get_logger(__name__)
 
 
-async def handle_new_session_command(
+async def handle_new_session_command(  # type: ignore[no-untyped-def]
     chat_id: str, sender_id: str, sender_name: Optional[str], send_reply_func
 ):
     """
@@ -42,9 +42,9 @@ async def handle_new_session_command(
         )
 
         if current_session:
-            current_session.is_active = False
-            current_session.state = SessionState.NORMAL.value
-            current_session.pending_approval_data = None
+            current_session.is_active = False  # type: ignore[assignment]
+            current_session.state = SessionState.NORMAL.value  # type: ignore[assignment]
+            current_session.pending_approval_data = None  # type: ignore[assignment]
             db.commit()
             logger.info(f"✅ 已结束旧会话: {current_session.session_id}")
 
@@ -102,7 +102,7 @@ async def handle_new_session_command(
         db.close()
 
 
-async def handle_end_session_command(chat_id: str, session_id: str, send_reply_func):
+async def handle_end_session_command(chat_id: str, session_id: str, send_reply_func):  # type: ignore[no-untyped-def]
     """
     处理 /end 命令 - 结束当前会话
 
@@ -142,9 +142,9 @@ async def handle_end_session_command(chat_id: str, session_id: str, send_reply_f
         )
 
         # 结束会话（软删除）
-        session.is_active = False
-        session.state = SessionState.NORMAL.value
-        session.pending_approval_data = None
+        session.is_active = False  # type: ignore[assignment]
+        session.state = SessionState.NORMAL.value  # type: ignore[assignment]
+        session.pending_approval_data = None  # type: ignore[assignment]
         db.commit()
 
         logger.info(f"✅ 已结束会话: {session_id}")

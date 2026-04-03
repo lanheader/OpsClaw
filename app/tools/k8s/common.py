@@ -12,12 +12,12 @@ from app.utils.logger import get_logger, get_request_context
 logger = get_logger(__name__)
 
 
-def init_k8s_client(db=None):
+def init_k8s_client(db=None):  # type: ignore[no-untyped-def]
     """初始化 K8s 客户端"""
     return create_client(db)
 
 
-def log_tool_start(tool_name: str, **kwargs):
+def log_tool_start(tool_name: str, **kwargs):  # type: ignore[no-untyped-def]
     """记录工具开始执行的日志"""
     ctx = get_request_context()
     session_id = ctx.get('session_id', 'no-sess')
@@ -25,7 +25,7 @@ def log_tool_start(tool_name: str, **kwargs):
     logger.info(f"🔧 [{session_id}] 执行工具: {tool_name} | 参数: {params}")
 
 
-def log_tool_success(tool_name: str, result_count: int = None):
+def log_tool_success(tool_name: str, result_count: int = None):  # type: ignore[assignment]
     """记录工具执行成功的日志"""
     ctx = get_request_context()
     session_id = ctx.get('session_id', 'no-sess')
@@ -35,7 +35,7 @@ def log_tool_success(tool_name: str, result_count: int = None):
         logger.info(f"✅ [{session_id}] 工具完成: {tool_name}")
 
 
-def is_pod_ready(pod) -> str:
+def is_pod_ready(pod) -> str:  # type: ignore[no-untyped-def]
     """检查 Pod 是否就绪"""
     if not pod.status.container_statuses:
         return "0/0"
@@ -44,10 +44,10 @@ def is_pod_ready(pod) -> str:
     return f"{ready}/{total}"
 
 
-def format_timestamp(timestamp) -> Optional[str]:
+def format_timestamp(timestamp) -> Optional[str]:  # type: ignore[no-untyped-def]
     """格式化时间戳为 ISO 格式"""
     if timestamp:
-        return timestamp.isoformat()
+        return timestamp.isoformat()  # type: ignore[no-any-return]
     return None
 
 

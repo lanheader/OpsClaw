@@ -35,7 +35,7 @@ logger = get_logger(__name__)
 class ApprovalHandler:
     """审批流程处理器"""
 
-    def __init__(self, channel_adapter):
+    def __init__(self, channel_adapter):  # type: ignore[no-untyped-def]
         """
         初始化审批处理器
 
@@ -72,7 +72,7 @@ class ApprovalHandler:
             False: 无待审批状态
         """
         # 检查是否有待审批状态
-        approval_data = SessionStateManager.check_awaiting_approval(context.session_id)
+        approval_data = SessionStateManager.check_awaiting_approval(context.session_id)  # type: ignore[arg-type]
         if not approval_data:
             return False
 
@@ -134,7 +134,7 @@ class ApprovalHandler:
             await self._send_error_message(context.chat_id, str(exc))
 
             # 重置会话状态
-            SessionStateManager.reset_to_normal(context.session_id)
+            SessionStateManager.reset_to_normal(context.session_id)  # type: ignore[arg-type]
             return True
 
     async def resume_flow(
@@ -156,7 +156,7 @@ class ApprovalHandler:
         try:
             # 先调用审批响应处理（它会检查 awaiting_approval 状态）
             resume_status = await handle_approval_response(
-                session_id=context.session_id,
+                session_id=context.session_id,  # type: ignore[arg-type]
                 decision=decision,
                 chat_id=context.chat_id,
                 user_response=user_response,
@@ -166,7 +166,7 @@ class ApprovalHandler:
             if resume_status == "completed":
                 logger.info(f"✅ 工作流已恢复: decision={decision}")
                 # 处理完成后清理会话状态
-                SessionStateManager.reset_to_normal(context.session_id)
+                SessionStateManager.reset_to_normal(context.session_id)  # type: ignore[arg-type]
             elif resume_status == "interrupted":
                 # 有新的审批请求，这是正常状态，不需要清理会话状态
                 logger.info(f"🔒 工作流恢复后有新的审批请求，等待用户审批")
@@ -178,7 +178,7 @@ class ApprovalHandler:
 
                 # 🔥 重要：发送新的审批请求消息给用户
                 # 从 SessionStateManager 获取新的审批信息
-                new_approval_data = SessionStateManager.check_awaiting_approval(context.session_id)
+                new_approval_data = SessionStateManager.check_awaiting_approval(context.session_id)  # type: ignore[arg-type]
                 if new_approval_data:
                     logger.info(f"📋 发送新的审批请求消息给用户")
                     # 从 HITLRequest 格式转换为显示格式
@@ -269,7 +269,7 @@ class ApprovalHandler:
 
     async def _send_error_message(self, chat_id: str, error_msg: str) -> None:
         """发送错误消息"""
-        msg = format_error_message(error_msg)
+        msg = format_error_message(error_msg)  # type: ignore[arg-type]
         try:
             await self._send_card_message(chat_id, msg)
         except Exception as e:

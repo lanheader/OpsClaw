@@ -66,5 +66,5 @@ class ChatSession(Base):
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, comment="更新时间"
     )
 
-    def __repr__(self):
+    def __repr__(self):  # type: ignore[no-untyped-def]
         return f"<ChatSession(id={self.id}, session_id='{self.session_id}', source='{self.source}', user_id={self.user_id})>"

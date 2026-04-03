@@ -48,7 +48,7 @@ _MAX_QUALITY_RETRIES = 1
 class AgentInvoker:
     """Agent 调用器 - 使用统一的 AgentChatService"""
 
-    def __init__(self, channel_adapter):
+    def __init__(self, channel_adapter):  # type: ignore[no-untyped-def]
         self.channel = channel_adapter
         self.settings = get_settings()
         self.service = get_agent_chat_service()
@@ -58,13 +58,13 @@ class AgentInvoker:
         logger.info(f"🤖 调用 Agent: session={context.session_id}, text={text[:50]}...")
 
         # 使用统一的会话锁管理器
-        async with SessionLockContext(context.session_id, timeout=600):
+        async with SessionLockContext(context.session_id, timeout=600):  # type: ignore[arg-type]
             logger.info(f"🔒 获取会话锁: session={context.session_id}")
 
             # 构建请求
             request = ChatRequest(
-                session_id=context.session_id,
-                user_id=context.user_id,
+                session_id=context.session_id,  # type: ignore[arg-type]
+                user_id=context.user_id,  # type: ignore[arg-type]
                 content=text,
                 channel=MessageChannel.FEISHU,
                 user_permissions=list(context.user_permissions or []),
@@ -100,8 +100,8 @@ class AgentInvoker:
                     feedback = quality_result.feedback
                     logger.info(f"🔍 [质量检查] 发送质量反馈重新请求: {feedback[:100]}...")
                     retry_request = ChatRequest(
-                        session_id=context.session_id,
-                        user_id=context.user_id,
+                        session_id=context.session_id,  # type: ignore[arg-type]
+                        user_id=context.user_id,  # type: ignore[arg-type]
                         content=feedback,
                         channel=MessageChannel.FEISHU,
                         user_permissions=list(context.user_permissions or []),

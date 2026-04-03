@@ -32,7 +32,7 @@ class SQLiteMemoryStore:
         self._init_tables()
         logger.info(f"✅ SQLite FTS5 记忆存储初始化完成 | {db_path}")
 
-    def _init_tables(self):
+    def _init_tables(self):  # type: ignore[no-untyped-def]
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("""
                 CREATE VIRTUAL TABLE IF NOT EXISTS incidents_fts
@@ -101,8 +101,8 @@ class SQLiteMemoryStore:
 
     def store_incident(
         self, content: str, incident_type: str = "general",
-        title: str = None, resolution: str = None,
-        root_cause: str = None, metadata: dict = None
+        title: str = None, resolution: str = None,  # type: ignore[assignment]
+        root_cause: str = None, metadata: dict = None  # type: ignore[assignment]
     ) -> str:
         doc_id = f"incident_{datetime.now().timestamp()}"
         with sqlite3.connect(self.db_path) as conn:
@@ -122,7 +122,7 @@ class SQLiteMemoryStore:
         return doc_id
 
     def search_incidents(
-        self, query: str, top_k: int = 5, incident_type: str = None
+        self, query: str, top_k: int = 5, incident_type: str = None  # type: ignore[assignment]
     ) -> List[Dict[str, Any]]:
         terms = self._escape_fts_query(query)
 
@@ -173,7 +173,7 @@ class SQLiteMemoryStore:
 
     def store_knowledge(
         self, title: str, content: str, category: str = "general",
-        tags: List[str] = None, source: str = None, metadata: dict = None
+        tags: List[str] = None, source: str = None, metadata: dict = None  # type: ignore[assignment]
     ) -> str:
         doc_id = f"knowledge_{datetime.now().timestamp()}"
         tags_str = ",".join(tags or [])
@@ -192,7 +192,7 @@ class SQLiteMemoryStore:
         return doc_id
 
     def search_knowledge(
-        self, query: str, top_k: int = 5, category: str = None
+        self, query: str, top_k: int = 5, category: str = None  # type: ignore[assignment]
     ) -> List[Dict[str, Any]]:
         terms = self._escape_fts_query(query)
 
@@ -240,7 +240,7 @@ class SQLiteMemoryStore:
 
     # ===== 会话摘要 =====
 
-    def store_summary(self, session_id: str, summary: str):
+    def store_summary(self, session_id: str, summary: str):  # type: ignore[no-untyped-def]
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("""
                 INSERT OR REPLACE INTO session_summaries (session_id, summary, updated_at)
@@ -260,7 +260,7 @@ class SQLiteMemoryStore:
     # ===== 会话记忆 =====
 
     def search_session_history(
-        self, session_id: str, query: str = None, top_k: int = 10
+        self, session_id: str, query: str = None, top_k: int = 10  # type: ignore[assignment]
     ) -> List[Dict[str, Any]]:
         # keyword 模式下会话记忆不做语义搜索，直接返回空
         # 会话上下文由 checkpointer 的 messages 管理

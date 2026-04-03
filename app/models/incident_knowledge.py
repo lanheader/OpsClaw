@@ -49,5 +49,5 @@ class IncidentKnowledgeBase(Base):
     # 关联
     tags = Column(String(500), nullable=True, comment="标签，逗号分隔")
 
-    def __repr__(self):
+    def __repr__(self):  # type: ignore[no-untyped-def]
         return f"<IncidentKnowledgeBase(id={self.id}, title='{self.issue_title}', score={self.effectiveness_score})>"

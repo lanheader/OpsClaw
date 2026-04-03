@@ -19,7 +19,7 @@ router = APIRouter()
 
 
 @router.post("/webhook/{channel_type}")
-async def universal_webhook(
+async def universal_webhook(  # type: ignore[no-untyped-def]
     channel_type: str,
     request: Request,
     background_tasks: BackgroundTasks,
@@ -122,7 +122,7 @@ async def universal_webhook(
 
 
 @router.get("/channels")
-async def list_channels():
+async def list_channels():  # type: ignore[no-untyped-def]
     """
     列出所有可用的消息渠道
 
@@ -139,7 +139,7 @@ async def list_channels():
 
 
 @router.get("/health/{channel_type}")
-async def channel_health_check(channel_type: str):
+async def channel_health_check(channel_type: str):  # type: ignore[no-untyped-def]
     """
     检查指定渠道的健康状态
 

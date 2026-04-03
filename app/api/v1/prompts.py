@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 # ========== 列表和详情 ==========
 
 @router.get("", response_model=List[AgentPromptListItem])
-async def get_all_prompts(
+async def get_all_prompts(  # type: ignore[no-untyped-def]
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin)
 ):
@@ -39,15 +39,15 @@ async def get_all_prompts(
     result = []
     for p in prompts:
         item = AgentPromptListItem(
-            id=p.id,
-            agent_name=p.agent_name,
-            name=p.name,
-            description=p.description,
-            version=p.version,
-            is_active=p.is_active,
-            content_preview=p.content[:200] + "..." if len(p.content) > 200 else p.content,
-            created_at=p.created_at,
-            updated_at=p.updated_at,
+            id=p.id,  # type: ignore[arg-type]
+            agent_name=p.agent_name,  # type: ignore[arg-type]
+            name=p.name,  # type: ignore[arg-type]
+            description=p.description,  # type: ignore[arg-type]
+            version=p.version,  # type: ignore[arg-type]
+            is_active=p.is_active,  # type: ignore[arg-type]
+            content_preview=p.content[:200] + "..." if len(p.content) > 200 else p.content,  # type: ignore[arg-type]
+            created_at=p.created_at,  # type: ignore[arg-type]
+            updated_at=p.updated_at,  # type: ignore[arg-type]
         )
         result.append(item)
 
@@ -55,7 +55,7 @@ async def get_all_prompts(
 
 
 @router.get("/{agent_name}", response_model=AgentPromptResponse)
-async def get_prompt(
+async def get_prompt(  # type: ignore[no-untyped-def]
     agent_name: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin)
@@ -73,7 +73,7 @@ async def get_prompt(
 # ========== 创建和更新 ==========
 
 @router.post("", response_model=AgentPromptResponse, status_code=status.HTTP_201_CREATED)
-async def create_prompt(
+async def create_prompt(  # type: ignore[no-untyped-def]
     data: AgentPromptCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin)
@@ -118,7 +118,7 @@ async def create_prompt(
 
 
 @router.put("/{agent_name}", response_model=AgentPromptResponse)
-async def update_prompt(
+async def update_prompt(  # type: ignore[no-untyped-def]
     agent_name: str,
     data: AgentPromptUpdate,
     db: Session = Depends(get_db),
@@ -142,7 +142,7 @@ async def update_prompt(
 
     # 如果内容有变更，增加版本号并创建版本记录
     if "content" in update_data and update_data["content"] != old_content:
-        prompt.version += 1
+        prompt.version += 1  # type: ignore[assignment]
 
         # 创建版本记录
         version_record = PromptVersion(
@@ -169,7 +169,7 @@ async def update_prompt(
 # ========== 版本管理 ==========
 
 @router.get("/{agent_name}/versions", response_model=List[PromptVersionListItem])
-async def get_prompt_versions(
+async def get_prompt_versions(  # type: ignore[no-untyped-def]
     agent_name: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin)
@@ -185,14 +185,14 @@ async def get_prompt_versions(
     result = []
     for v in versions:
         item = PromptVersionListItem(
-            id=v.id,
-            prompt_id=v.prompt_id,
-            agent_name=v.agent_name,
-            version=v.version,
-            content_preview=v.content[:200] + "..." if len(v.content) > 200 else v.content,
-            change_summary=v.change_summary,
-            changed_by=v.changed_by,
-            created_at=v.created_at,
+            id=v.id,  # type: ignore[arg-type]
+            prompt_id=v.prompt_id,  # type: ignore[arg-type]
+            agent_name=v.agent_name,  # type: ignore[arg-type]
+            version=v.version,  # type: ignore[arg-type]
+            content_preview=v.content[:200] + "..." if len(v.content) > 200 else v.content,  # type: ignore[arg-type]
+            change_summary=v.change_summary,  # type: ignore[arg-type]
+            changed_by=v.changed_by,  # type: ignore[arg-type]
+            created_at=v.created_at,  # type: ignore[arg-type]
         )
         result.append(item)
 
@@ -200,7 +200,7 @@ async def get_prompt_versions(
 
 
 @router.get("/{agent_name}/versions/{version}", response_model=PromptVersionResponse)
-async def get_prompt_version_content(
+async def get_prompt_version_content(  # type: ignore[no-untyped-def]
     agent_name: str,
     version: int,
     db: Session = Depends(get_db),
@@ -224,7 +224,7 @@ async def get_prompt_version_content(
 
 
 @router.post("/{agent_name}/rollback", response_model=RollbackResponse)
-async def rollback_prompt(
+async def rollback_prompt(  # type: ignore[no-untyped-def]
     agent_name: str,
     data: RollbackRequest,
     db: Session = Depends(get_db),
@@ -256,7 +256,7 @@ async def rollback_prompt(
     # 回滚内容
     old_version = prompt.version
     prompt.content = target_version.content
-    prompt.version = data.target_version
+    prompt.version = data.target_version  # type: ignore[assignment]
 
     # 创建回滚版本记录
     rollback_record = PromptVersion(
@@ -281,14 +281,14 @@ async def rollback_prompt(
     return RollbackResponse(
         success=True,
         message=f"成功回滚到版本 {data.target_version}",
-        current_version=prompt.version
+        current_version=prompt.version  # type: ignore[arg-type]
     )
 
 
 # ========== 缓存管理 ==========
 
 @router.post("/clear-cache", response_model=ClearCacheResponse)
-async def clear_cache(
+async def clear_cache(  # type: ignore[no-untyped-def]
     current_user: User = Depends(get_current_admin)
 ):
     """清除所有提示词缓存"""

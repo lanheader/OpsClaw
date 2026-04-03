@@ -8,7 +8,7 @@ K8s 写操作工具（新架构）
 from typing import Dict, Any, Optional
 import time
 
-from kubernetes import client
+from kubernetes import client  # type: ignore[import]
 from app.integrations.kubernetes.client import create_client
 
 from app.tools.base import (
@@ -26,12 +26,12 @@ logger = get_logger(__name__)
 
 
 # 通用初始化函数
-def _init_k8s_client(db=None):
+def _init_k8s_client(db=None):  # type: ignore[no-untyped-def]
     """初始化 K8s 客户端"""
     return create_client(db)
 
 
-def _log_tool_start(tool_name: str, **kwargs):
+def _log_tool_start(tool_name: str, **kwargs):  # type: ignore[no-untyped-def]
     """记录工具开始执行的日志"""
     ctx = get_request_context()
     session_id = ctx.get('session_id', 'no-sess')
@@ -39,7 +39,7 @@ def _log_tool_start(tool_name: str, **kwargs):
     logger.info(f"🔧 [{session_id}] 执行工具: {tool_name} | 参数: {params}")
 
 
-def _log_tool_success(tool_name: str, message: str = None):
+def _log_tool_success(tool_name: str, message: str = None):  # type: ignore[assignment]
     """记录工具执行成功的日志"""
     ctx = get_request_context()
     session_id = ctx.get('session_id', 'no-sess')
@@ -66,10 +66,10 @@ class RestartDeploymentTool(BaseOpTool):
     通过滚动重启的方式重启 Deployment。
     """
 
-    def __init__(self, db=None):
+    def __init__(self, db=None):  # type: ignore[no-untyped-def]
         self.k8s_client = _init_k8s_client(db)
 
-    async def execute(
+    async def execute(  # type: ignore[no-untyped-def]
         self,
         name: str,
         namespace: str = "default",
@@ -129,10 +129,10 @@ class ScaleDeploymentTool(BaseOpTool):
     调整 Deployment 的副本数量。
     """
 
-    def __init__(self, db=None):
+    def __init__(self, db=None):  # type: ignore[no-untyped-def]
         self.k8s_client = _init_k8s_client(db)
 
-    async def execute(
+    async def execute(  # type: ignore[no-untyped-def]
         self,
         name: str,
         replicas: int,
@@ -189,10 +189,10 @@ class UpdateDeploymentImageTool(BaseOpTool):
     更新 Deployment 中容器的镜像版本。
     """
 
-    def __init__(self, db=None):
+    def __init__(self, db=None):  # type: ignore[no-untyped-def]
         self.k8s_client = _init_k8s_client(db)
 
-    async def execute(
+    async def execute(  # type: ignore[no-untyped-def]
         self,
         name: str,
         image: str,

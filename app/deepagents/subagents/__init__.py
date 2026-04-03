@@ -37,7 +37,7 @@ def _load_prompt(subagent_name: str) -> str:
     return optimizer.get_prompt_for_agent(subagent_name)
 
 
-def _load_tools_for_config(config: Dict[str, Any], db=None) -> List[Any]:
+def _load_tools_for_config(config: Dict[str, Any], db=None) -> List[Any]:  # type: ignore[no-untyped-def]
     """
     根据配置动态加载工具（带集成开关检查）
 
@@ -93,7 +93,7 @@ def _inject_tools_into_prompt(prompt: str, tools: List[Any]) -> str:
     return prompt + "\n".join(lines)
 
 
-def get_all_subagents(db=None) -> List[SubAgent]:
+def get_all_subagents(db=None) -> List[SubAgent]:  # type: ignore[no-untyped-def]
     """
     获取所有子智能体配置（工具动态加载）
 
@@ -130,12 +130,12 @@ def get_all_subagents(db=None) -> List[SubAgent]:
             f"(工具数: {len(config['tools'])}, 提示词长度: {len(prompt)} 字符)"
         )
 
-        configs.append(config)
+        configs.append(config)  # type: ignore[arg-type]
 
     return configs
 
 
-def get_subagent_by_name(name: str, db=None) -> SubAgent:
+def get_subagent_by_name(name: str, db=None) -> SubAgent:  # type: ignore[no-untyped-def]
     """
     根据名称获取子智能体配置
 

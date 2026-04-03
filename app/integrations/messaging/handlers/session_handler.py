@@ -29,7 +29,7 @@ class SessionHandler:
         sender_name: Optional[str],
         channel_type: str,
         user_id: int,
-        db: Optional[SessionLocal] = None
+        db: Optional[SessionLocal] = None  # type: ignore[valid-type]
     ) -> ChannelContext:
         """
         获取或创建会话上下文
@@ -92,7 +92,7 @@ class SessionHandler:
     def _build_context(
         self,
         session: ChatSession,
-        db: SessionLocal
+        db: SessionLocal  # type: ignore[valid-type]
     ) -> ChannelContext:
         """
         构建渠道上下文
@@ -106,17 +106,17 @@ class SessionHandler:
         """
         # 获取用户权限
         try:
-            permission_codes = get_user_permission_codes(db, session.user_id)
+            permission_codes = get_user_permission_codes(db, session.user_id)  # type: ignore[arg-type]
         except Exception as e:
             logger.warning(f"获取用户权限失败: {e}，使用空权限")
             permission_codes = []
 
         context = ChannelContext(
-            channel_type=session.source,
-            chat_id=session.external_chat_id,
-            sender_id=session.external_user_id,
-            session_id=session.session_id,
-            user_id=session.user_id,
+            channel_type=session.source,  # type: ignore[arg-type]
+            chat_id=session.external_chat_id,  # type: ignore[arg-type]
+            sender_id=session.external_user_id,  # type: ignore[arg-type]
+            session_id=session.session_id,  # type: ignore[arg-type]
+            user_id=session.user_id,  # type: ignore[arg-type]
             user_permissions=set(permission_codes)
         )
 
@@ -145,7 +145,7 @@ class SessionHandler:
             ).first()
 
             if session:
-                session.is_active = False
+                session.is_active = False  # type: ignore[assignment]
                 db.commit()
                 logger.info(f"✅ 会话已结束: {context.session_id}")
                 return True

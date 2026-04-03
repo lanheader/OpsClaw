@@ -30,9 +30,9 @@ async def get_alert_statistics(duration: str = "24h") -> Dict[str, Any]:
     silenced = await client.get_silences()
 
     # 按严重级别统计
-    by_severity = {}
-    by_service = {}
-    top_alerts = {}
+    by_severity = {}  # type: ignore[var-annotated]
+    by_service = {}  # type: ignore[var-annotated]
+    top_alerts = {}  # type: ignore[var-annotated]
 
     for alert in active:
         severity = alert.get("labels", {}).get("severity", "unknown")
@@ -80,7 +80,7 @@ async def silence_alert(
     ]
 
     return await client.create_silence(
-        matchers=matchers,
+        matchers=matchers,  # type: ignore[arg-type]
         duration=duration,
         comment=comment or f"Silenced by OpsAgent: {alert_name}",
     )

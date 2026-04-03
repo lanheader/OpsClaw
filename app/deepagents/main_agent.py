@@ -298,13 +298,13 @@ async def create_base_agent(user_id: Optional[int] = None, db: Optional[Session]
         model=llm,
         system_prompt=system_prompt,
         tools=tools,
-        subagents=subagents,
+        subagents=subagents,  # type: ignore[arg-type]
         middleware=custom_middleware,
         checkpointer=checkpointer,
         store=store,
         backend=backend,
         skills=skills,
-        interrupt_on=interrupt_on if interrupt_on else None,
+        interrupt_on=interrupt_on if interrupt_on else None,  # type: ignore[arg-type]
     )
 
     logger.info("✅ Agent 创建完成")
@@ -349,7 +349,7 @@ class DynamicAgentWrapper:
         result = await self._agent.ainvoke(input_data, config=config, **kwargs)
         return _ensure_final_report(result)
 
-    async def astream(self, input_data: Any, config: Optional[dict] = None, **kwargs: Any):
+    async def astream(self, input_data: Any, config: Optional[dict] = None, **kwargs: Any):  # type: ignore[no-untyped-def]
         """
         流式调用 base_agent，确保最后一个事件包含 final_report
         """

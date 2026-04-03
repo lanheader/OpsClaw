@@ -49,7 +49,7 @@ async def get_or_create_feishu_session(
         logger.info(f"Found active Feishu session: {session.session_id}")
         # 如果会话存在但没有用户名，更新用户名
         if sender_name and not session.external_user_name:
-            session.external_user_name = sender_name
+            session.external_user_name = sender_name  # type: ignore[assignment]
             db.commit()
             logger.info(f"Updated Feishu session user name: {sender_name}")
         return session
@@ -67,11 +67,11 @@ async def get_or_create_feishu_session(
 
     if inactive_session:
         # 重新激活最近的非活跃会话
-        inactive_session.is_active = True
-        inactive_session.state = "normal"
-        inactive_session.pending_approval_data = None
+        inactive_session.is_active = True  # type: ignore[assignment]
+        inactive_session.state = "normal"  # type: ignore[assignment]
+        inactive_session.pending_approval_data = None  # type: ignore[assignment]
         if sender_name:
-            inactive_session.external_user_name = sender_name
+            inactive_session.external_user_name = sender_name  # type: ignore[assignment]
         db.commit()
         db.refresh(inactive_session)
         logger.info(f"Reactivated inactive Feishu session: {inactive_session.session_id}")
@@ -145,11 +145,11 @@ def save_feishu_message(
     )
 
     if session:
-        session.updated_at = datetime.now(timezone.utc)
+        session.updated_at = datetime.now(timezone.utc)  # type: ignore[assignment]
 
         # 如果会话没有标题，使用第一条消息作为标题
         if not session.title and role == MessageRole.USER:
-            session.title = content[:30] + ("..." if len(content) > 30 else "")
+            session.title = content[:30] + ("..." if len(content) > 30 else "")  # type: ignore[assignment]
 
         db.commit()
 

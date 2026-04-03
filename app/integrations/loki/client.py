@@ -72,7 +72,7 @@ class LokiClient:
         }
 
         try:
-            response = await self._client.get(url, params=params)
+            response = await self._client.get(url, params=params)  # type: ignore[arg-type]
             response.raise_for_status()
             data = response.json()
 
@@ -80,7 +80,7 @@ class LokiClient:
                 logger.error(f"Loki query failed: {data.get('error')}")
                 return {"status": "error", "error": data.get("error", "Unknown error")}
 
-            return data
+            return data  # type: ignore[no-any-return]
 
         except httpx.HTTPError as e:
             logger.exception(f"Loki HTTP error: {e}")
@@ -295,15 +295,15 @@ class LokiClient:
 
         return log_lines
 
-    async def close(self):
+    async def close(self):  # type: ignore[no-untyped-def]
         """关闭 HTTP 客户端"""
         await self._client.aclose()
 
-    async def __aenter__(self):
+    async def __aenter__(self):  # type: ignore[no-untyped-def]
         """异步上下文管理器入口"""
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(self, exc_type, exc_val, exc_tb):  # type: ignore[no-untyped-def]
         """异步上下文管理器退出"""
         await self.close()
 

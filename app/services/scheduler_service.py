@@ -12,10 +12,10 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 from functools import partial
 
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
-from apscheduler.triggers.date import DateTrigger
-from apscheduler.jobstores.base import JobLookupError
+from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore[import]
+from apscheduler.triggers.cron import CronTrigger  # type: ignore[import]
+from apscheduler.triggers.date import DateTrigger  # type: ignore[import]
+from apscheduler.jobstores.base import JobLookupError  # type: ignore[import]
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -30,12 +30,12 @@ logger = get_logger(__name__)
 class SchedulerService:
     """定时任务调度服务"""
 
-    def __init__(self):
+    def __init__(self):  # type: ignore[no-untyped-def]
         self.scheduler = AsyncIOScheduler()
         self._running = False
         self.settings = get_settings()
 
-    def start(self):
+    def start(self):  # type: ignore[no-untyped-def]
         """启动调度器"""
         if not self._running:
             self.scheduler.start()
@@ -45,14 +45,14 @@ class SchedulerService:
             # 加载所有启用的任务
             self._load_enabled_tasks()
 
-    def shutdown(self):
+    def shutdown(self):  # type: ignore[no-untyped-def]
         """关闭调度器"""
         if self._running:
             self.scheduler.shutdown(wait=False)
             self._running = False
             logger.info("🛑 定时任务调度器已关闭")
 
-    def _load_enabled_tasks(self):
+    def _load_enabled_tasks(self):  # type: ignore[no-untyped-def]
         """加载所有启用的任务"""
         db = next(get_db())
         try:
@@ -105,7 +105,7 @@ class SchedulerService:
                     logger.error(f"❌ Webhook 任务缺少执行时间: {task.id}")
                     return False
 
-                trigger = DateTrigger(run_date=datetime.fromisoformat(task.cron_expr))
+                trigger = DateTrigger(run_date=datetime.fromisoformat(task.cron_expr))  # type: ignore[arg-type]
 
             else:
                 logger.error(f"❌ 未知的任务类型: {task.task_type}")
@@ -140,7 +140,7 @@ class SchedulerService:
             logger.exception(f"❌ 添加任务失败: {e}")
             return False
 
-    async def _execute_task(self, task_id: int):
+    async def _execute_task(self, task_id: int):  # type: ignore[no-untyped-def]
         """执行任务"""
         db = next(get_db())
         log = None
@@ -159,7 +159,7 @@ class SchedulerService:
             logger.info(f"🚀 开始执行任务: {task.name} (ID: {task_id})")
 
             # 更新任务状态
-            task.last_run_time = datetime.now()
+            task.last_run_time = datetime.now()  # type: ignore[assignment]
             db.commit()
 
             # 创建执行日志
@@ -177,8 +177,8 @@ class SchedulerService:
 
             request = ChatRequest(
                 session_id=session_id,
-                user_id="system",
-                content=task.task_params or task.description or task.name,
+                user_id="system",  # type: ignore[arg-type]
+                content=task.task_params or task.description or task.name,  # type: ignore[arg-type]
                 channel=MessageChannel.WEB,
                 user_permissions=[],
             )
@@ -187,21 +187,21 @@ class SchedulerService:
             response = await service.process_message(request)
 
             # 更新执行结果
-            log.finished_at = datetime.now()
-            log.duration_ms = int((log.finished_at - log.started_at).total_seconds() * 1000)
+            log.finished_at = datetime.now()  # type: ignore[assignment]
+            log.duration_ms = int((log.finished_at - log.started_at).total_seconds() * 1000)  # type: ignore[assignment]
 
             if response.workflow_status == "completed":
-                log.status = "success"
-                log.result_summary = response.reply
-                task.last_run_status = "success"
-                task.success_count += 1
+                log.status = "success"  # type: ignore[assignment]
+                log.result_summary = response.reply  # type: ignore[assignment]
+                task.last_run_status = "success"  # type: ignore[assignment]
+                task.success_count += 1  # type: ignore[assignment]
             else:
-                log.status = "failed"
-                log.error_message = response.reply
-                task.last_run_status = "failed"
-                task.failure_count += 1
+                log.status = "failed"  # type: ignore[assignment]
+                log.error_message = response.reply  # type: ignore[assignment]
+                task.last_run_status = "failed"  # type: ignore[assignment]
+                task.failure_count += 1  # type: ignore[assignment]
 
-            task.run_count += 1
+            task.run_count += 1  # type: ignore[assignment]
 
             # 更新下次执行时间
             job = self.scheduler.get_job(f"task_{task_id}")
@@ -216,16 +216,16 @@ class SchedulerService:
 
             # 更新失败状态
             if log:
-                log.status = "error"
-                log.error_message = str(e)
-                log.finished_at = datetime.now()
-                log.duration_ms = int((log.finished_at - log.started_at).total_seconds() * 1000)
+                log.status = "error"  # type: ignore[assignment]
+                log.error_message = str(e)  # type: ignore[assignment]
+                log.finished_at = datetime.now()  # type: ignore[assignment]
+                log.duration_ms = int((log.finished_at - log.started_at).total_seconds() * 1000)  # type: ignore[assignment]
 
             try:
                 task = db.query(ScheduledTask).filter(ScheduledTask.id == task_id).first()
                 if task:
-                    task.last_run_status = "error"
-                    task.failure_count += 1
+                    task.last_run_status = "error"  # type: ignore[assignment]
+                    task.failure_count += 1  # type: ignore[assignment]
                     db.commit()
             except Exception as db_error:
                 logger.error(f"⚠️ 更新任务失败状态时出错 (task_id={task_id}): {db_error}")

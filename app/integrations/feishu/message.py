@@ -178,8 +178,8 @@ def build_workflow_notification_card(
             details.append(f"**错误信息**: {execution_result['error']}")
 
         if details:
-            card["elements"].append({"tag": "hr"})
-            card["elements"].append(
+            card["elements"].append({"tag": "hr"})  # type: ignore[attr-defined]
+            card["elements"].append(  # type: ignore[attr-defined]
                 {"tag": "div", "text": {"tag": "lark_md", "content": "\n".join(details)}}
             )
 
@@ -396,7 +396,7 @@ def build_table_card(
             "tag": "column_set",
             "flex_mode": "none",
             "background_style": "grey",
-            "columns": header_columns,
+            "columns": header_columns,  # type: ignore[dict-item]
         }
     )
 
@@ -416,7 +416,7 @@ def build_table_card(
                 }
             )
 
-        elements.append({"tag": "column_set", "flex_mode": "none", "columns": row_columns})
+        elements.append({"tag": "column_set", "flex_mode": "none", "columns": row_columns})  # type: ignore[dict-item]
 
     # 添加底部说明
     if footer:

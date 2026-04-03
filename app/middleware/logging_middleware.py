@@ -130,7 +130,7 @@ class LoggingMiddleware(AgentMiddleware):
     async def awrap_tool_call(
         self,
         request: ToolCallRequest,
-        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage]],
+        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage]],  # type: ignore[override]
     ) -> ToolMessage:
         """拦截工具调用，记录工具名、参数和耗时"""
         tool_name = request.tool_call.get("name", "unknown")

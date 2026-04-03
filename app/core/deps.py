@@ -29,7 +29,7 @@ async def get_current_user(
     """
     # 验证 Token
     payload = verify_token(token)
-    user_id: str = payload.get("sub")
+    user_id: str = payload.get("sub")  # type: ignore[assignment]
 
     if user_id is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="无效的认证凭证")

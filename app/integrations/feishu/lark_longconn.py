@@ -12,7 +12,7 @@ import time
 from threading import Thread
 from typing import Optional
 
-import lark_oapi as lark
+import lark_oapi as lark  # type: ignore[import]
 
 from app.integrations.feishu.callback import handle_card_action, handle_message_receive
 from app.utils.logger import get_logger
@@ -127,7 +127,7 @@ class FeishuLongConnClient:
         logger.info("事件处理器已创建")
         return event_handler
 
-    def _async_handle_message(self, message, sender):
+    def _async_handle_message(self, message, sender):  # type: ignore[no-untyped-def]
         """把消息处理提交到 FastAPI 主线程的 event loop（线程安全）"""
         message_dict = {
             "message_id": message.message_id,
@@ -166,7 +166,7 @@ class FeishuLongConnClient:
             )
         )
 
-    def _async_handle_card_action(self, action, operator):
+    def _async_handle_card_action(self, action, operator):  # type: ignore[no-untyped-def]
         """异步处理卡片动作"""
         try:
             asyncio.run(handle_card_action(action, operator))
@@ -174,7 +174,7 @@ class FeishuLongConnClient:
         except Exception as e:
             logger.error(f"异步处理卡片动作失败: {e}")
 
-    def start(self, main_loop: Optional[asyncio.AbstractEventLoop] = None):
+    def start(self, main_loop: Optional[asyncio.AbstractEventLoop] = None):  # type: ignore[no-untyped-def]
         """
         启动长连接客户端（在独立线程中运行）
 
@@ -188,14 +188,14 @@ class FeishuLongConnClient:
         self._main_loop = main_loop or asyncio.get_event_loop()
         logger.info(f"正在启动飞书长连接客户端，主 loop: {self._main_loop}")
 
-        def run_ws_client():
+        def run_ws_client():  # type: ignore[no-untyped-def]
             """在独立线程中运行 WebSocket 客户端"""
             # 为这个线程创建完全独立的事件循环
             new_loop = asyncio.new_event_loop()
             asyncio.set_event_loop(new_loop)
 
             # HACK: 替换 SDK 的全局 loop 变量
-            import lark_oapi.ws.client as ws_client_module
+            import lark_oapi.ws.client as ws_client_module  # type: ignore[import]
             ws_client_module.loop = new_loop
 
             try:
@@ -226,7 +226,7 @@ class FeishuLongConnClient:
 
         logger.info("✅ 飞书长连接线程已启动")
 
-    def stop(self):
+    def stop(self):  # type: ignore[no-untyped-def]
         """停止长连接客户端"""
         if self.ws_client:
             try:
@@ -271,7 +271,7 @@ def init_feishu_longconn_client(app_id: str, app_secret: str) -> FeishuLongConnC
     return _feishu_longconn_client
 
 
-def start_feishu_longconn(
+def start_feishu_longconn(  # type: ignore[no-untyped-def]
     app_id: str,
     app_secret: str,
     main_loop: Optional[asyncio.AbstractEventLoop] = None,

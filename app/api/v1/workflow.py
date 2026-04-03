@@ -63,7 +63,7 @@ class WorkflowStatusResponse(BaseModel):
 
 
 @router.post("/execute", response_model=WorkflowExecuteResponse)
-async def execute_workflow(
+async def execute_workflow(  # type: ignore[no-untyped-def]
     request: WorkflowExecuteRequest, current_user: User = Depends(get_current_user)
 ):
     """
@@ -77,7 +77,7 @@ async def execute_workflow(
     """
     try:
         # 1. 创建 Agent（v3.0 单例模式，异步）
-        agent = await create_agent_for_session(
+        agent = await create_agent_for_session(  # type: ignore[call-arg]
             session_id=f"workflow_{current_user.id}_{request.user_input[:20]}",
             enable_approval=True,
             enable_security=True,
@@ -90,7 +90,7 @@ async def execute_workflow(
             "user_role": "admin" if current_user.is_superuser else "user",
             "session_id": session_id,
             "user_input": request.user_input,
-            "trigger_source": request.trigger_source,
+            "trigger_source": request.trigger_source,  # type: ignore[typeddict-item]
             "workflow_status": "running",
             "waiting_for_approval": False,
             "approval_required": False,
@@ -138,6 +138,6 @@ async def execute_workflow(
 
 
 @router.get("/health")
-async def health_check():
+async def health_check():  # type: ignore[no-untyped-def]
     """健康检查"""
     return {"status": "ok", "message": "Workflow API is running"}

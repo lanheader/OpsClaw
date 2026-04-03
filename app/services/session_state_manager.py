@@ -14,14 +14,14 @@ from app.utils.timezone import get_beijing_now
 logger = logging.getLogger(__name__)
 
 
-def _retry_on_db_lock(max_retries: int = 3, delay: float = 0.1):
+def _retry_on_db_lock(max_retries: int = 3, delay: float = 0.1):  # type: ignore[no-untyped-def]
     """重试装饰器，处理数据库锁定错误
 
     注意：此装饰器用于同步函数。如果在异步上下文中调用被装饰的函数，
     建议使用 asyncio.to_thread() 或 run_in_executor() 来避免阻塞事件循环。
     """
-    def decorator(func):
-        def wrapper(*args, **kwargs):
+    def decorator(func):  # type: ignore[no-untyped-def]
+        def wrapper(*args, **kwargs):  # type: ignore[no-untyped-def]
             for attempt in range(max_retries):
                 try:
                     return func(*args, **kwargs)
@@ -62,10 +62,10 @@ class SessionStateManager:
                 return False
 
             # 设置状态
-            session.state = SessionState.AWAITING_APPROVAL.value
-            session.pending_approval_data = approval_data
+            session.state = SessionState.AWAITING_APPROVAL.value  # type: ignore[assignment]
+            session.pending_approval_data = approval_data  # type: ignore[assignment]
             # 记录过期时间，但不用于自动清理，仅供参考
-            session.approval_expires_at = get_beijing_now() + timedelta(
+            session.approval_expires_at = get_beijing_now() + timedelta(  # type: ignore[assignment]
                 minutes=timeout_minutes
             )
 
@@ -112,7 +112,7 @@ class SessionStateManager:
             # 不检查过期时间，因为状态由用户操作驱动
             # 只要状态是 awaiting_approval，就返回批准数据
             logger.info(f"会话处于等待批准状态，返回批准数据")
-            return session.pending_approval_data
+            return session.pending_approval_data  # type: ignore[return-value]
 
         except Exception as e:
             logger.error(f"检查会话状态失败: {e}", exc_info=True)
@@ -137,7 +137,7 @@ class SessionStateManager:
             if not session:
                 return False
 
-            session.state = SessionState.PROCESSING.value
+            session.state = SessionState.PROCESSING.value  # type: ignore[assignment]
             db.commit()
             logger.info(f"会话 {session_id} 已设置为处理中状态")
             return True
@@ -166,9 +166,9 @@ class SessionStateManager:
             if not session:
                 return False
 
-            session.state = SessionState.NORMAL.value
-            session.pending_approval_data = None
-            session.approval_expires_at = None
+            session.state = SessionState.NORMAL.value  # type: ignore[assignment]
+            session.pending_approval_data = None  # type: ignore[assignment]
+            session.approval_expires_at = None  # type: ignore[assignment]
 
             db.commit()
             logger.info(f"会话 {session_id} 已重置为正常状态")
@@ -222,7 +222,7 @@ class SessionStateManager:
             session = db.query(ChatSession).filter_by(session_id=session_id).first()
             if not session:
                 return -1
-            return session.last_processed_message_index or -1
+            return session.last_processed_message_index or -1  # type: ignore[return-value]
         except Exception as e:
             logger.error(f"获取已处理消息索引失败: {e}")
             return -1
@@ -253,7 +253,7 @@ class SessionStateManager:
             # 原因：工作流最后一条消息的索引可能等于 last_processed
             # 之前的条件 (>) 会导致最后一条消息被跳过
             if index >= (session.last_processed_message_index or -1):
-                session.last_processed_message_index = index
+                session.last_processed_message_index = index  # type: ignore[assignment]
                 db.commit()
                 logger.debug(f"会话 {session_id} 已处理消息索引更新为 {index}")
             return True

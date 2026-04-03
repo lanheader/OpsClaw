@@ -1,20 +1,15 @@
 """
-DeepAgents 工厂函数（兼容层）
-
-注意：从 v4.0 开始，Agent 创建由 main_agent.create_base_agent() 负责。
-此文件保留是为了向后兼容，实际上只是调用 main_agent.get_ops_agent()。
-FinalReportEnrichedAgent 已合并到 main_agent.DynamicAgentWrapper。
+DeepAgents 工厂函数
 """
 
-from typing import Any, Optional, Set
-from langchain_core.language_models import BaseChatModel
+from typing import Optional, Set
 from app.deepagents.main_agent import get_ops_agent
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 
-async def create_agent_for_session(
+async def create_agent_for_session(  # type: ignore[no-untyped-def]
     enable_approval: bool = True,
     user_permissions: Optional[Set[str]] = None,
     user_id: Optional[int] = None,

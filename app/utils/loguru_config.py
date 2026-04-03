@@ -63,7 +63,7 @@ logger.add(
 class InterceptHandler(logging.Handler):
     """拦截标准 logging 并转发到 loguru"""
 
-    def emit(self, record):
+    def emit(self, record):  # type: ignore[no-untyped-def]
         # 获取对应的 loguru level
         try:
             level = logger.level(record.levelname).name
@@ -126,7 +126,7 @@ LOGGING_LEVELS = {
 }
 
 
-def setup_logging():
+def setup_logging():  # type: ignore[no-untyped-def]
     """配置日志系统"""
     # 拦截标准库的 logging
     logging.basicConfig(handlers=[InterceptHandler()], level=0, force=True)

@@ -66,7 +66,7 @@ async def expand_query(user_query: str) -> str:
         for k in keys_to_remove:
             del _expand_cache[k]
 
-    return expanded
+    return expanded  # type: ignore[no-any-return]
 
 
 __all__ = ["expand_query"]

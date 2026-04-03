@@ -18,7 +18,7 @@ logger = get_logger(__name__)
 class UserBindingHandler:
     """用户绑定验证处理器"""
 
-    def __init__(self, channel_adapter):
+    def __init__(self, channel_adapter):  # type: ignore[no-untyped-def]
         """
         初始化用户绑定处理器
 
@@ -32,7 +32,7 @@ class UserBindingHandler:
         sender_id: str,
         channel_type: str,
         chat_id: str
-    ) -> Optional[any]:
+    ) -> Optional[any]:  # type: ignore[valid-type]
         """
         验证用户是否已绑定
 

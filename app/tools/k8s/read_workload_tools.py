@@ -34,10 +34,10 @@ from app.tools.k8s.common import init_k8s_client, log_tool_start, log_tool_succe
 class GetDeploymentsTool(BaseOpTool):
     """获取 Deployment 列表工具"""
 
-    def __init__(self, db=None):
+    def __init__(self, db=None):  # type: ignore[no-untyped-def]
         self.k8s_client = init_k8s_client(db)
 
-    async def execute(
+    async def execute(  # type: ignore[no-untyped-def]
         self,
         namespace: str = "default",
         **kwargs
@@ -90,10 +90,10 @@ class GetDeploymentsTool(BaseOpTool):
 class GetStatefulSetsTool(BaseOpTool):
     """获取 StatefulSet 列表工具"""
 
-    def __init__(self, db=None):
+    def __init__(self, db=None):  # type: ignore[no-untyped-def]
         self.k8s_client = init_k8s_client(db)
 
-    async def execute(
+    async def execute(  # type: ignore[no-untyped-def]
         self,
         namespace: str = "default",
         **kwargs
@@ -147,10 +147,10 @@ class GetStatefulSetsTool(BaseOpTool):
 class GetDaemonSetsTool(BaseOpTool):
     """获取 DaemonSet 列表工具"""
 
-    def __init__(self, db=None):
+    def __init__(self, db=None):  # type: ignore[no-untyped-def]
         self.k8s_client = init_k8s_client(db)
 
-    async def execute(
+    async def execute(  # type: ignore[no-untyped-def]
         self,
         namespace: str = "default",
         **kwargs
