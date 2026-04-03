@@ -19,11 +19,6 @@ class Settings(BaseSettings):
         case_sensitive=True,
     )
 
-    # ========== Server Configuration ==========
-    HOST: str = "0.0.0.0"
-    PORT: int = 8000
-    RELOAD: bool = False
-
     # ========== Application ==========
     APP_NAME: str = "OpsClaw LangGraph"
     DEBUG: bool = False
@@ -106,24 +101,6 @@ class Settings(BaseSettings):
     FEISHU_LONGCONN_RECONNECT_INTERVAL: int = 5
     FEISHU_LONGCONN_MAX_RECONNECT_ATTEMPTS: int = 10
 
-    # 飞书聊天模式配置
-    FEISHU_CHAT_MODE: str = Field(
-        default="command_only",
-        description="飞书聊天模式: ai_chat (AI对话) 或 command_only (仅指令)",
-    )
-    FEISHU_REJECT_MESSAGE: str = Field(
-        default="有事说事，没事退朝，运维AI，拒绝闲聊",
-        description="command_only 模式下对非指令消息的回复",
-    )
-
-    # 意图分类配置
-    FEISHU_ENABLE_INTENT_CLASSIFICATION: bool = Field(
-        default=True, description="是否启用意图分类 Agent（仅在 ai_chat 模式下生效）"
-    )
-    FEISHU_INTENT_THRESHOLD: float = Field(
-        default=0.5, ge=0.0, le=1.0, description="意图相关性阈值 (0-1)，高于此值才会响应"
-    )
-
     # ========== 消息渠道架构配置 ==========
     USE_NEW_MESSAGING_ARCH: bool = Field(
         default=True,
@@ -143,56 +120,28 @@ class Settings(BaseSettings):
     KUBECONFIG: Optional[str] = None
 
     # ========== Security Policy ==========
-    SECURITY_POLICY_PATH: str = "./config/security_policy.yaml"
     SECURITY_ENVIRONMENT: str = "production"
 
     # ========== JWT 配置 ==========
     JWT_SECRET_KEY: str = Field(default="your-secret-key-here-change-in-production", min_length=32)
-    JWT_ALGORITHM: str = "HS256"
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     JWT_ACCESS_TOKEN_EXPIRE_DAYS: int = 7
 
     # ========== 初始管理员账号 ==========
-    INITIAL_ADMIN_USERNAME: str = "admin"
     INITIAL_ADMIN_PASSWORD: str = "admin123"
-    INITIAL_ADMIN_EMAIL: str = "admin@example.com"
-
-    # ========== Feature Flags ==========
-    DEFAULT_WORKFLOW_VERSION: str = "v1"
-    V2_INSPECTION_ENABLED: bool = False
-    V2_HEALING_ENABLED: bool = False
-    V2_SECURITY_ENABLED: bool = True
-    V2_PLUGINS: str = ""
 
     # ========== API & CORS ==========
     ENABLE_DOCS: bool = False
     ENABLE_CORS: bool = False
     CORS_ORIGINS: List[str] = []
 
-    # ========== Performance ==========
-    WORKERS: int = 4
-    TIMEOUT: int = 120
-
-    # ========== Mock Data ==========
-    USE_MOCK_DATA: bool = False
-
     # ========== Subagent LLM Configuration ==========
-    SUBAGENT_INTENT_MODEL: str = Field(default="glm-4-flash", description="意图识别子智能体使用的模型")
-    SUBAGENT_ANALYZE_MODEL: str = Field(default="glm-4", description="分析决策子智能体使用的模型")
     SUBAGENT_DATA_MODEL: str = Field(default="glm-4", description="数据采集子智能体使用的模型")
+    SUBAGENT_ANALYZE_MODEL: str = Field(default="glm-4", description="分析诊断子智能体使用的模型")
     SUBAGENT_EXECUTE_MODEL: str = Field(default="glm-4", description="执行操作子智能体使用的模型")
-    SUBAGENT_REPORT_MODEL: str = Field(default="glm-4", description="报告生成子智能体使用的模型")
-    SUBAGENT_FORMAT_MODEL: str = Field(default="glm-4-flash", description="响应格式化子智能体使用的模型")
-
-    # ========== 记忆系统配置 ==========
-    # 使用 SQLite FTS5 全文搜索（零外部依赖）
-
-    # ========== Mem0 记忆系统配置 ==========
-    MEM0_ENABLED: bool = Field(default=True, description="是否启用 Mem0 通用对话记忆")
-    MEM0_API_KEY: Optional[str] = Field(default=None, description="Mem0 Platform API Key（使用托管服务，留空则自托管）")
-    MEM0_PROVIDER: Optional[str] = Field(default=None, description="Mem0 使用的 LLM 提供商（留空则使用 DEFAULT_LLM_PROVIDER）")
-    MEM0_MODEL: Optional[str] = Field(default=None, description="Mem0 使用的模型（留空则使用对应 provider 的默认模型）")
-    MEM0_AUTO_LEARN: bool = Field(default=True, description="是否自动从对话中学习")
+    SUBAGENT_NETWORK_MODEL: str = Field(default="glm-4", description="网络诊断子智能体使用的模型")
+    SUBAGENT_SECURITY_MODEL: str = Field(default="glm-4", description="安全巡检子智能体使用的模型")
+    SUBAGENT_STORAGE_MODEL: str = Field(default="glm-4", description="存储排查子智能体使用的模型")
 
     def get_checkpoint_db_url(self) -> str:
         """返回 LangGraph checkpoint 使用的数据库 URL（独立数据库文件）。"""
@@ -212,23 +161,17 @@ class Settings(BaseSettings):
             return self.OPENROUTER_API_KEY is not None
         return False
 
-    def get_v2_plugins_list(self) -> List[str]:
-        """获取 v2 插件列表。"""
-        if not self.V2_PLUGINS:
-            return []
-        return [p.strip() for p in self.V2_PLUGINS.split(",") if p.strip()]
-
     def get_subagent_model(self, subagent_name: str) -> str:
         """返回指定 subagent 的模型配置。"""
         mapping = {
-            "intent-agent": self.SUBAGENT_INTENT_MODEL,
-            "analyze-agent": self.SUBAGENT_ANALYZE_MODEL,
             "data-agent": self.SUBAGENT_DATA_MODEL,
+            "analyze-agent": self.SUBAGENT_ANALYZE_MODEL,
             "execute-agent": self.SUBAGENT_EXECUTE_MODEL,
-            "report-agent": self.SUBAGENT_REPORT_MODEL,
-            "format-agent": self.SUBAGENT_FORMAT_MODEL,
+            "network-agent": self.SUBAGENT_NETWORK_MODEL,
+            "security-agent": self.SUBAGENT_SECURITY_MODEL,
+            "storage-agent": self.SUBAGENT_STORAGE_MODEL,
         }
-        return mapping.get(subagent_name, self.SUBAGENT_INTENT_MODEL)
+        return mapping.get(subagent_name, self.SUBAGENT_DATA_MODEL)
 
 
 # 单例实例
