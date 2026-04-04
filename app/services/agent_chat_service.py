@@ -28,7 +28,6 @@ from langchain_core.messages import AIMessage, HumanMessage
 from app.core.config import get_settings
 from app.deepagents.factory import create_agent_for_session
 from app.deepagents.main_agent import get_thread_config
-from app.memory.memory_manager import get_memory_manager
 from app.services.session_lock_manager import SessionLockContext
 from app.utils.logger import get_logger, set_request_context
 from app.utils.llm_helper import ensure_final_report_in_state
@@ -302,32 +301,6 @@ def _process_event(
         )
 
     return None
-
-
-async def _inject_memory(text: str, session_id: str, user_id: int) -> str:
-    """记忆注入"""
-    try:
-        memory_manager = get_memory_manager(user_id=str(user_id))
-        context_str = await memory_manager.build_context(
-            user_query=text,
-            session_id=session_id,
-            include_incidents=True,
-            include_knowledge=True,
-            include_session=True,
-            include_summary=True,
-            max_tokens=4500,
-        )
-        if context_str:
-            enhanced = (
-                f"{text}\n\n---\n**参考资料**（来自历史对话和知识库）：\n"
-                f"{context_str}\n---"
-            )
-            logger.info(f"🧠 记忆已注入: {len(context_str)} 字符")
-            return enhanced
-    except Exception as e:
-        logger.warning(f"⚠️ 记忆注入失败: {e}")
-
-    return text
 
 
 def _extract_reply(final_state: Dict[str, Any], workflow_completed: bool) -> Optional[str]:
@@ -770,13 +743,8 @@ class AgentChatService:
             user_id=request.user_id,
         )
 
-        # 记忆注入
-        enhanced_text = await _inject_memory(
-            request.content, request.session_id, request.user_id
-        )
-
         # 构建输入状态和配置
-        input_state = {"messages": [HumanMessage(content=enhanced_text)]}
+        input_state = {"messages": [HumanMessage(content=request.content)]}
         config = get_thread_config(request.session_id)
 
         return agent, input_state, config

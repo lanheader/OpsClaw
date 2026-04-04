@@ -22,8 +22,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from app.core.constants import is_incident_handling
 from app.core.llm_factory import LLMFactory
 from app.utils.logger import get_logger
-from app.memory.sqlite_memory_store import SQLiteMemoryStore
-from app.memory.query_expander import expand_query
+from app.memory.sqlite_fts_store import SQLiteFTSStore, get_langgraph_store
 
 logger = get_logger(__name__)
 
@@ -36,7 +35,7 @@ class MemoryManager:
 
     def __init__(self, user_id: str = None):  # type: ignore[assignment]
         self._user_id = user_id or "default_user"
-        self._store = SQLiteMemoryStore()
+        self._store = get_langgraph_store()
         logger.info(f"📌 记忆管理器初始化: user_id={self._user_id}, 模式=SQLite FTS5")
 
     # ==================== 故障记忆 ====================
@@ -50,27 +49,44 @@ class MemoryManager:
         root_cause: str = None,  # type: ignore[assignment]
         metadata: dict = None  # type: ignore[assignment]
     ) -> str:
-        return self._store.store_incident(
-            content=content,
-            incident_type=incident_type,
-            title=title,
-            resolution=resolution,
-            root_cause=root_cause,
-            metadata=metadata,
+        key = f"incident_{datetime.now().timestamp()}"
+        await self._store.aput(
+            ("memories", "incidents"),
+            key,
+            {
+                "content": content,
+                "title": title or "",
+                "incident_type": incident_type,
+                "resolution": resolution or "",
+                "root_cause": root_cause or "",
+                "created_at": datetime.now().isoformat(),
+                **(metadata or {}),
+            },
         )
+        return key
 
     async def recall_similar_incidents(
         self,
         query: str,
         top_k: int = 5,
-        incident_type: str = None,  # type: ignore[assignment]
-        threshold: float = 0.7
+        incident_type: str = None,
+        threshold: float = 0.5
     ) -> List[Dict]:
-        return self._store.search_incidents(
-            query=query,
-            top_k=top_k,
-            incident_type=incident_type
-        )
+        results = await self._store.asearch(("memories", "incidents"), query=query, limit=top_k * 2)
+        filtered = []
+        for item in results:
+            score = item.score or 0.0
+            if score >= threshold:
+                filtered.append({
+                    "id": item.key,
+                    "title": item.value.get("title", ""),
+                    "content": item.value.get("content", ""),
+                    "incident_type": item.value.get("incident_type", ""),
+                    "resolution": item.value.get("resolution", ""),
+                    "root_cause": item.value.get("root_cause", ""),
+                    "similarity": round(score, 3),
+                })
+        return filtered[:top_k]
 
     # ==================== 知识库 ====================
 
@@ -83,49 +99,44 @@ class MemoryManager:
         source: str = None,  # type: ignore[assignment]
         metadata: dict = None  # type: ignore[assignment]
     ) -> str:
-        return self._store.store_knowledge(
-            title=title,
-            content=content,
-            category=category,
-            tags=tags,
-            source=source,
-            metadata=metadata,
+        key = f"knowledge_{datetime.now().timestamp()}"
+        await self._store.aput(
+            ("memories", "knowledge"),
+            key,
+            {
+                "content": content,
+                "title": title,
+                "category": category,
+                "tags": ",".join(tags or []),
+                "source": source or "",
+                "created_at": datetime.now().isoformat(),
+                **(metadata or {}),
+            },
         )
+        return key
 
     async def query_knowledge(
         self,
         query: str,
         category: str = None,  # type: ignore[assignment]
         top_k: int = 5,
-        threshold: float = 0.7
+        threshold: float = 0.5
     ) -> List[Dict]:
-        return self._store.search_knowledge(
-            query=query,
-            category=category,
-            top_k=top_k
-        )
+        results = await self._store.asearch(("memories", "knowledge"), query=query, limit=top_k * 2)
+        filtered = []
+        for item in results:
+            if (item.score or 0.0) >= threshold:
+                filtered.append({
+                    "id": item.key,
+                    "title": item.value.get("title", ""),
+                    "content": item.value.get("content", ""),
+                    "category": item.value.get("category", ""),
+                    "tags": (item.value.get("tags") or "").split(","),
+                    "similarity": round(item.score or 0, 3),
+                })
+        return filtered[:top_k]
 
     # ==================== 会话记忆 ====================
-
-    async def remember_message(
-        self,
-        session_id: str,
-        role: str,
-        content: str,
-        importance: float = 0.5
-    ) -> str:
-        # SQLite FTS5 模式下，会话消息由 checkpointer 管理
-        # 这里只存储摘要
-        return ""
-
-    async def recall_session_context(
-        self,
-        session_id: str,
-        query: str,
-        top_k: int = 10
-    ) -> List[Dict]:
-        # SQLite FTS5 模式下，会话上下文由 checkpointer 的 messages 管理
-        return []
 
     async def summarize_session(
         self,
@@ -168,8 +179,16 @@ class MemoryManager:
             ])
             summary = response.content.strip()
 
-            # 存储摘要到 FTS5 数据库（覆盖更新）
-            self._store.store_summary(session_id, summary)
+            # 存储摘要到 FTS5 Store（覆盖更新）
+            await self._store.aput(
+                ("memories", "sessions"),
+                f"summary_{session_id}",
+                {
+                    "content": summary,
+                    "session_id": session_id,
+                    "updated_at": datetime.now().isoformat(),
+                },
+            )
             logger.info(f"🧠 会话摘要已生成并存储: session={session_id}, len={len(summary)}")
             return summary  # type: ignore[no-any-return]
 
@@ -186,86 +205,15 @@ class MemoryManager:
         检索最近的会话摘要。
         """
         try:
-            return self._store.get_summary(session_id) or ""
+            results = await self._store.asearch(
+                ("memories", "sessions"),
+                query=f"summary_{session_id}",
+                limit=1
+            )
+            return results[0].value.get("content", "") if results else ""
         except Exception as e:
             logger.warning(f"⚠️ 会话摘要检索失败: {e}")
             return ""
-
-    # ==================== 上下文构建 ====================
-
-    async def build_context(
-        self,
-        user_query: str,
-        session_id: str = None,  # type: ignore[assignment]
-        include_incidents: bool = True,
-        include_knowledge: bool = True,
-        include_session: bool = False,
-        include_summary: bool = True,
-        max_tokens: int = 4500,
-        enable_truncation: bool = True,
-    ) -> str:
-        """构建记忆上下文字符串，注入到用户 prompt"""
-        context_parts = []
-        current_tokens = 0
-
-        # 扩展查询关键词
-        search_query = user_query
-        try:
-            search_query = await expand_query(user_query)
-        except Exception as e:
-            logger.warning(f"⚠️ 查询扩展失败，使用原始查询: {e}")
-            search_query = user_query
-
-        # 优先注入会话摘要（若有），作为长期记忆补充
-        if include_summary and session_id:
-            try:
-                summary = await self.recall_session_summary(session_id)
-                if summary:
-                    text = self._format_summary(summary)
-                    tokens = self._estimate_tokens(text)
-                    if current_tokens + tokens <= max_tokens:
-                        context_parts.append(text)
-                        current_tokens += tokens
-            except Exception as e:
-                logger.warning(f"⚠️ 会话摘要检索失败: {e}")
-
-        if include_incidents:
-            try:
-                incidents = await self.recall_similar_incidents(search_query, top_k=3)
-                if incidents:
-                    text = self._format_incidents(incidents)
-                    tokens = self._estimate_tokens(text)
-                    if current_tokens + tokens <= max_tokens:
-                        context_parts.append(text)
-                        current_tokens += tokens
-            except Exception as e:
-                logger.warning(f"⚠️ 故障记忆检索失败: {e}")
-
-        if include_knowledge:
-            try:
-                knowledge = await self.query_knowledge(search_query, top_k=3)
-                if knowledge:
-                    text = self._format_knowledge(knowledge)
-                    tokens = self._estimate_tokens(text)
-                    if current_tokens + tokens <= max_tokens:
-                        context_parts.append(text)
-                        current_tokens += tokens
-            except Exception as e:
-                logger.warning(f"⚠️ 知识库检索失败: {e}")
-
-        if include_session and session_id:
-            try:
-                contexts = await self.recall_session_context(session_id, user_query, top_k=5)
-                if contexts:
-                    text = self._format_session_context(contexts)
-                    tokens = self._estimate_tokens(text)
-                    if current_tokens + tokens <= max_tokens:
-                        context_parts.append(text)
-                        current_tokens += tokens
-            except Exception as e:
-                logger.warning(f"⚠️ 会话记忆检索失败: {e}")
-
-        return "\n\n".join(context_parts)
 
     # ==================== 自动学习 ====================
 
@@ -311,13 +259,14 @@ class MemoryManager:
     # ==================== 统计 ====================
 
     async def get_stats(self) -> Dict[str, Any]:
-        stats = self._store.get_stats()
-        return {"sqlite_fts5": stats, "timestamp": datetime.now().isoformat()}
+        # Store API 不直接提供统计，返回基本信息
+        return {
+            "backend": "SQLiteFTSStore",
+            "timestamp": datetime.now().isoformat(),
+            "note": "使用 LangGraph Store API，统计功能由 Store 内部管理"
+        }
 
     # ==================== 内部工具 ====================
-
-    def _format_summary(self, summary: str) -> str:
-        return f"## 本次会话摘要\n{summary}"
 
     def _estimate_tokens(self, text: str) -> int:
         if not text:
@@ -325,34 +274,6 @@ class MemoryManager:
         chinese_chars = sum(1 for c in text if '\u4e00' <= c <= '\u9fff')
         other_chars = len(text) - chinese_chars
         return int(chinese_chars / 1.5 + other_chars / 4)
-
-    def _format_incidents(self, incidents: List[Dict]) -> str:
-        parts = ["## 相关历史故障"]
-        for inc in incidents:
-            parts.append(f"\n### {inc.get('title') or inc.get('incident_type', '')}")
-            parts.append(f"**相似度**: {inc.get('similarity', 0):.0%}")
-            parts.append(f"**内容**: {inc.get('content', '')[:200]}")
-            if inc.get("resolution"):
-                parts.append(f"**解决方案**: {inc['resolution'][:200]}")
-            if inc.get("root_cause"):
-                parts.append(f"**根本原因**: {inc['root_cause'][:200]}")
-        return "\n".join(parts)
-
-    def _format_knowledge(self, knowledge: List[Dict]) -> str:
-        parts = ["## 相关知识"]
-        for k in knowledge:
-            parts.append(f"\n### [{k.get('category', 'general')}] {k.get('title', '')}")
-            parts.append(f"**相似度**: {k.get('similarity', 0):.0%}")
-            parts.append(f"**内容**: {k.get('content', '')[:300]}")
-            if k.get("tags"):
-                parts.append(f"**标签**: {', '.join(k['tags'])}")
-        return "\n".join(parts)
-
-    def _format_session_context(self, contexts: List[Dict]) -> str:
-        parts = ["## 对话历史"]
-        for ctx in contexts[:5]:
-            parts.append(f"- **{ctx.get('role', '')}**: {ctx.get('content', '')[:150]}")
-        return "\n".join(parts)
 
     def _detect_incident_type(self, query: str) -> str:
         q = query.lower()

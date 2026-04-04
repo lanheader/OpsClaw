@@ -14,6 +14,7 @@ import {
   MessageOutlined,
   EditOutlined,
   ClockCircleOutlined,
+  BookOutlined,
 } from '@ant-design/icons';
 import React, { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
@@ -30,6 +31,7 @@ import Profile from './pages/Profile';
 import PromptManagement from './pages/PromptManagement';
 import ScheduledTasks from './pages/ScheduledTasks';
 import OnboardingWizard from './pages/OnboardingWizard';
+import KnowledgeManagement from './pages/KnowledgeManagement';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { PermissionProvider, usePermission } from './contexts/PermissionContext';
 import { PrivateRoute } from './components/PrivateRoute';
@@ -112,6 +114,11 @@ const AppLayout: React.FC = () => {
       key: '/scheduled-tasks',
       icon: <ClockCircleOutlined />,
       label: <Link to="/scheduled-tasks">定时任务</Link>,
+    },
+    {
+      key: '/knowledge',
+      icon: <BookOutlined />,
+      label: <Link to="/knowledge">知识库</Link>,
     },
     hasPermission('view_history') && {
       key: '/history',
@@ -205,6 +212,7 @@ const AppLayout: React.FC = () => {
               <Route path="/settings" element={<SystemSettings />} />
               <Route path="/prompts" element={<PromptManagement />} />
               <Route path="/scheduled-tasks" element={<ScheduledTasks />} />
+              <Route path="/knowledge" element={<KnowledgeManagement />} />
               <Route path="/onboarding" element={<OnboardingWizard />} />
             </Routes>
           </div>

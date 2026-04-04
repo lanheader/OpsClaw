@@ -139,8 +139,8 @@ async def search_incidents(
                 tags=inc.tags,  # type: ignore[arg-type]
                 is_verified=inc.is_verified,  # type: ignore[arg-type]
                 is_active=inc.is_active,  # type: ignore[arg-type]
-                created_at=inc.created_at.isoformat(),
-                updated_at=inc.updated_at.isoformat(),
+                created_at=inc.created_at.isoformat() if inc.created_at else "",
+                updated_at=inc.updated_at.isoformat() if inc.updated_at else "",
             )
             for inc in incidents
         ]
@@ -198,8 +198,8 @@ async def list_incidents(
                 tags=inc.tags,  # type: ignore[arg-type]
                 is_verified=inc.is_verified,  # type: ignore[arg-type]
                 is_active=inc.is_active,  # type: ignore[arg-type]
-                created_at=inc.created_at.isoformat(),
-                updated_at=inc.updated_at.isoformat(),
+                created_at=inc.created_at.isoformat() if inc.created_at else "",
+                updated_at=inc.updated_at.isoformat() if inc.updated_at else "",
             )
             for inc in incidents
         ]
@@ -237,8 +237,8 @@ async def get_incident(
             tags=incident.tags,  # type: ignore[arg-type]
             is_verified=incident.is_verified,  # type: ignore[arg-type]
             is_active=incident.is_active,  # type: ignore[arg-type]
-            created_at=incident.created_at.isoformat(),
-            updated_at=incident.updated_at.isoformat(),
+            created_at=incident.created_at.isoformat() if incident.created_at else "",
+            updated_at=incident.updated_at.isoformat() if incident.updated_at else "",
         )
 
     finally:
@@ -286,8 +286,8 @@ async def create_incident(
             tags=incident.tags,  # type: ignore[arg-type]
             is_verified=incident.is_verified,  # type: ignore[arg-type]
             is_active=incident.is_active,  # type: ignore[arg-type]
-            created_at=incident.created_at.isoformat(),
-            updated_at=incident.updated_at.isoformat(),
+            created_at=incident.created_at.isoformat() if incident.created_at else "",
+            updated_at=incident.updated_at.isoformat() if incident.updated_at else "",
         )
 
     finally:
@@ -353,8 +353,8 @@ async def update_incident(
             tags=incident.tags,  # type: ignore[arg-type]
             is_verified=incident.is_verified,  # type: ignore[arg-type]
             is_active=incident.is_active,  # type: ignore[arg-type]
-            created_at=incident.created_at.isoformat(),
-            updated_at=incident.updated_at.isoformat(),
+            created_at=incident.created_at.isoformat() if incident.created_at else "",
+            updated_at=incident.updated_at.isoformat() if incident.updated_at else "",
         )
 
     finally:

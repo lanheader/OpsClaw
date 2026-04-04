@@ -4,13 +4,10 @@ from typing import Any, Optional, Set, List
 
 from deepagents import create_deep_agent, SubAgent
 from deepagents.backends.filesystem import FilesystemBackend
-from langchain_core.language_models import BaseChatModel
 from sqlalchemy.orm import Session
-
-from app.middleware.error_filtering_middleware import ErrorFilteringMiddleware
+from app.services.approval_config_service import ApprovalConfigService
 from app.middleware.logging_middleware import LoggingMiddleware
-from app.middleware.dynamic_permission_middleware import DynamicPermissionMiddleware
-from app.middleware.dynamic_approval_middleware import DynamicApprovalMiddleware
+from app.middleware.store_memory_middleware import StoreMemoryMiddleware
 from app.core.llm_factory import LLMFactory
 from app.core.checkpointer import get_checkpointer
 from app.services.unified_prompt_optimizer import get_prompt_optimizer
@@ -19,55 +16,9 @@ from app.utils.logger import get_logger
 from app.memory import get_langgraph_store
 from app.deepagents.subagents import get_all_subagents
 
+from langchain.agents.middleware import ContextEditingMiddleware, ClearToolUsesEdit
 
 logger = get_logger(__name__)
-
-FILE_OUTPUT_PROMPT = """
-<language_rule>
-- 你必须始终使用中文（简体中文）回复用户
-- 所有分析报告、诊断结果、修复建议都必须使用中文
-- 工具调用参数保持英文（如 namespace、label 等），但回复内容的描述必须用中文
-- 专业术语可以保留英文原文，但需附中文解释（如 CPU 使用率、OOM 等）
-</language_rule>
-
-<file_output>
-完成分析后，你可以使用 `write_file` 工具生成报告文件。
-
-**重要：路径必须使用相对路径，不要加前导斜杠 /**
-
-**write_file 工具参数：**
-- file_path: 文件路径（相对路径，不要加 /）
-- content: 文件内容
-
-正确示例：
-- write_file(file_path="workspace/reports/2026-04-03/sess_abc_diagnosis.md", content="...")
-- write_file(file_path="workspace/runbooks/pod_crash.md", content="...")
-- write_file(file_path="workspace/exports/sess_abc_data.json", content="...")
-
-错误示例（不要这样写）：
-- ❌ write_file(path="workspace/reports/...", content="...")  # 参数名错误，应该是 file_path
-- ❌ write_file(file_path="/workspace/reports/...", content="...")  # 不要用绝对路径
-- ❌ write_file(file_path="reports/...", content="...")  # 缺少 workspace/ 前缀
-
-工具采集的大数据已自动保存到 workspace/data/{session_id}/ 目录。
-如需读取完整数据，使用 read_file 工具，路径格式：workspace/data/{session_id}/{tool_name}_latest.json
-
-报告格式使用 Markdown，包含：
-1. 问题摘要
-2. 根因分析
-3. 证据（工具调用结果）
-4. 修复建议
-5. 验证步骤
-</file_output>
-"""
-
-
-def _get_llm(llm: Optional[BaseChatModel] = None) -> BaseChatModel:
-    """获取 LLM 实例"""
-    if llm is None:
-        llm = LLMFactory.create_llm()
-    return llm
-
 
 def _load_all_subagents(db: Optional[Session] = None) -> List[SubAgent]:
     """加载所有 Subagent 列表（工具按集成开关动态过滤）"""
@@ -171,46 +122,17 @@ def _get_skills_config() -> tuple:
     return project_root, skills_dir, False, backend, None
 
 
-async def create_base_agent(user_id: Optional[int] = None, db: Optional[Session] = None) -> Any:
-    """
-    懒加载创建 Agent，每次都新建（不缓存）。
-    创建前根据 user_id+db 查用户角色，动态生成 interrupt_on。
-
-    Args:
-        user_id: 用户 ID
-        db: 数据库会话
-    """
-    logger.info("🏗️ 创建 Agent（懒加载）")
-
-    # 0. 获取项目根目录
-    project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-
-    # 1. 获取 LLM
-    llm = _get_llm()
-
-    # 2. 按用户权限加载工具（不过滤则加载全部）
-    subagents = _load_all_subagents(db)
-    tools = _load_tools_for_user(user_id, db)
-
-    # 3. 获取基础设施
-    checkpointer = await get_checkpointer()
-    store = get_langgraph_store()
-    logger.info("🧠 SQLite FTS5 Store 适配器已加载（全文搜索，零外部依赖）")
-
-    # 4. Skills 配置
-    _, _, _, backend, skills = _get_skills_config()
-
-    # 5. 确保输出目录存在
-    for output_dir in ["workspace/reports", "workspace/runbooks", "workspace/exports", "workspace/data"]:
-        os.makedirs(os.path.join(project_root, output_dir), exist_ok=True)
-
-    # 获取需要审批的工具（从已加载的工具列表中筛选）
+def _build_interrupt_on(
+    tools: List[Any],
+    user_id: Optional[int],
+    db: Optional[Session],
+) -> dict:
+    """构建 interrupt_on 配置（注册表工具 + 内置写工具）"""
     interrupt_on = {}
     tool_names = {t.name for t in tools}
-    try:
-        from app.services.approval_config_service import ApprovalConfigService
+    builtin_tools_need_approval = {"write_file", "edit_file"}
 
-        # 查用户角色（委托给服务层）
+    try:
         user_role = None
         if user_id is not None and db is not None:
             try:
@@ -218,7 +140,6 @@ async def create_base_agent(user_id: Optional[int] = None, db: Optional[Session]
             except Exception as e:
                 logger.warning(f"获取用户角色失败: {e}")
 
-        # db 为 None 时用临时连接
         _db = db
         _should_close = False
         if _db is None:
@@ -230,11 +151,8 @@ async def create_base_agent(user_id: Optional[int] = None, db: Optional[Session]
             tools_need_approval = ApprovalConfigService.get_tools_require_approval(
                 _db, user_role=user_role
             )
-            # 关键：只对用户可用的工具中的需审批工具设置 interrupt_on
-            # 注意：DeepAgents 内置工具（write_file, edit_file）不在 tool_names 中，
-            # 它们的审批由 DynamicApprovalMiddleware 处理，不走 interrupt_on 机制
             for tool_name in tools_need_approval:
-                if tool_name in tool_names:
+                if tool_name in tool_names or tool_name in builtin_tools_need_approval:
                     interrupt_on[tool_name] = True
             logger.info(
                 f"🔒 审批配置: user_id={user_id}, role={user_role}, "
@@ -243,30 +161,38 @@ async def create_base_agent(user_id: Optional[int] = None, db: Optional[Session]
         finally:
             if _should_close:
                 _db.close()
+
     except Exception as e:
         logger.warning(f"⚠️ 加载审批配置失败: {e}，安全兜底拦截所有高风险工具")
         for t in [
             "force_delete_pod", "delete_pod", "delete_deployment",
             "delete_service", "delete_config_map", "delete_secret",
             "restart_deployment", "scale_deployment", "update_deployment_image",
+            "write_file", "edit_file",
         ]:
             interrupt_on[t] = True
 
-    custom_middleware = [
-        ErrorFilteringMiddleware(),
-        LoggingMiddleware(),
-        DynamicPermissionMiddleware(),
-        DynamicApprovalMiddleware(),
-    ]
-    logger.info("🔧 已加载中间件: 错误过滤、日志记录、权限检查、审批检查")
+    return interrupt_on
 
-    # 7. 从数据库加载 system_prompt（优先数据库，降级到默认提示词）
+
+def _build_middleware() -> list:
+    """构建中间件列表"""
+    middleware = [
+        ContextEditingMiddleware(),
+        LoggingMiddleware(),
+        StoreMemoryMiddleware(max_tokens=3000, top_k=5, score_threshold=0.5),
+    ]
+    logger.info("🔧 已加载中间件: 上下文编辑、日志记录、记忆注入")
+    return middleware
+
+
+def _load_system_prompt() -> str:
+    """从数据库加载 system_prompt，降级到默认提示词"""
     prompt_optimizer = get_prompt_optimizer()
     try:
-        main_prompt = prompt_optimizer.get_prompt_for_agent("main-agent")
+        return prompt_optimizer.get_prompt_for_agent("main-agent")
     except ValueError:
-        # 如果数据库中没有，使用默认提示词
-        main_prompt = """你是一个智能运维助手（OpsClaw），负责帮助用户诊断和解决 Kubernetes 集群问题。
+        return """你是一个智能运维助手（OpsClaw），负责帮助用户诊断和解决 Kubernetes 集群问题。
 
 ## 核心能力
 1. 集群状态查询和分析
@@ -286,13 +212,52 @@ async def create_base_agent(user_id: Optional[int] = None, db: Optional[Session]
 - 提供清晰的问题分析报告
 - 给出可操作的解决方案"""
 
-    system_prompt = main_prompt + FILE_OUTPUT_PROMPT
 
-    # 8. 创建 Agent（记忆注入由 agent_chat_service._inject_memory 处理）
+async def create_base_agent(user_id: Optional[int] = None, db: Optional[Session] = None) -> Any:
+    """
+    懒加载创建 Agent，每次都新建（不缓存）。
+    创建前根据 user_id+db 查用户角色，动态生成 interrupt_on。
+
+    Args:
+        user_id: 用户 ID
+        db: 数据库会话
+    """
+    logger.info("🏗️ 创建 Agent（懒加载）")
+
+    # 0. 获取项目根目录
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+
+    # 1. 获取 LLM
+    llm = LLMFactory.create_llm()
+
+    # 2. 按用户权限加载工具
+    subagents = _load_all_subagents(db)
+    tools = _load_tools_for_user(user_id, db)
+
+    # 3. 获取基础设施
+    checkpointer = await get_checkpointer()
+    store = get_langgraph_store()
+
+    # 4. Skills 配置
+    _, _, _, backend, skills = _get_skills_config()
+
+    # 5. 确保输出目录存在
+    for output_dir in ["workspace/reports", "workspace/runbooks", "workspace/exports", "workspace/data"]:
+        os.makedirs(os.path.join(project_root, output_dir), exist_ok=True)
+
+    # 6. 构建审批配置、中间件、提示词
+    interrupt_on = _build_interrupt_on(tools, user_id, db)
+    custom_middleware = _build_middleware()
+    main_prompt = _load_system_prompt()
+
+    # 7. 创建 Agent（三层记忆架构）
+    # L1: Checkpointer (短期) - 原始对话 messages
+    # L2: Store + StoreMemoryMiddleware (中期) - 故障记录、知识库
+    # L3: MemoryMiddleware (长期) - 用户偏好、环境约定
     agent = create_deep_agent(
         name="OpsAgent",
         model=llm,
-        system_prompt=system_prompt,
+        system_prompt=main_prompt,
         tools=tools,
         subagents=subagents,
         middleware=custom_middleware,
@@ -301,6 +266,7 @@ async def create_base_agent(user_id: Optional[int] = None, db: Optional[Session]
         backend=backend,
         skills=skills,
         interrupt_on=interrupt_on if interrupt_on else None,
+        memory=["/workspace/memory/AGENTS.md"],
     )
 
     logger.info("✅ Agent 创建完成")

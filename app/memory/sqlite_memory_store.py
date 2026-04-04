@@ -121,53 +121,50 @@ class SQLiteMemoryStore:
         logger.debug(f"💾 [FTS5] 存储故障记忆: {doc_id}")
         return doc_id
 
-    def search_incidents(
-        self, query: str, top_k: int = 5, incident_type: str = None  # type: ignore[assignment]
-    ) -> List[Dict[str, Any]]:
+    def search_incidents(self, query, top_k=5, incident_type=None):
         terms = self._escape_fts_query(query)
-
-        # 空查询时返回空列表（或可根据需求返回最新记录）
         if not terms:
             return []
 
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                if incident_type:
-                    sql = """
-                        SELECT f.rowid, f.title, f.content, f.incident_type,
-                               f.resolution, f.root_cause, m.created_at,
-                               bm25(incidents_fts) as rank
-                        FROM incidents_fts f
-                        JOIN incidents_meta m ON f.rowid = m.rowid
-                        WHERE incidents_fts MATCH ? AND f.incident_type = ?
-                        ORDER BY rank LIMIT ?
-                    """
-                    rows = conn.execute(sql, [terms, incident_type, top_k]).fetchall()
-                else:
-                    sql = """
-                        SELECT f.rowid, f.title, f.content, f.incident_type,
-                               f.resolution, f.root_cause, m.created_at,
-                               bm25(incidents_fts) as rank
-                        FROM incidents_fts f
-                        JOIN incidents_meta m ON f.rowid = m.rowid
-                        WHERE incidents_fts MATCH ?
-                        ORDER BY rank LIMIT ?
-                    """
-                    rows = conn.execute(sql, [terms, top_k]).fetchall()
+        with sqlite3.connect(self.db_path) as conn:
+            sql = """
+                  SELECT f.rowid, f.title, f.content, f.incident_type,
+                         f.resolution, f.root_cause, m.created_at,
+                         bm25(incidents_fts) as rank
+                  FROM incidents_fts f
+                           JOIN incidents_meta m ON f.rowid = m.rowid
+                  WHERE incidents_fts MATCH ?
+                  ORDER BY rank LIMIT ? \
+                  """
+            rows = conn.execute(sql, [terms, top_k]).fetchall()
 
-                return [
-                    {
-                        "id": f"incident_{r[0]}",
-                        "title": r[1], "content": r[2],
-                        "incident_type": r[3], "resolution": r[4],
-                        "root_cause": r[5], "created_at": r[6],
-                        "similarity": 1.0,  # FTS5 不返回相似度分数，标记为 1.0
-                    }
-                    for r in rows
-                ]
-        except Exception as e:
-            logger.warning(f"⚠️ FTS5 故障搜索失败: {e}")
-            return []
+            results = []
+            for r in rows:
+                # rank 是负数，越小越相关
+                rank = r[7]  # bm25 rank
+
+                # 转换为相似度：rank 越小 → 分数越高
+                # 用 sigmoid 变换：score = 1 / (1 + e^(rank/10))
+                # -10 → 0.73, -5 → 0.62, -1 → 0.52, 0 → 0.50, -50 → 0.99
+                import math
+                score = 1.0 / (1.0 + math.exp(rank / 10.0))
+
+                # 过滤：只返回相似度 > 0.5 的结果
+                if score < 0.5:
+                    continue
+
+                results.append({
+                    "id": f"incident_{r[0]}",
+                    "title": r[1],
+                    "content": r[2],
+                    "incident_type": r[3],
+                    "resolution": r[4],
+                    "root_cause": r[5],
+                    "created_at": r[6],
+                    "similarity": round(score, 3),  # ← 用真实分数
+                })
+
+            return results
 
     # ===== 知识库 =====
 
