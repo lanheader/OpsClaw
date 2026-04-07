@@ -1,19 +1,19 @@
 version: '3.8'
 
 services:
-  ops-agent:
+  opsclaw:
     build:
       context: .
       dockerfile: Dockerfile
-    image: lanjiaxuan/ops-agent:v0.0.4
-    container_name: ops-agent
+    image: lanjiaxuan/opsclaw:v0.0.4
+    container_name: opsclaw
     restart: unless-stopped
     ports:
       - "8088:80"
     volumes:
       # 数据持久化
-      - ops-agent-data:/app/workspace/data
-      - ops-agent-logs:/app/workspace/logs
+      - opsclaw-data:/app/workspace/data
+      - opsclaw-logs:/app/workspace/logs
       # K8s 配置（可选）
       - ${HOME}/.kube:/root/.kube:ro
       # 环境变量文件
