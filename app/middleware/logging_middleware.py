@@ -14,7 +14,7 @@ from langchain.agents.middleware.types import (
 )
 from langchain_core.messages import AIMessage, ToolMessage
 
-from app.utils.logger import get_logger, get_request_context, log_tool_call
+from app.utils.logger import get_logger, get_request_context
 
 logger = get_logger(__name__)
 
@@ -145,10 +145,8 @@ class LoggingMiddleware(AgentMiddleware):
         subagent_name = tool_args.get("subagent_type", tool_args.get("subagent", "unknown")) if is_subagent else None
         task_description = tool_args.get("description", tool_args.get("task", ""))[:80] if is_subagent else ""
 
-        # 只显示参数的 key 和值的简短预览，避免日志过长
         args_preview = {k: str(v)[:60] for k, v in tool_args.items()}
 
-        # ========== 工具调用开始 ==========
         if is_subagent:
             logger.info(
                 f"🎯 [{session_id}] [SubAgent 开始] {subagent_name} | 任务: {task_description}"
@@ -175,7 +173,6 @@ class LoggingMiddleware(AgentMiddleware):
         elapsed = time.time() - start
         result_preview = str(getattr(result, "content", ""))[:100]
 
-        # ========== 工具调用结束 ==========
         if is_subagent:
             logger.info(
                 f"✅ [{session_id}] [SubAgent 完成] {subagent_name} | 耗时={elapsed:.2f}s | 结果: {result_preview!r}"
