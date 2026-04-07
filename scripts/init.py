@@ -39,6 +39,7 @@ from app.models.role_permission import RolePermission
 from app.models.approval_config import ApprovalConfig
 from app.models.system_setting import SystemSetting
 from app.models.agent_prompt import AgentPrompt
+from app.models.incident_knowledge import IncidentKnowledgeBase
 from app.services.approval_config_service import ApprovalConfigService
 from app.core.security import hash_password
 from app.core.config import get_settings
