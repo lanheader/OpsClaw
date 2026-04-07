@@ -5,11 +5,11 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: lanjiaxuan/ops-agent:v4.0
+    image: lanjiaxuan/ops-agent:v0.0.4
     container_name: ops-agent
     restart: unless-stopped
     ports:
-      - "80:80"
+      - "8088:80"
     volumes:
       # 数据持久化
       - ops-agent-data:/app/workspace/data
@@ -57,9 +57,7 @@ services:
       - LOKI_URL=${LOKI_URL:-}
 
       # 初始管理员
-      - INITIAL_ADMIN_USERNAME=${INITIAL_ADMIN_USERNAME:-admin}
       - INITIAL_ADMIN_PASSWORD=${INITIAL_ADMIN_PASSWORD:-admin123}
-      - INITIAL_ADMIN_EMAIL=${INITIAL_ADMIN_EMAIL:-admin@ops-agent.local}
 
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost/api/v1/health"]

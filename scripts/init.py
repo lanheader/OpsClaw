@@ -420,13 +420,13 @@ def init_admin_user():
         settings = get_settings()
 
         # 检查管理员是否存在
-        admin = db.query(User).filter(User.username == settings.INITIAL_ADMIN_USERNAME).first()
+        admin = db.query(User).filter(User.username == "admin").first()
         if admin:
             logger.info(f"  管理员用户已存在: {admin.username}")
         else:
             admin = User(
-                username=settings.INITIAL_ADMIN_USERNAME,
-                email=settings.INITIAL_ADMIN_EMAIL,
+                username="admin",
+                email="admin@opsclaw.example.com",
                 hashed_password=hash_password(settings.INITIAL_ADMIN_PASSWORD),
                 is_superuser=True,
                 is_active=True,
@@ -699,7 +699,7 @@ def main():
         logger.info("  1. 启动服务: uv run uvicorn app.main:app --reload")
         logger.info("  2. 访问 API 文档: http://localhost:8000/docs")
         logger.info("  3. 访问 Web UI: http://localhost:5173")
-        logger.info(f"  4. 默认账号: {get_settings().INITIAL_ADMIN_USERNAME} / {get_settings().INITIAL_ADMIN_PASSWORD}")
+        logger.info(f"  4. 默认账号: admin / {get_settings().INITIAL_ADMIN_PASSWORD}")
         logger.info("")
 
     except Exception as e:
