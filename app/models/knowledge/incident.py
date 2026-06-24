@@ -1,3 +1,4 @@
+# app/models/knowledge/incident.py
 """
 运维知识库数据模型
 
@@ -6,9 +7,9 @@
 
 from datetime import datetime
 from sqlalchemy import Column, Integer, String, Text, Float, DateTime, Boolean
-from sqlalchemy.orm import relationship
 
-from app.models.database import Base
+from app.models.database import bases
+Base = bases["knowledge"]
 
 
 class IncidentKnowledgeBase(Base):

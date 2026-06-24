@@ -1,8 +1,10 @@
+# app/models/config/approval.py
 """审批配置数据模型"""
 
 from datetime import datetime, timezone
 from sqlalchemy import Column, Integer, String, Boolean, JSON, DateTime, Index
-from app.models.database import Base
+from app.models.database import bases
+Base = bases["config"]
 
 
 class ApprovalConfig(Base):

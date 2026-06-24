@@ -26,9 +26,9 @@ from app.integrations.messaging.handlers.session_handler import SessionHandler
 from app.integrations.messaging.handlers.command_handler import CommandHandler
 from app.integrations.messaging.handlers.approval_handler import ApprovalHandler
 from app.integrations.messaging.handlers.agent_invoker import AgentInvoker
-from app.models.database import SessionLocal
+from app.models.database import session_makers
 from app.services.chat_service import save_feishu_message
-from app.models.chat_message import MessageRole
+from app.models.chat.message import MessageRole
 
 logger = get_logger(__name__)
 
@@ -116,7 +116,7 @@ class MessageProcessor:
 
             # 保存用户消息到数据库
             if context.session_id:
-                db = SessionLocal()
+                db = session_makers["chat"]()
                 try:
                     save_feishu_message(db, context.session_id, MessageRole.USER, message.text)
                     logger.info(f"✅ 已保存用户消息到数据库: session={context.session_id}")

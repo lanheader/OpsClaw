@@ -6,9 +6,9 @@
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta
 
-from app.models.chat_session import ChatSession
-from app.models.chat_message import ChatMessage, MessageRole
-from app.models.database import SessionLocal
+from app.models.chat.session import ChatSession
+from app.models.chat.message import ChatMessage, MessageRole
+from app.models.chat import SessionLocal
 from app.tools.base import (
     BaseOpTool,
     ToolCategory,

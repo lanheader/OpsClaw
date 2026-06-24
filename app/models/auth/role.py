@@ -1,10 +1,10 @@
-# app/models/role.py
+# app/models/auth/role.py
 """角色模型"""
 
 from sqlalchemy import Column, Integer, String, Boolean, DateTime
-from sqlalchemy.orm import relationship
 from datetime import datetime
-from app.models.database import Base
+from app.models.database import bases
+Base = bases["auth"]
 
 
 class Role(Base):

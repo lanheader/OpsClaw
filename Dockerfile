@@ -30,32 +30,36 @@ LABEL maintainer="lanjiaxuan"
 # 安装系统依赖
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        python3 python3-pip python3-venv python3-dev \
+        python3 python3-dev \
         nginx supervisor curl bash && \
     rm -rf /var/lib/apt/lists/*
 
+# 从官方镜像复制 uv 二进制（无需 pip 安装）
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+
 WORKDIR /app
 
-# 创建虚拟环境
-RUN python3 -m venv /app/.venv
-
 # 设置环境变量
-ENV PATH="/app/.venv/bin:$PATH" \
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PROJECT_ENVIRONMENT=/app/.venv \
+    PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1
+    PYTHONDONTWRITEBYTECODE=1
 
-# 安装 UV 和基础工具
-RUN pip install uv setuptools wheel
+# 复制依赖文件（利用 Docker 层缓存：依赖未变时跳过安装）
+COPY pyproject.toml uv.lock /app/
+
+# 安装 Python 依赖（--no-install-project 仅装依赖，不装项目本身）
+RUN uv sync --frozen --no-install-project --extra kubernetes --extra prometheus
 
 # 复制后端代码
 COPY app/ /app/app/
-COPY pyproject.toml pyproject.toml
 COPY scripts/ /app/scripts/
 COPY docker/ /app/docker/
 
-# 安装 Python 依赖
-RUN uv pip install ".[kubernetes,prometheus]"
+# 安装项目本身（不重装依赖）
+RUN uv sync --frozen --extra kubernetes --extra prometheus
 
 # 从 Stage 1 复制前端构建产物到 Nginx 目录
 COPY --from=frontend-builder /app/frontend/dist /usr/share/nginx/html

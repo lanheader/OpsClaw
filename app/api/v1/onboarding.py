@@ -6,9 +6,9 @@ from typing import Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.models.database import get_db
-from app.models.user import User
-from app.models.system_setting import SystemSetting
+from app.models.database import get_config_db, get_auth_db
+from app.models.auth.user import User
+from app.models.config.system_setting import SystemSetting
 from app.core.deps import get_current_user
 from app.core.security import hash_password
 from app.schemas.onboarding import (
@@ -57,11 +57,13 @@ def _update_setting(db: Session, key: str, value: str) -> None:
 
 @router.get("/status", response_model=OnboardingStatusResponse)
 async def get_onboarding_status(  # type: ignore[no-untyped-def]
-    db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
+    config_db: Session = Depends(get_config_db),
+    auth_db: Session = Depends(get_auth_db),
+    current_user: User = Depends(get_current_user)
 ):
     """获取初始化状态"""
     # 检查是否已完成初始化
-    completed_setting = db.query(SystemSetting).filter(
+    completed_setting = config_db.query(SystemSetting).filter(
         SystemSetting.key == ONBOARDING_COMPLETED_KEY
     ).first()
 
@@ -69,7 +71,7 @@ async def get_onboarding_status(  # type: ignore[no-untyped-def]
         return OnboardingStatusResponse(initialized=True, step=4)
 
     # 检查当前步骤
-    admin_user = db.query(User).filter(User.username == "admin").first()
+    admin_user = auth_db.query(User).filter(User.username == "admin").first()
     if not admin_user:
         # 没有 admin 用户，不允许初始化
         raise HTTPException(
@@ -89,7 +91,7 @@ async def get_onboarding_status(  # type: ignore[no-untyped-def]
 @router.post("/step1")
 async def submit_step1(  # type: ignore[no-untyped-def]
     data: Step1Request,
-    db: Session = Depends(get_db),
+    auth_db: Session = Depends(get_auth_db),
     current_user: User = Depends(get_current_user),
 ):
     """Step 1: 账户设置 - 更新 admin 密码、邮箱、飞书ID"""
@@ -105,7 +107,7 @@ async def submit_step1(  # type: ignore[no-untyped-def]
 
     # 更新邮箱
     # 检查邮箱是否已被其他用户使用
-    existing_email = db.query(User).filter(
+    existing_email = auth_db.query(User).filter(
         User.email == data.email, User.id != current_user.id
     ).first()
     if existing_email:
@@ -117,7 +119,7 @@ async def submit_step1(  # type: ignore[no-untyped-def]
 
     # 更新飞书 ID
     # 检查飞书ID是否已被其他用户使用
-    existing_feishu = db.query(User).filter(
+    existing_feishu = auth_db.query(User).filter(
         User.feishu_user_id == data.feishu_user_id, User.id != current_user.id
     ).first()
     if existing_feishu:
@@ -127,7 +129,7 @@ async def submit_step1(  # type: ignore[no-untyped-def]
         )
     current_user.feishu_user_id = data.feishu_user_id  # type: ignore[assignment]
 
-    db.commit()
+    auth_db.commit()
     logger.info(f"Admin {current_user.username} completed step 1: account settings")
 
     return {"message": "账户设置已保存", "step": 1}
@@ -136,7 +138,7 @@ async def submit_step1(  # type: ignore[no-untyped-def]
 @router.post("/step2")
 async def submit_step2(  # type: ignore[no-untyped-def]
     data: Step2Request,
-    db: Session = Depends(get_db),
+    config_db: Session = Depends(get_config_db),
     current_user: User = Depends(get_current_user),
 ):
     """Step 2: Kubernetes 配置"""
@@ -159,10 +161,10 @@ async def submit_step2(  # type: ignore[no-untyped-def]
     for setting_data in k8s_settings:
         key, value, category, name, value_type, description = setting_data[:6]
         is_sensitive = setting_data[6] if len(setting_data) > 6 else False
-        _get_or_create_setting(db, key, value, category, name, value_type, description, is_sensitive)  # type: ignore[arg-type]
-        _update_setting(db, key, value)  # type: ignore[arg-type]
+        _get_or_create_setting(config_db, key, value, category, name, value_type, description, is_sensitive)  # type: ignore[arg-type]
+        _update_setting(config_db, key, value)  # type: ignore[arg-type]
 
-    db.commit()
+    config_db.commit()
     logger.info(f"Admin {current_user.username} completed step 2: Kubernetes config")
 
     return {"message": "Kubernetes 配置已保存", "step": 2}
@@ -171,7 +173,7 @@ async def submit_step2(  # type: ignore[no-untyped-def]
 @router.post("/step3")
 async def submit_step3(  # type: ignore[no-untyped-def]
     data: Step3Request,
-    db: Session = Depends(get_db),
+    config_db: Session = Depends(get_config_db),
     current_user: User = Depends(get_current_user),
 ):
     """Step 3: Prometheus 配置"""
@@ -190,10 +192,10 @@ async def submit_step3(  # type: ignore[no-untyped-def]
 
     for setting_data in prom_settings:
         key, value, category, name, value_type, description = setting_data
-        _get_or_create_setting(db, key, value, category, name, value_type, description)
-        _update_setting(db, key, value)
+        _get_or_create_setting(config_db, key, value, category, name, value_type, description)
+        _update_setting(config_db, key, value)
 
-    db.commit()
+    config_db.commit()
     logger.info(f"Admin {current_user.username} completed step 3: Prometheus config")
 
     return {"message": "Prometheus 配置已保存", "step": 3}
@@ -202,7 +204,7 @@ async def submit_step3(  # type: ignore[no-untyped-def]
 @router.post("/step4")
 async def submit_step4(  # type: ignore[no-untyped-def]
     data: Step4Request,
-    db: Session = Depends(get_db),
+    config_db: Session = Depends(get_config_db),
     current_user: User = Depends(get_current_user),
 ):
     """Step 4: Loki 配置"""
@@ -221,10 +223,10 @@ async def submit_step4(  # type: ignore[no-untyped-def]
 
     for setting_data in loki_settings:
         key, value, category, name, value_type, description = setting_data
-        _get_or_create_setting(db, key, value, category, name, value_type, description)
-        _update_setting(db, key, value)
+        _get_or_create_setting(config_db, key, value, category, name, value_type, description)
+        _update_setting(config_db, key, value)
 
-    db.commit()
+    config_db.commit()
     logger.info(f"Admin {current_user.username} completed step 4: Loki config")
 
     return {"message": "Loki 配置已保存", "step": 4}
@@ -232,7 +234,7 @@ async def submit_step4(  # type: ignore[no-untyped-def]
 
 @router.post("/complete", response_model=OnboardingSummaryResponse)
 async def complete_onboarding(  # type: ignore[no-untyped-def]
-    db: Session = Depends(get_db),
+    config_db: Session = Depends(get_config_db),
     current_user: User = Depends(get_current_user),
 ):
     """完成初始化"""
@@ -245,18 +247,18 @@ async def complete_onboarding(  # type: ignore[no-untyped-def]
 
     # 设置完成标记
     _get_or_create_setting(
-        db, ONBOARDING_COMPLETED_KEY, "true", "system",
+        config_db, ONBOARDING_COMPLETED_KEY, "true", "system",
         "初始化完成", "boolean", "标记系统是否已完成初始化"
     )
-    _update_setting(db, ONBOARDING_COMPLETED_KEY, "true")
+    _update_setting(config_db, ONBOARDING_COMPLETED_KEY, "true")
 
-    db.commit()
+    config_db.commit()
     logger.info(f"Admin {current_user.username} completed onboarding")
 
     # 返回配置摘要
-    k8s_enabled = db.query(SystemSetting).filter(SystemSetting.key == "k8s.enabled").first()
-    prom_enabled = db.query(SystemSetting).filter(SystemSetting.key == "prometheus.enabled").first()
-    loki_enabled = db.query(SystemSetting).filter(SystemSetting.key == "loki.enabled").first()
+    k8s_enabled = config_db.query(SystemSetting).filter(SystemSetting.key == "k8s.enabled").first()
+    prom_enabled = config_db.query(SystemSetting).filter(SystemSetting.key == "prometheus.enabled").first()
+    loki_enabled = config_db.query(SystemSetting).filter(SystemSetting.key == "loki.enabled").first()
 
     return OnboardingSummaryResponse(
         account_configured=True,

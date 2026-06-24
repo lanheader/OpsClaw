@@ -6,10 +6,10 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.models.database import get_db
-from app.models.user import User
-from app.models.role import Role
-from app.models.user_role import UserRole
+from app.models.database import get_auth_db as get_db
+from app.models.auth.user import User
+from app.models.auth.role import Role
+from app.models.auth.user_role import UserRole
 from app.core.security import hash_password
 from app.core.deps import get_current_user, get_current_admin
 from app.core.permission_checker import check_user_permission

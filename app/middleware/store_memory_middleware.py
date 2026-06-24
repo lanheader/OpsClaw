@@ -100,10 +100,10 @@ class StoreMemoryMiddleware(AgentMiddleware[AgentState, ContextT, ResponseT]):
     def _search_knowledge(self, query: str) -> list[tuple[float, str]]:
         """从 SQLite 主库搜索知识"""
         try:
-            from app.models.database import get_db
-            from app.models.incident_knowledge import IncidentKnowledgeBase
+            from app.models.database import get_knowledge_db
+            from app.models.knowledge.incident import IncidentKnowledgeBase
 
-            db = next(get_db())
+            db = next(get_knowledge_db())
             try:
                 # 查询活跃的知识库条目
                 items = db.query(IncidentKnowledgeBase).filter(

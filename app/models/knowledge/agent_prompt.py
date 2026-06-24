@@ -1,3 +1,4 @@
+# app/models/knowledge/agent_prompt.py
 """提示词管理模型
 
 支持将提示词存储到数据库，实现：
@@ -9,7 +10,8 @@
 from datetime import datetime
 from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, ForeignKey, Index
 from sqlalchemy.orm import relationship
-from app.models.database import Base
+from app.models.database import bases
+Base = bases["knowledge"]
 
 
 class AgentPrompt(Base):

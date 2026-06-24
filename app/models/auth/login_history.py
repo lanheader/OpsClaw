@@ -1,10 +1,11 @@
-# app/models/login_history.py
+# app/models/auth/login_history.py
 """登录历史模型"""
 
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
 from datetime import datetime
-from app.models.database import Base
+from app.models.database import bases
+Base = bases["auth"]
 
 
 class LoginHistory(Base):

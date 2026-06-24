@@ -11,7 +11,7 @@ from typing import Optional
 from fastapi import APIRouter, Request, HTTPException, Header, BackgroundTasks, Depends
 from sqlalchemy.orm import Session
 
-from app.models.database import get_db
+from app.models.database import get_chat_db as get_db
 
 from app.utils.logger import get_logger
 from app.core.config import get_settings
@@ -134,7 +134,7 @@ async def send_test_message(  # type: ignore[no-untyped-def]
         # 如果没有提供 chat_id，从数据库获取最近的飞书会话
         target_chat_id = chat_id
         if not target_chat_id:
-            from app.models.chat_session import ChatSession
+            from app.models.chat.session import ChatSession
             from sqlalchemy import desc
 
             # 查找最近的飞书会话

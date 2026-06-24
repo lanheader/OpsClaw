@@ -1,9 +1,10 @@
-# app/models/role_permission.py
+# app/models/auth/role_permission.py
 """角色-权限关联模型"""
 
 from sqlalchemy import Column, Integer, ForeignKey, DateTime, UniqueConstraint
 from datetime import datetime
-from app.models.database import Base
+from app.models.database import bases
+Base = bases["auth"]
 
 
 class RolePermission(Base):

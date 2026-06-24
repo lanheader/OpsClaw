@@ -56,8 +56,8 @@ class UnifiedPromptOptimizer:
     def _load_from_database(self, subagent_name: str) -> Optional[str]:
         """从数据库加载提示词"""
         try:
-            from app.models.database import SessionLocal
-            from app.models.agent_prompt import AgentPrompt
+            from app.models.knowledge import SessionLocal
+            from app.models.knowledge.agent_prompt import AgentPrompt
 
             db = SessionLocal()
             try:

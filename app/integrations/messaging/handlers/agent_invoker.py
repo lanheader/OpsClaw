@@ -18,9 +18,9 @@ from app.core.config import get_settings
 from app.integrations.messaging.base_channel import ChannelContext, MessageType, OutgoingMessage
 from app.integrations.feishu.message import build_formatted_reply_card
 from app.integrations.feishu.message_formatter import clean_xml_tags, format_approval_request
-from app.models.database import SessionLocal
+from app.models.database import session_makers
 from app.services.chat_service import save_feishu_message
-from app.models.chat_message import MessageRole
+from app.models.chat.message import MessageRole
 from app.services.session_lock_manager import SessionLockContext
 
 # 导入统一的消息处理服务
@@ -216,7 +216,7 @@ class AgentInvoker:
         if not session_id:
             return
 
-        db = SessionLocal()
+        db = session_makers["chat"]()
         try:
             save_feishu_message(db, session_id, role, content)
             logger.info(f"✅ 已保存消息到数据库: session={session_id}, role={role.value}")

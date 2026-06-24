@@ -30,16 +30,19 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from sqlalchemy import create_engine
-from app.models.database import Base, SessionLocal
-from app.models.user import User
-from app.models.role import Role
-from app.models.permission import Permission
-from app.models.user_role import UserRole
-from app.models.role_permission import RolePermission
-from app.models.approval_config import ApprovalConfig
-from app.models.system_setting import SystemSetting
-from app.models.agent_prompt import AgentPrompt
-from app.models.incident_knowledge import IncidentKnowledgeBase
+from app.models.database import (
+    init_db, session_makers,
+    get_auth_db, get_config_db, get_knowledge_db, get_workflow_db
+)
+from app.models.auth.user import User
+from app.models.auth.role import Role
+from app.models.auth.permission import Permission
+from app.models.auth.user_role import UserRole
+from app.models.auth.role_permission import RolePermission
+from app.models.config.approval import ApprovalConfig
+from app.models.config.system_setting import SystemSetting
+from app.models.knowledge.agent_prompt import AgentPrompt
+from app.models.knowledge.incident import IncidentKnowledgeBase
 from app.services.approval_config_service import ApprovalConfigService
 from app.core.security import hash_password
 from app.core.config import get_settings
@@ -397,15 +400,21 @@ def create_tables(reset: bool = False):
     logger.info("📦 步骤 1: 创建数据库表")
     logger.info("=" * 60)
 
-    settings = get_settings()
-    engine = create_engine(settings.DATABASE_URL)
-
     if reset:
         logger.warning("⚠️  重置模式：将删除所有现有表！")
-        Base.metadata.drop_all(engine)
+        from app.models.database import engines, bases
+        for domain, engine in engines.items():
+            bases[domain].metadata.drop_all(engine)
         logger.info("  ✅ 已删除所有旧表")
 
-    Base.metadata.create_all(engine)
+    # 确保所有模型已导入，metadata 才能感知到所有表
+    import app.models.auth  # noqa: F401
+    import app.models.chat  # noqa: F401
+    import app.models.workflow  # noqa: F401
+    import app.models.knowledge  # noqa: F401
+    import app.models.config  # noqa: F401
+
+    init_db()
     logger.info("✅ 数据库表创建完成")
 
 
@@ -415,7 +424,7 @@ def init_admin_user():
     logger.info("👤 步骤 2: 初始化管理员用户")
     logger.info("=" * 60)
 
-    db = SessionLocal()
+    db = session_makers["auth"]()
     try:
         settings = get_settings()
 
@@ -513,19 +522,20 @@ def sync_tools_and_approval():
     logger.info("🔧 步骤 3: 同步工具到审批配置表")
     logger.info("=" * 60)
 
-    db = SessionLocal()
+    config_db = session_makers["config"]()
+    auth_db = session_makers["auth"]()
     try:
-        synced_count = ApprovalConfigService.sync_tools_to_db(db)
+        synced_count = ApprovalConfigService.sync_tools_to_db(config_db)
         logger.info(f"  ✅ 同步了 {synced_count} 个新工具")
 
-        # 同步所有权限定义到 Permission 表
+        # 同步所有权限定义到 Permission 表（auth 域）
         from app.core.permissions import get_all_permissions, PermissionCategory
         all_perm_defs = get_all_permissions()
         added_perm_count = 0
         for perm_def in all_perm_defs:
-            exists = db.query(Permission).filter(Permission.code == perm_def.code).first()
+            exists = auth_db.query(Permission).filter(Permission.code == perm_def.code).first()
             if not exists:
-                db.add(Permission(
+                auth_db.add(Permission(
                     code=perm_def.code,
                     name=perm_def.name,
                     category=perm_def.category.value,
@@ -533,21 +543,23 @@ def sync_tools_and_approval():
                     description=perm_def.description,
                 ))
                 added_perm_count += 1
-        db.commit()
+        auth_db.commit()
         if added_perm_count > 0:
             logger.info(f"  ✅ 同步了 {added_perm_count} 个新权限到权限表")
 
-        total_count = db.query(ApprovalConfig).count()
+        total_count = config_db.query(ApprovalConfig).count()
         logger.info(f"  📊 总工具数: {total_count}")
 
         logger.info("✅ 工具同步完成")
 
     except Exception as e:
         logger.error(f"❌ 同步工具失败: {e}")
-        db.rollback()
+        config_db.rollback()
+        auth_db.rollback()
         raise
     finally:
-        db.close()
+        config_db.close()
+        auth_db.close()
 
 
 def init_system_settings():
@@ -556,7 +568,7 @@ def init_system_settings():
     logger.info("⚙️  步骤 4: 初始化系统设置")
     logger.info("=" * 60)
 
-    db = SessionLocal()
+    db = session_makers["config"]()
     try:
         created_count = 0
         skipped_count = 0
@@ -593,8 +605,8 @@ def seed_default_prompts():
     logger.info("=" * 60)
     logger.info("📝 步骤 5: 初始化默认提示词")
     logger.info("=" * 60)
+    db = session_makers["knowledge"]()
 
-    db = SessionLocal()
     try:
         created_count = 0
         skipped_count = 0

@@ -1,10 +1,11 @@
-# app/models/chat_message.py
+# app/models/chat/message.py
 """聊天消息模型"""
 
 from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Enum
 from datetime import datetime
 import enum
-from app.models.database import Base
+from app.models.database import bases
+Base = bases["chat"]
 
 
 class MessageRole(str, enum.Enum):

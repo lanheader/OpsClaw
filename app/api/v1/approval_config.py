@@ -6,9 +6,9 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
 from app.core.deps import get_current_admin
-from app.models.database import get_db
-from app.models.approval_config import ApprovalConfig
-from app.models.user import User
+from app.models.database import get_config_db as get_db
+from app.models.config.approval import ApprovalConfig
+from app.models.auth.user import User
 from app.services.approval_config_service import ApprovalConfigService
 from app.tools import get_available_packages
 from app.utils.logger import get_logger

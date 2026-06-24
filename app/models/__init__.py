@@ -1,40 +1,83 @@
 # app/models/__init__.py
-"""Database models for ops-agent-langgraph"""
+"""Database models for ops-agent-langgraph
+
+按功能域组织的数据库模型：
+- auth: 认证授权域
+- chat: 聊天会话域
+- workflow: 工作流域
+- knowledge: 知识库域
+- config: 配置域
+"""
 
 from app.models.database import Base, get_db
-from app.models.workflow_execution import WorkflowExecution
-from app.models.user import User
-from app.models.login_history import LoginHistory
-from app.models.role import Role
-from app.models.permission import Permission
-from app.models.role_permission import RolePermission
-from app.models.user_role import UserRole
-from app.models.chat_session import ChatSession
-from app.models.chat_message import ChatMessage, MessageRole
-from app.models.approval_config import ApprovalConfig
-from app.models.system_setting import SystemSetting
-from app.models.agent_prompt import AgentPrompt, PromptVersion
-from app.models.scheduled_task import ScheduledTask, TaskExecution, TaskType, ExecutionStatus
+
+# 认证授权域
+from app.models.auth import (
+    User,
+    Role,
+    Permission,
+    UserRole,
+    RolePermission,
+    LoginHistory,
+)
+
+# 聊天会话域
+from app.models.chat import (
+    ChatSession,
+    SessionState,
+    ChatMessage,
+    MessageRole,
+)
+
+# 工作流域
+from app.models.workflow import (
+    WorkflowExecution,
+    ScheduledTask,
+    TaskType,
+    TaskExecution,
+    ExecutionStatus,
+)
+
+# 知识库域
+from app.models.knowledge import (
+    IncidentKnowledgeBase,
+    AgentPrompt,
+    PromptVersion,
+)
+
+# 配置域
+from app.models.config import (
+    ApprovalConfig,
+    SystemSetting,
+)
 
 __all__ = [
+    # 数据库基础
     "Base",
     "get_db",
-    "WorkflowExecution",
+    # 认证授权域
     "User",
-    "LoginHistory",
     "Role",
     "Permission",
-    "RolePermission",
     "UserRole",
+    "RolePermission",
+    "LoginHistory",
+    # 聊天会话域
     "ChatSession",
+    "SessionState",
     "ChatMessage",
     "MessageRole",
-    "ApprovalConfig",
-    "SystemSetting",
+    # 工作流域
+    "WorkflowExecution",
+    "ScheduledTask",
+    "TaskType",
+    "TaskExecution",
+    "ExecutionStatus",
+    # 知识库域
+    "IncidentKnowledgeBase",
     "AgentPrompt",
     "PromptVersion",
-    "ScheduledTask",
-    "TaskExecution",
-    "TaskType",
-    "ExecutionStatus",
+    # 配置域
+    "ApprovalConfig",
+    "SystemSetting",
 ]

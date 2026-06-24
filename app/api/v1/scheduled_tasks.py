@@ -11,9 +11,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, func as sql_func
 
-from app.models.database import get_db
-from app.models.scheduled_task import ScheduledTask, TaskExecution, TaskType, ExecutionStatus
-from app.models.user import User
+from app.models.database import get_workflow_db as get_db
+from app.models.workflow.scheduled_task import ScheduledTask, TaskType
+from app.models.workflow.task_execution import TaskExecution, ExecutionStatus
+from app.models.auth.user import User
 from app.schemas.scheduled_task import (
     ScheduledTaskCreate,
     ScheduledTaskUpdate,

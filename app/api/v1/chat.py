@@ -25,10 +25,10 @@ from app.core.permission_checker import get_user_permission_codes
 from app.deepagents.factory import create_agent_for_session
 from app.memory.memory_manager import get_memory_manager
 from app.utils.timezone import get_beijing_now
-from app.models.chat_message import ChatMessage, MessageRole
-from app.models.chat_session import ChatSession
-from app.models.database import get_db, SessionLocal
-from app.models.user import User
+from app.models.chat.message import ChatMessage, MessageRole
+from app.models.chat.session import ChatSession
+from app.models.database import get_chat_db as get_db, session_makers
+from app.models.auth.user import User
 from app.schemas.chat import (
     ChatMessageCreate,
     ChatMessageResponse,
@@ -562,7 +562,7 @@ async def send_message(  # type: ignore[no-untyped-def]
     # 2. 后台执行 Agent 并保存助手消息
     async def _background_process():  # type: ignore[no-untyped-def]
         """后台任务：执行 Agent → 保存助手消息"""
-        inner_db = SessionLocal()
+        inner_db = session_makers["chat"]()
         try:
             set_request_context(
                 session_id=session_id,

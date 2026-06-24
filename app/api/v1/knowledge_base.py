@@ -10,10 +10,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, or_
 
-from app.models.database import get_db
-from app.models.user import User
+from app.models.database import get_knowledge_db as get_db
+from app.models.auth.user import User
 from app.core.deps import get_current_user
-from app.models.incident_knowledge import IncidentKnowledgeBase
+from app.models.knowledge.incident import IncidentKnowledgeBase
 
 logger = logging.getLogger(__name__)
 

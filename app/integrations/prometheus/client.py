@@ -297,7 +297,7 @@ def get_prometheus_client(base_url: Optional[str] = None, db=None) -> Prometheus
 
             # 2. 如果环境变量不存在，从数据库读取
             if base_url is None and db is not None:
-                from app.models.system_setting import SystemSetting
+                from app.models.config.system_setting import SystemSetting
                 setting = db.query(SystemSetting).filter(
                     SystemSetting.key == "prometheus.url"
                 ).first()

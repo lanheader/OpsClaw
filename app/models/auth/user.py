@@ -1,9 +1,10 @@
-# app/models/user.py
+# app/models/auth/user.py
 """用户模型"""
 
 from sqlalchemy import Column, Integer, String, Boolean, DateTime
 from datetime import datetime
-from app.models.database import Base
+from app.models.database import bases
+Base = bases["auth"]
 
 
 class User(Base):

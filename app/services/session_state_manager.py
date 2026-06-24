@@ -7,8 +7,8 @@ from sqlalchemy.exc import OperationalError
 import logging
 import time
 
-from app.models.chat_session import ChatSession, SessionState
-from app.models.database import SessionLocal
+from app.models.chat.session import ChatSession, SessionState
+from app.models.chat import SessionLocal
 from app.utils.timezone import get_beijing_now
 
 logger = logging.getLogger(__name__)

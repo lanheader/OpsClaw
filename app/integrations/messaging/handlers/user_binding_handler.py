@@ -8,8 +8,8 @@
 
 from typing import Optional
 from app.utils.logger import get_logger
-from app.models.database import SessionLocal
-from app.models.user import User
+from app.models.database import session_makers
+from app.models.auth.user import User
 from app.integrations.messaging.base_channel import OutgoingMessage, MessageType
 
 logger = get_logger(__name__)
@@ -45,7 +45,7 @@ class UserBindingHandler:
             User 对象或 None
         """
         try:
-            db = SessionLocal()
+            db = session_makers["auth"]()
             try:
                 # 根据渠道类型查询对应的字段
                 if channel_type == "feishu":

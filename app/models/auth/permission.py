@@ -1,9 +1,10 @@
-# app/models/permission.py
+# app/models/auth/permission.py
 """权限模型"""
 
 from sqlalchemy import Column, Integer, String, DateTime
 from datetime import datetime
-from app.models.database import Base
+from app.models.database import bases
+Base = bases["auth"]
 
 
 class Permission(Base):

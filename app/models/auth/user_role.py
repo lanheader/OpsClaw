@@ -1,9 +1,10 @@
-# app/models/user_role.py
+# app/models/auth/user_role.py
 """用户-角色关联模型"""
 
 from sqlalchemy import Column, Integer, ForeignKey, DateTime, UniqueConstraint
 from datetime import datetime
-from app.models.database import Base
+from app.models.database import bases
+Base = bases["auth"]
 
 
 class UserRole(Base):

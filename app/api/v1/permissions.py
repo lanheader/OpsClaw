@@ -6,11 +6,11 @@ from typing import List, Dict
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.models.database import get_db
-from app.models.user import User
-from app.models.role import Role
-from app.models.user_role import UserRole
-from app.models.permission import Permission
+from app.models.database import get_auth_db as get_db
+from app.models.auth.user import User
+from app.models.auth.role import Role
+from app.models.auth.user_role import UserRole
+from app.models.auth.permission import Permission
 from app.core.deps import get_current_user
 from app.core.permission_checker import get_user_permission_codes, is_admin
 from app.core.permissions import get_all_permissions, PermissionCategory, sync_tool_permissions_to_db

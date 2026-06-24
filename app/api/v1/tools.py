@@ -11,8 +11,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
-from app.models.database import get_db
-from app.models.user import User
+from app.models.database import get_auth_db as get_db
+from app.models.auth.user import User
 from app.core.deps import get_current_user
 from app.core.permission_checker import get_user_permission_codes
 from app.tools.registry import get_tool_registry, ToolGroup, ToolPermission

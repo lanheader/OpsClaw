@@ -42,13 +42,7 @@ def _load_all_subagents(db: Optional[Session] = None) -> List[SubAgent]:
 def _load_all_tools() -> List[Any]:
     """加载所有工具（过滤未启用的集成）"""
     registry = get_tool_registry()
-    try:
-        from app.models.database import SessionLocal
-        db = SessionLocal()
-        tools = registry.get_langchain_tools(db=db)
-        db.close()
-    except Exception:
-        tools = registry.get_langchain_tools()
+    tools = registry.get_langchain_tools()
 
     # 日志输出
     _log_tools_info(tools)
@@ -143,7 +137,7 @@ def _build_interrupt_on(
         _db = db
         _should_close = False
         if _db is None:
-            from app.models.database import SessionLocal
+            from app.models.config import SessionLocal
             _db = SessionLocal()
             _should_close = True
 
@@ -399,7 +393,7 @@ async def get_ops_agent(
     _db = db
     _should_close_db = False
     if _db is None:
-        from app.models.database import SessionLocal
+        from app.models.config import SessionLocal
         _db = SessionLocal()
         _should_close_db = True
 

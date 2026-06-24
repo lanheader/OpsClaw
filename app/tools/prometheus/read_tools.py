@@ -18,8 +18,8 @@ from app.tools.base import (
     tool_success_response,
 )
 from app.integrations.prometheus.client import get_prometheus_client
-from app.models.database import SessionLocal
-from app.models.system_setting import SystemSetting
+from app.models.config import SessionLocal
+from app.models.config.system_setting import SystemSetting
 from app.utils.logger import get_logger, get_request_context
 
 logger = get_logger(__name__)

@@ -133,6 +133,10 @@ async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
     """Application lifespan management"""
 
     # Startup
+    from app.models.database import init_db
+    from app.models import auth, chat, workflow, knowledge, config  # noqa: F401 确保所有模型已注册
+    init_db()
+    logger.info("✅ 数据库初始化完成（5 个域数据库）")  # type: ignore[union-attr]
     logger.info("🚀 Starting OpsClaw (DeepAgents Architecture v3.0 - Lazy Loading)")  # type: ignore[union-attr]
     logger.info(f"Environment: {settings.SECURITY_ENVIRONMENT}")  # type: ignore[union-attr]
     logger.info(f"LLM Provider: {settings.DEFAULT_LLM_PROVIDER}")  # type: ignore[union-attr]

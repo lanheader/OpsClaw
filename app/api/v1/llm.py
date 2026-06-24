@@ -8,8 +8,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.models.database import get_db
-from app.models.user import User
+from app.models.database import get_auth_db as get_db
+from app.models.auth.user import User
 from app.core.deps import get_current_admin
 from app.core.config import get_settings
 from app.core.llm_factory import LLMFactory

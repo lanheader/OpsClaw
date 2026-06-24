@@ -14,9 +14,9 @@ from sqlalchemy.orm import Session
 from app.core.deps import get_current_user
 from app.core.state import OpsState
 from app.deepagents.factory import create_agent_for_session
-from app.models.database import get_db
-from app.models.user import User
-from app.models.workflow_execution import WorkflowExecution
+from app.models.database import get_workflow_db as get_db
+from app.models.auth.user import User
+from app.models.workflow.execution import WorkflowExecution
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)

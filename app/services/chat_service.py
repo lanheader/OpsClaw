@@ -6,9 +6,9 @@ from datetime import datetime, timezone
 from typing import Optional
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
-from app.models.chat_session import ChatSession
-from app.models.chat_message import ChatMessage, MessageRole
-from app.models.user import User
+from app.models.chat.session import ChatSession
+from app.models.chat.message import ChatMessage, MessageRole
+from app.models.auth.user import User
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)

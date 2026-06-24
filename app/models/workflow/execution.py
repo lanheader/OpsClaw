@@ -1,10 +1,11 @@
-# app/models/workflow_execution.py
+# app/models/workflow/execution.py
 """工作流执行追踪模型"""
 
 from sqlalchemy import Column, Integer, String, DateTime, JSON, Text
 from sqlalchemy.sql import func
 from datetime import datetime
-from app.models.database import Base
+from app.models.database import bases
+Base = bases["workflow"]
 
 
 class WorkflowExecution(Base):

@@ -1,9 +1,10 @@
-# app/models/chat_session.py
+# app/models/chat/session.py
 """聊天会话模型"""
 
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, JSON, Enum
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, JSON
 from datetime import datetime
-from app.models.database import Base
+from app.models.database import bases
+Base = bases["chat"]
 import enum
 
 
@@ -28,8 +29,8 @@ class ChatSession(Base):
         String(100), unique=True, index=True, nullable=False, comment="会话唯一标识"
     )
 
-    # 用户关联
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True, comment="用户ID")
+    # 用户关联（跨数据库，不使用 ForeignKey）
+    user_id = Column(Integer, nullable=False, index=True, comment="用户ID（关联 auth.users.id）")
 
     # 会话信息
     title = Column(String(200), nullable=True, comment="会话标题（从首条消息生成）")

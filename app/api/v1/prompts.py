@@ -5,9 +5,9 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.models.database import get_db
-from app.models.user import User
-from app.models.agent_prompt import AgentPrompt, PromptVersion
+from app.models.database import get_knowledge_db as get_db
+from app.models.auth.user import User
+from app.models.knowledge.agent_prompt import AgentPrompt, PromptVersion
 from app.core.deps import get_current_admin
 from app.schemas.agent_prompt import (
     AgentPromptCreate,

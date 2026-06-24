@@ -6,8 +6,8 @@ from enum import Enum
 from typing import List, TYPE_CHECKING
 from dataclasses import dataclass
 
-from app.models.permission import Permission
-from app.models.role_permission import RolePermission
+from app.models.auth.permission import Permission
+from app.models.auth.role_permission import RolePermission
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session

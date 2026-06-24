@@ -6,9 +6,9 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
-from app.models.database import get_db
-from app.models.user import User
-from app.models.login_history import LoginHistory
+from app.models.database import get_auth_db as get_db
+from app.models.auth.user import User
+from app.models.auth.login_history import LoginHistory
 from app.core.security import verify_password, create_access_token, get_access_token_expire_days
 from app.core.deps import get_current_user
 from app.schemas.user import LoginRequest, LoginResponse, UserResponse

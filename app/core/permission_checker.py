@@ -7,12 +7,12 @@ from functools import wraps
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
-from app.models.permission import Permission
-from app.models.role_permission import RolePermission
-from app.models.user_role import UserRole
-from app.models.user import User
+from app.models.auth.permission import Permission
+from app.models.auth.role_permission import RolePermission
+from app.models.auth.user_role import UserRole
+from app.models.auth.user import User
 from app.core.deps import get_current_user
-from app.models.database import get_db, SessionLocal
+from app.models.database import get_auth_db as get_db, SessionLocal
 from app.utils.logger import get_request_context, set_request_context
 
 logger = logging.getLogger(__name__)

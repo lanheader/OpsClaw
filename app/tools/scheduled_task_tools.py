@@ -18,8 +18,8 @@ from langchain_core.tools import tool
 
 from sqlalchemy.orm import Session
 
-from app.models.database import get_db
-from app.models.scheduled_task import ScheduledTask, TaskStatus, TaskType  # type: ignore[attr-defined]
+from app.models.database import get_workflow_db as get_db
+from app.models.workflow.scheduled_task import ScheduledTask, TaskStatus, TaskType  # type: ignore[attr-defined]
 from app.services.scheduler_service import get_scheduler_service
 from app.utils.logger import get_logger
 

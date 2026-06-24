@@ -5,7 +5,7 @@ from typing import List, Dict, Any, Optional, Set
 
 from sqlalchemy.orm import Session
 
-from app.models.approval_config import ApprovalConfig
+from app.models.config.approval import ApprovalConfig
 from app.tools.registry import get_tool_registry
 from app.tools.base import RiskLevel
 
@@ -30,8 +30,8 @@ class ApprovalConfigService:
         if user_id is None:
             return None
 
-        from app.models.user_role import UserRole
-        from app.models.role import Role
+        from app.models.auth.user_role import UserRole
+        from app.models.auth.role import Role
 
         roles = (
             db.query(Role.name)

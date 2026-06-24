@@ -19,8 +19,9 @@ from apscheduler.jobstores.base import JobLookupError  # type: ignore[import]
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.models.database import get_db
-from app.models.scheduled_task import ScheduledTask, TaskExecution, ExecutionStatus, TaskType
+from app.models.database import get_workflow_db
+from app.models.workflow.scheduled_task import ScheduledTask, TaskType
+from app.models.workflow.task_execution import TaskExecution, ExecutionStatus
 from app.services.agent_chat_service import get_agent_chat_service, ChatRequest, MessageChannel
 from app.utils.logger import get_logger
 
@@ -54,7 +55,7 @@ class SchedulerService:
 
     def _load_enabled_tasks(self):  # type: ignore[no-untyped-def]
         """加载所有启用的任务"""
-        db = next(get_db())
+        db = next(get_workflow_db())
         try:
             tasks = db.query(ScheduledTask).filter(
                 ScheduledTask.enabled == True
@@ -124,7 +125,7 @@ class SchedulerService:
             # 更新下次执行时间
             job = self.scheduler.get_job(job_id)
             if job:
-                db = next(get_db())
+                db = next(get_workflow_db())
                 try:
                     db_task = db.query(ScheduledTask).filter(ScheduledTask.id == task.id).first()
                     if db_task:
@@ -142,7 +143,7 @@ class SchedulerService:
 
     async def _execute_task(self, task_id: int):  # type: ignore[no-untyped-def]
         """执行任务"""
-        db = next(get_db())
+        db = next(get_workflow_db())
         log = None
 
         try:

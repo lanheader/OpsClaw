@@ -13,8 +13,8 @@ from app.services.chat_service import get_or_create_feishu_session
 from app.core.permission_checker import get_user_permission_codes
 
 from app.integrations.messaging.base_channel import ChannelContext
-from app.models.database import SessionLocal
-from app.models.chat_session import ChatSession
+from app.models.database import session_makers
+from app.models.chat.session import ChatSession
 
 logger = get_logger(__name__)
 
@@ -29,7 +29,7 @@ class SessionHandler:
         sender_name: Optional[str],
         channel_type: str,
         user_id: int,
-        db: Optional[SessionLocal] = None  # type: ignore[valid-type]
+        db: Optional[object] = None  # type: ignore[valid-type]
     ) -> ChannelContext:
         """
         获取或创建会话上下文
@@ -47,7 +47,7 @@ class SessionHandler:
         """
         should_close_db = False
         if db is None:
-            db = SessionLocal()
+            db = session_makers["chat"]()
             should_close_db = True
 
         try:
@@ -92,7 +92,7 @@ class SessionHandler:
     def _build_context(
         self,
         session: ChatSession,
-        db: SessionLocal  # type: ignore[valid-type]
+        db: object  # type: ignore[valid-type]
     ) -> ChannelContext:
         """
         构建渠道上下文
@@ -104,9 +104,13 @@ class SessionHandler:
         Returns:
             ChannelContext 对象
         """
-        # 获取用户权限
+        # 获取用户权限（权限在 auth DB，需单独打开）
         try:
-            permission_codes = get_user_permission_codes(db, session.user_id)  # type: ignore[arg-type]
+            auth_db = session_makers["auth"]()
+            try:
+                permission_codes = get_user_permission_codes(auth_db, session.user_id)  # type: ignore[arg-type]
+            finally:
+                auth_db.close()
         except Exception as e:
             logger.warning(f"获取用户权限失败: {e}，使用空权限")
             permission_codes = []
@@ -138,7 +142,7 @@ class SessionHandler:
         Returns:
             是否成功
         """
-        db = SessionLocal()
+        db = session_makers["chat"]()
         try:
             session = db.query(ChatSession).filter(
                 ChatSession.session_id == context.session_id
@@ -179,7 +183,7 @@ class SessionHandler:
         Returns:
             新的 ChannelContext 对象
         """
-        db = SessionLocal()
+        db = session_makers["chat"]()
         try:
             # 先结束当前活跃会话
             db.query(ChatSession).filter(
@@ -209,8 +213,16 @@ class SessionHandler:
 
             logger.info(f"✅ 创建新会话: {session_id}")
 
-            # 获取用户权限
-            permission_codes = get_user_permission_codes(db, user_id)
+            # 获取用户权限（权限在 auth DB）
+            try:
+                auth_db = session_makers["auth"]()
+                try:
+                    permission_codes = get_user_permission_codes(auth_db, user_id)
+                finally:
+                    auth_db.close()
+            except Exception as e:
+                logger.warning(f"获取用户权限失败: {e}，使用空权限")
+                permission_codes = []
 
             return ChannelContext(
                 channel_type=channel_type,

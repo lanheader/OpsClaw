@@ -1,8 +1,10 @@
+# app/models/config/system_setting.py
 """系统设置模型"""
 
 from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean
 from datetime import datetime
-from app.models.database import Base
+from app.models.database import bases
+Base = bases["config"]
 
 
 class SystemSetting(Base):
